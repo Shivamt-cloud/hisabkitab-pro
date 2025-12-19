@@ -393,6 +393,30 @@ function App() {
             }
           />
           <Route
+            path="/companies"
+            element={
+              <ProtectedRoute requiredPermission="users:read" requiredRole="admin">
+                <CompanyManagement />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/companies/new"
+            element={
+              <ProtectedRoute requiredPermission="users:create" requiredRole="admin">
+                <CompanyForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/companies/:id/edit"
+            element={
+              <ProtectedRoute requiredPermission="users:update" requiredRole="admin">
+                <CompanyForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/users"
             element={
               <ProtectedRoute requiredPermission="users:read">

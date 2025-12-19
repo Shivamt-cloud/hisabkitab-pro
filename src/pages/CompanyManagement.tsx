@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { companyService } from '../services/companyService'
 import { Company } from '../types/company'
-import { Home, Plus, Edit, Trash2, Building2, Users, Eye, EyeOff } from 'lucide-react'
+import { Home, Plus, Edit, Building2, Users, Eye, EyeOff } from 'lucide-react'
 
 const CompanyManagement = () => {
   const { user } = useAuth()
