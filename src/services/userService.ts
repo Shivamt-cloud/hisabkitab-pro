@@ -1,12 +1,21 @@
 import { User, UserRole } from '../types/auth'
 import { getAll, getById, put, deleteById, getByIndex, STORES } from '../database/db'
 
-// Initialize users (no default demo users)
+// Initialize users with default admin user
 async function initializeUsers(): Promise<void> {
-  // Users must be created through the User Management interface
-  // No default demo users are created
   const users = await getAll<{ id: string; password: string } & User>(STORES.USERS)
-  // Database is ready for users to be added
+  
+  // Create default admin user if database is empty
+  if (users.length === 0) {
+    const defaultAdminUser: (User & { password: string }) = {
+      id: '1',
+      name: 'HisabKitab Pro Admin',
+      email: 'hisabkitabpro',
+      password: 'Shiv845496!@#',
+      role: 'admin',
+    }
+    await put(STORES.USERS, defaultAdminUser)
+  }
 }
 
 export interface UserWithPassword extends User {
