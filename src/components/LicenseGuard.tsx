@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { AlertTriangle, Calendar } from 'lucide-react'
 import { checkLicenseValidity, LicenseStatus } from '../utils/licenseValidator'
 
@@ -15,6 +15,7 @@ export function LicenseGuard({ children }: LicenseGuardProps) {
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null)
   const [isChecking, setIsChecking] = useState(true)
   const navigate = useNavigate()
+  const location = useLocation()
 
   useEffect(() => {
     const verifyLicense = async () => {
@@ -23,10 +24,9 @@ export function LicenseGuard({ children }: LicenseGuardProps) {
       setLicenseStatus(status)
       setIsChecking(false)
 
-      // If license is expired, redirect to a blocked page or login
-      if (status.isExpired) {
-        // You can customize this behavior - maybe show a warning page instead
-        // For now, we'll show the blocked screen
+      // If license is expired and user is not on login page, show blocked screen
+      if (status.isExpired && location.pathname !== '/login') {
+        // Blocked screen will be shown below
       }
     }
 
@@ -35,7 +35,7 @@ export function LicenseGuard({ children }: LicenseGuardProps) {
     // Re-check license every hour
     const interval = setInterval(verifyLicense, 60 * 60 * 1000)
     return () => clearInterval(interval)
-  }, [])
+  }, [location.pathname])
 
   if (isChecking) {
     return (
@@ -78,7 +78,10 @@ export function LicenseGuard({ children }: LicenseGuardProps) {
           </div>
 
           <button
-            onClick={() => navigate('/login')}
+            onClick={() => {
+              localStorage.removeItem('hisabkitab_user')
+              window.location.href = '/login'
+            }}
             className="mt-6 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors"
           >
             Go to Login

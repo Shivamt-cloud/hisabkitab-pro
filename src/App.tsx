@@ -439,10 +439,10 @@ function App() {
               </ProtectedRoute>
             }
           />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </LicenseGuard>
         </Router>
-        </LicenseGuard>
       </AuthProvider>
     </DatabaseProvider>
   )
