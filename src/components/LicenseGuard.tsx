@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useState } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { AlertTriangle, Calendar } from 'lucide-react'
 import { checkLicenseValidity, LicenseStatus } from '../utils/licenseValidator'
 
