@@ -66,7 +66,14 @@ const Dashboard = () => {
     loadCompanyName()
   }, [timePeriod, customStartDate, customEndDate])
 
-  const calculateReports = async () => {
+  const loadCompanyName = async () => {
+    try {
+      const companySettings = await settingsService.getCompany()
+      setCompanyName(companySettings.company_name || '')
+    } catch (error) {
+      console.error('Error loading company name:', error)
+    }
+  }
 
   // Update time every second for real-time clock
   useEffect(() => {
