@@ -841,11 +841,23 @@ const Dashboard = () => {
                 </button>
               </div>
             )}
+            {user?.role === 'admin' && (
+              <div className="mt-6 pt-6 border-t border-gray-200/50 space-y-4">
+                <button 
+                  onClick={() => navigate('/companies')}
+                  className="group w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-indigo-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                >
+                  <Building2 className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                  <span>Company Management</span>
+                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                </button>
+              </div>
+            )}
             {hasPermission('users:read') && (
               <div className="mt-6 pt-6 border-t border-gray-200/50 space-y-4">
                 <button 
                   onClick={() => navigate('/users')}
-                  className="group w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                  className="group w-full bg-gradient-to-r from-teal-600 via-emerald-600 to-green-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-teal-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
                   <Users className="w-5 h-5 group-hover:scale-110 transition-transform" />
                   <span>User Management</span>
