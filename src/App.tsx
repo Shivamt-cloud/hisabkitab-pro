@@ -39,6 +39,8 @@ import AnalyticsDashboard from './pages/AnalyticsDashboard'
 import Notifications from './pages/Notifications'
 import IndexedDBInspector from './pages/IndexedDBInspector'
 import { DatabaseProvider } from './components/DatabaseProvider'
+import { LicenseGuard } from './components/LicenseGuard'
+import { LicenseExpiredBanner } from './components/LicenseExpiredBanner'
 
 // Lazy load to prevent import errors from breaking the app
 // const BackupRestore = lazy(() => import('./pages/BackupRestore'))
@@ -47,9 +49,12 @@ function App() {
   return (
     <DatabaseProvider>
       <AuthProvider>
-        <Router>
-        <Routes>
-          <Route path="/login" element={<Login />} />
+        <LicenseGuard>
+          <Router>
+            <LicenseExpiredBanner />
+          <LicenseExpiredBanner />
+          <Routes>
+            <Route path="/login" element={<Login />} />
           <Route
             path="/"
             element={
@@ -434,10 +439,11 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Router>
-    </AuthProvider>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Router>
+        </LicenseGuard>
+      </AuthProvider>
     </DatabaseProvider>
   )
 }

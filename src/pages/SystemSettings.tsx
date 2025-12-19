@@ -15,10 +15,61 @@ const SystemSettings = () => {
   const [loading, setLoading] = useState(false)
   const [saved, setSaved] = useState(false)
 
-  const [company, setCompany] = useState<CompanySettings>(settingsService.getCompany())
-  const [invoice, setInvoice] = useState<InvoiceSettings>(settingsService.getInvoice())
-  const [tax, setTax] = useState<TaxSettings>(settingsService.getTax())
-  const [general, setGeneral] = useState<GeneralSettings>(settingsService.getGeneral())
+  const [company, setCompany] = useState<CompanySettings>({
+    company_name: '',
+    valid_from: '',
+    valid_to: '',
+  })
+  const [invoice, setInvoice] = useState<InvoiceSettings>({
+    invoice_prefix: 'INV',
+    invoice_number_format: 'INV-{YYYY}-{NNNN}',
+    invoice_footer_text: '',
+    invoice_terms_and_conditions: '',
+    show_tax_breakdown: true,
+    show_payment_instructions: false,
+    payment_instructions_text: '',
+    invoice_template: 'standard',
+  })
+  const [tax, setTax] = useState<TaxSettings>({
+    default_gst_rate: 18,
+    default_tax_type: 'exclusive',
+    enable_cgst_sgst: false,
+    default_cgst_rate: 9,
+    default_sgst_rate: 9,
+    default_igst_rate: 18,
+    tax_exempt_categories: [],
+  })
+  const [general, setGeneral] = useState<GeneralSettings>({
+    currency_symbol: '₹',
+    currency_code: 'INR',
+    date_format: 'DD-MMM-YYYY',
+    time_format: '12h',
+    default_unit: 'pcs',
+    low_stock_threshold_percentage: 20,
+    auto_archive_products_after_sale: true,
+    enable_barcode_generation: true,
+    default_barcode_format: 'EAN13',
+  })
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const [companySettings, invoiceSettings, taxSettings, generalSettings] = await Promise.all([
+          settingsService.getCompany(),
+          settingsService.getInvoice(),
+          settingsService.getTax(),
+          settingsService.getGeneral(),
+        ])
+        setCompany(companySettings)
+        setInvoice(invoiceSettings)
+        setTax(taxSettings)
+        setGeneral(generalSettings)
+      } catch (error) {
+        console.error('Error loading settings:', error)
+      }
+    }
+    loadSettings()
+  }, [])
 
   useEffect(() => {
     if (saved) {
@@ -27,12 +78,25 @@ const SystemSettings = () => {
     }
   }, [saved])
 
-  const handleSaveCompany = (e: FormEvent) => {
+  const handleSaveCompany = async (e: FormEvent) => {
     e.preventDefault()
     setLoading(true)
     try {
-      settingsService.updateCompany(company, user?.id ? parseInt(user.id) : undefined)
+      // Validate validity dates
+      if (company.valid_from && company.valid_to) {
+        const fromDate = new Date(company.valid_from)
+        const toDate = new Date(company.valid_to)
+        if (toDate < fromDate) {
+          alert('Validity end date must be after start date')
+          setLoading(false)
+          return
+        }
+      }
+      await settingsService.updateCompany(company, user?.id ? parseInt(user.id) : undefined)
       setSaved(true)
+      // Reload company settings after save
+      const updatedCompany = await settingsService.getCompany()
+      setCompany(updatedCompany)
     } catch (error) {
       alert('Failed to save company settings')
     } finally {
@@ -105,18 +169,24 @@ const SystemSettings = () => {
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = 'application/json'
-    input.onchange = (e) => {
+    input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0]
       if (file) {
         const reader = new FileReader()
-        reader.onload = (event) => {
+        reader.onload = async (event) => {
           try {
             const json = event.target?.result as string
-            settingsService.import(json, user?.id ? parseInt(user.id) : undefined)
-            setCompany(settingsService.getCompany())
-            setInvoice(settingsService.getInvoice())
-            setTax(settingsService.getTax())
-            setGeneral(settingsService.getGeneral())
+            await settingsService.import(json, user?.id ? parseInt(user.id) : undefined)
+            const [companySettings, invoiceSettings, taxSettings, generalSettings] = await Promise.all([
+              settingsService.getCompany(),
+              settingsService.getInvoice(),
+              settingsService.getTax(),
+              settingsService.getGeneral(),
+            ])
+            setCompany(companySettings)
+            setInvoice(invoiceSettings)
+            setTax(taxSettings)
+            setGeneral(generalSettings)
             setSaved(true)
             alert('Settings imported successfully!')
           } catch (error) {
@@ -380,6 +450,48 @@ const SystemSettings = () => {
                       placeholder="ABCDE1234F"
                     />
                   </div>
+                </div>
+
+                {/* License Validity Section */}
+                <div className="border-t border-gray-200 pt-6 mt-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">License Validity</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Valid From <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={company.valid_from || ''}
+                        onChange={(e) => setCompany({ ...company, valid_from: e.target.value })}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        required
+                      />
+                      <p className="text-xs text-gray-500 mt-1">License validity start date</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Valid To <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={company.valid_to || ''}
+                        onChange={(e) => setCompany({ ...company, valid_to: e.target.value })}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        required
+                        min={company.valid_from || undefined}
+                      />
+                      <p className="text-xs text-gray-500 mt-1">License validity end date</p>
+                    </div>
+                  </div>
+                  {company.valid_from && company.valid_to && (
+                    <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <p className="text-sm text-blue-800">
+                        <strong>License Period:</strong> {new Date(company.valid_from).toLocaleDateString()} to {new Date(company.valid_to).toLocaleDateString()}
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-end">

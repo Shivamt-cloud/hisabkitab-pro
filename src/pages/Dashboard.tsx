@@ -7,6 +7,7 @@ import { purchaseService, supplierService } from '../services/purchaseService'
 import { productService } from '../services/productService'
 import { customerService } from '../services/customerService'
 import { notificationService } from '../services/notificationService'
+import { settingsService } from '../services/settingsService'
 import { 
   ShoppingCart, 
   History, 
@@ -58,10 +59,14 @@ const Dashboard = () => {
     todaySales: 0,
     thisWeekSales: 0,
   })
+  const [companyName, setCompanyName] = useState<string>('')
 
   useEffect(() => {
     calculateReports()
+    loadCompanyName()
   }, [timePeriod, customStartDate, customEndDate])
+
+  const calculateReports = async () => {
 
   // Update time every second for real-time clock
   useEffect(() => {
@@ -432,7 +437,7 @@ const Dashboard = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-4xl font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                HisabKitab-Pro
+                {companyName ? `${companyName} - HisabKitab-Pro` : 'HisabKitab-Pro'}
               </h1>
               <p className="text-sm text-gray-600 mt-1 font-medium">Inventory Management System</p>
             </div>

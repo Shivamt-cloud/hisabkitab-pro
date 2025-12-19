@@ -11,6 +11,8 @@ export interface CompanySettings {
   company_gstin?: string
   company_pan?: string
   company_logo?: string // URL or base64
+  valid_from?: string // License validity start date (ISO format)
+  valid_to?: string // License validity end date (ISO format)
 }
 
 export interface InvoiceSettings {

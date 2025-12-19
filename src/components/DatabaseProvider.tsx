@@ -5,6 +5,7 @@ import { ReactNode, useEffect, useState } from 'react'
 import { initDB } from '../database/db'
 import { migrateFromLocalStorage, isMigrationComplete } from '../database/migration'
 import { autoBackupService } from '../services/autoBackupService'
+import { userService } from '../services/userService'
 
 interface DatabaseProviderProps {
   children: ReactNode
