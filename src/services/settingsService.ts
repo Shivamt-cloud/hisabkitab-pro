@@ -1,0 +1,207 @@
+import { SystemSettings, CompanySettings, InvoiceSettings, TaxSettings, GeneralSettings } from '../types/settings'
+import { getById, put, STORES } from '../database/db'
+
+const SETTINGS_KEY = 'main'
+
+const defaultSettings: SystemSettings = {
+  company: {
+    company_name: 'HisabKitab',
+    company_address: '',
+    company_city: '',
+    company_state: '',
+    company_pincode: '',
+    company_country: 'India',
+    company_phone: '',
+    company_email: '',
+    company_website: '',
+    company_gstin: '',
+    company_pan: '',
+    company_logo: '',
+  },
+  invoice: {
+    invoice_prefix: 'INV',
+    invoice_number_format: 'INV-{YYYY}-{NNNN}',
+    invoice_footer_text: 'Thank you for your business!',
+    invoice_terms_and_conditions: '',
+    show_tax_breakdown: true,
+    show_payment_instructions: false,
+    payment_instructions_text: '',
+    invoice_template: 'standard',
+  },
+  tax: {
+    default_gst_rate: 18,
+    default_tax_type: 'exclusive',
+    enable_cgst_sgst: false,
+    default_cgst_rate: 9,
+    default_sgst_rate: 9,
+    default_igst_rate: 18,
+    tax_exempt_categories: [],
+  },
+  general: {
+    currency_symbol: '₹',
+    currency_code: 'INR',
+    date_format: 'DD-MMM-YYYY',
+    time_format: '12h',
+    default_unit: 'pcs',
+    low_stock_threshold_percentage: 20,
+    auto_archive_products_after_sale: true,
+    enable_barcode_generation: true,
+    default_barcode_format: 'EAN13',
+  },
+}
+
+interface SettingsRecord {
+  key: string
+  settings: SystemSettings
+}
+
+async function getSettingsRecord(): Promise<SettingsRecord> {
+  const record = await getById<SettingsRecord>(STORES.SETTINGS, SETTINGS_KEY)
+  if (record) {
+    return record
+  }
+  // Return default if not found
+  return {
+    key: SETTINGS_KEY,
+    settings: defaultSettings,
+  }
+}
+
+export const settingsService = {
+  // Get all settings
+  getAll: async (): Promise<SystemSettings> => {
+    try {
+      const record = await getSettingsRecord()
+      const stored = record.settings
+      if (stored) {
+        // Merge with defaults to ensure all fields exist
+        return {
+          company: { ...defaultSettings.company, ...stored.company },
+          invoice: { ...defaultSettings.invoice, ...stored.invoice },
+          tax: { ...defaultSettings.tax, ...stored.tax },
+          general: { ...defaultSettings.general, ...stored.general },
+          updated_at: stored.updated_at,
+          updated_by: stored.updated_by,
+        }
+      }
+    } catch (error) {
+      console.error('Error loading settings:', error)
+    }
+    return defaultSettings
+  },
+
+  // Get company settings
+  getCompany: async (): Promise<CompanySettings> => {
+    const settings = await settingsService.getAll()
+    return settings.company
+  },
+
+  // Get invoice settings
+  getInvoice: async (): Promise<InvoiceSettings> => {
+    const settings = await settingsService.getAll()
+    return settings.invoice
+  },
+
+  // Get tax settings
+  getTax: async (): Promise<TaxSettings> => {
+    const settings = await settingsService.getAll()
+    return settings.tax
+  },
+
+  // Get general settings
+  getGeneral: async (): Promise<GeneralSettings> => {
+    const settings = await settingsService.getAll()
+    return settings.general
+  },
+
+  // Update company settings
+  updateCompany: async (company: Partial<CompanySettings>, userId?: number): Promise<CompanySettings> => {
+    const settings = await settingsService.getAll()
+    settings.company = { ...settings.company, ...company }
+    settings.updated_at = new Date().toISOString()
+    settings.updated_by = userId
+    await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings })
+    return settings.company
+  },
+
+  // Update invoice settings
+  updateInvoice: async (invoice: Partial<InvoiceSettings>, userId?: number): Promise<InvoiceSettings> => {
+    const settings = await settingsService.getAll()
+    settings.invoice = { ...settings.invoice, ...invoice }
+    settings.updated_at = new Date().toISOString()
+    settings.updated_by = userId
+    await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings })
+    return settings.invoice
+  },
+
+  // Update tax settings
+  updateTax: async (tax: Partial<TaxSettings>, userId?: number): Promise<TaxSettings> => {
+    const settings = await settingsService.getAll()
+    settings.tax = { ...settings.tax, ...tax }
+    settings.updated_at = new Date().toISOString()
+    settings.updated_by = userId
+    await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings })
+    return settings.tax
+  },
+
+  // Update general settings
+  updateGeneral: async (general: Partial<GeneralSettings>, userId?: number): Promise<GeneralSettings> => {
+    const settings = await settingsService.getAll()
+    settings.general = { ...settings.general, ...general }
+    settings.updated_at = new Date().toISOString()
+    settings.updated_by = userId
+    await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings })
+    return settings.general
+  },
+
+  // Update all settings
+  updateAll: async (newSettings: Partial<SystemSettings>, userId?: number): Promise<SystemSettings> => {
+    const current = await settingsService.getAll()
+    const updated: SystemSettings = {
+      company: newSettings.company ? { ...current.company, ...newSettings.company } : current.company,
+      invoice: newSettings.invoice ? { ...current.invoice, ...newSettings.invoice } : current.invoice,
+      tax: newSettings.tax ? { ...current.tax, ...newSettings.tax } : current.tax,
+      general: newSettings.general ? { ...current.general, ...newSettings.general } : current.general,
+      updated_at: new Date().toISOString(),
+      updated_by: userId,
+    }
+    await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings: updated })
+    return updated
+  },
+
+  // Reset to defaults
+  resetToDefaults: async (userId?: number): Promise<SystemSettings> => {
+    const reset: SystemSettings = {
+      ...defaultSettings,
+      updated_at: new Date().toISOString(),
+      updated_by: userId,
+    }
+    await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings: reset })
+    return reset
+  },
+
+  // Export settings
+  export: async (): Promise<string> => {
+    const settings = await settingsService.getAll()
+    return JSON.stringify(settings, null, 2)
+  },
+
+  // Import settings
+  import: async (jsonString: string, userId?: number): Promise<SystemSettings> => {
+    try {
+      const imported = JSON.parse(jsonString)
+      const merged = {
+        company: { ...defaultSettings.company, ...imported.company },
+        invoice: { ...defaultSettings.invoice, ...imported.invoice },
+        tax: { ...defaultSettings.tax, ...imported.tax },
+        general: { ...defaultSettings.general, ...imported.general },
+        updated_at: new Date().toISOString(),
+        updated_by: userId,
+      }
+      await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings: merged })
+      return merged
+    } catch (error) {
+      throw new Error('Invalid settings format')
+    }
+  },
+}
