@@ -1,4 +1,4 @@
-# HisabKitab Pro - Inventory Management System
+# HisabKitab-Pro - Inventory Management System
 
 A comprehensive inventory management system for purchase and sales that works as a web application. Built with React, TypeScript, and IndexedDB for offline-first functionality.
 

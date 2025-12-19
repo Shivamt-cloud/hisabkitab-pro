@@ -432,7 +432,7 @@ const Dashboard = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-4xl font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                HisabKitab
+                HisabKitab-Pro
               </h1>
               <p className="text-sm text-gray-600 mt-1 font-medium">Inventory Management System</p>
             </div>
