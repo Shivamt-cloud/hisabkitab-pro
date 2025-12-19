@@ -47,7 +47,10 @@ const SystemSettings = () => {
   const [allUsers, setAllUsers] = useState<UserWithPassword[]>([])
   const [showUserForm, setShowUserForm] = useState(false)
   const [editingUser, setEditingUser] = useState<UserWithPassword | null>(null)
-  const [userFormData, setUserFormData] = useState<Partial<UserWithPassword>>({
+  interface UserFormData extends Partial<UserWithPassword> {
+    confirmPassword?: string
+  }
+  const [userFormData, setUserFormData] = useState<UserFormData>({
     name: '',
     email: '',
     password: '',
