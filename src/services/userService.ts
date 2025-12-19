@@ -106,6 +106,8 @@ export const userService = {
 
   // Verify login credentials
   verifyLogin: async (email: string, password: string): Promise<User | null> => {
+    // Ensure users are initialized before verifying
+    await initializeUsers()
     const user = await userService.getByEmail(email)
     if (user && user.password === password) {
       // Return user without password
