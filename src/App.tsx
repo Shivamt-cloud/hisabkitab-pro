@@ -49,11 +49,10 @@ function App() {
   return (
     <DatabaseProvider>
       <AuthProvider>
-        <LicenseGuard>
-          <Router>
+        <Router>
+          <LicenseGuard>
             <LicenseExpiredBanner />
-          <LicenseExpiredBanner />
-          <Routes>
+            <Routes>
             <Route path="/login" element={<Login />} />
           <Route
             path="/"

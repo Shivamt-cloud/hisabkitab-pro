@@ -14,7 +14,6 @@ interface LicenseGuardProps {
 export function LicenseGuard({ children }: LicenseGuardProps) {
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null)
   const [isChecking, setIsChecking] = useState(true)
-  const navigate = useNavigate()
   const location = useLocation()
 
   useEffect(() => {
