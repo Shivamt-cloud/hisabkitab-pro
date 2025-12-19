@@ -187,9 +187,25 @@ export const productService = {
     )
   },
 
-  create: async (product: Omit<Product, 'id' | 'created_at' | 'updated_at' | 'category_name'>): Promise<Product> => {
+  create: async (product: Omit<Product, 'id' | 'created_at' | 'updated_at' | 'category_name'> & { custom_sku?: string }): Promise<Product> => {
+    // Generate SKU with company code if not provided
+    let sku = product.sku
+    if (!sku) {
+      const { generateProductSKU } = await import('../utils/companyCodeHelper')
+      const allProducts = await productService.getAll(true, product.company_id)
+      const existingSkus = allProducts.map(p => p.sku).filter(Boolean) as string[]
+      sku = await generateProductSKU(product.company_id, product.custom_sku, existingSkus)
+    } else if (product.company_id && !sku.includes('-')) {
+      // If SKU provided but doesn't have company code prefix, add it
+      const { getCompanyCodeById } = await import('../utils/companyCodeHelper')
+      const companyCode = await getCompanyCodeById(product.company_id)
+      if (companyCode && !sku.startsWith(companyCode)) {
+        sku = `${companyCode}-${sku}`
+      }
+    }
     const newProduct: Product = {
       ...product,
+      sku: sku,
       id: Date.now(),
       stock_quantity: product.stock_quantity || 0, // Managed automatically via purchases/sales
       unit: product.unit || 'pcs',

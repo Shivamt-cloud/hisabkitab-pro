@@ -29,13 +29,19 @@ export const saleService = {
   },
 
   create: async (sale: Omit<Sale, 'id' | 'created_at' | 'updated_at' | 'archived'>): Promise<Sale> => {
-    // Generate invoice number
-    const invoiceNumber = `INV-${Date.now()}`
+    // Generate invoice number with company code
+    let invoiceNumber = sale.invoice_number
+    if (!invoiceNumber) {
+      const { generateInvoiceNumber } = await import('../utils/companyCodeHelper')
+      const allSales = await saleService.getAll(true, sale.company_id)
+      const existingInvoiceNumbers = allSales.map(s => s.invoice_number)
+      invoiceNumber = await generateInvoiceNumber(sale.company_id, existingInvoiceNumbers)
+    }
     
     const newSale: Sale = {
       ...sale,
       id: Date.now(),
-      invoice_number: sale.invoice_number || invoiceNumber,
+      invoice_number: invoiceNumber,
       archived: false,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

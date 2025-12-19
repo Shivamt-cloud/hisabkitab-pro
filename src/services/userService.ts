@@ -69,9 +69,17 @@ export const userService = {
       throw new Error('User with this email already exists')
     }
 
+    // Format username with company code if company_id is provided
+    let displayName = userData.name
+    if (userData.company_id) {
+      const { formatUsernameWithCompanyCode } = await import('../utils/companyCodeHelper')
+      displayName = await formatUsernameWithCompanyCode(userData.name, userData.company_id)
+    }
+
     const newUser: UserWithPassword = {
       ...userData,
       id: Date.now().toString(),
+      name: displayName, // Store formatted name with company code
     }
     await put(STORES.USERS, newUser)
     return newUser

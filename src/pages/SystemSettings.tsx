@@ -26,7 +26,7 @@ const SystemSettings = () => {
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(getCurrentCompanyId())
   const [showCompanyForm, setShowCompanyForm] = useState(false)
   const [editingCompany, setEditingCompany] = useState<Company | null>(null)
-  const [companyFormData, setCompanyFormData] = useState<Partial<Company>>({
+  const [companyFormData, setCompanyFormData] = useState<Partial<Company> & { custom_unique_code?: string }>({
     name: '',
     email: '',
     phone: '',
@@ -41,6 +41,7 @@ const SystemSettings = () => {
     valid_from: '',
     valid_to: '',
     is_active: true,
+    custom_unique_code: '', // For new companies - allow custom code input
   })
   
   // User management states
@@ -173,7 +174,11 @@ const SystemSettings = () => {
         await companyService.update(editingCompany.id, companyFormData)
         alert('Company updated successfully!')
       } else {
-        await companyService.create(companyFormData as Omit<Company, 'id' | 'created_at' | 'updated_at'>)
+        const { custom_unique_code, ...companyDataToCreate } = companyFormData
+        await companyService.create({ 
+          ...companyDataToCreate,
+          unique_code: custom_unique_code || undefined
+        } as Omit<Company, 'id' | 'created_at' | 'updated_at' | 'unique_code'> & { unique_code?: string })
         alert('Company created successfully!')
       }
       setShowCompanyForm(false)
@@ -193,6 +198,7 @@ const SystemSettings = () => {
         valid_from: '',
         valid_to: '',
         is_active: true,
+        custom_unique_code: '',
       })
       loadCompanies()
     } catch (error: any) {

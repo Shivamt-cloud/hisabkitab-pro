@@ -76,8 +76,18 @@ export const purchaseService = {
   },
 
   createGST: async (purchase: Omit<GSTPurchase, 'id' | 'created_at' | 'updated_at'>): Promise<GSTPurchase> => {
+    // Generate invoice number with company code if not provided
+    let invoiceNumber = purchase.invoice_number
+    if (!invoiceNumber) {
+      const { generatePurchaseInvoiceNumber } = await import('../utils/companyCodeHelper')
+      const allPurchases = await purchaseService.getAll('gst', purchase.company_id)
+      const existingInvoiceNumbers = allPurchases.map(p => p.invoice_number).filter(Boolean) as string[]
+      invoiceNumber = await generatePurchaseInvoiceNumber(purchase.company_id, existingInvoiceNumbers)
+    }
+    
     const newPurchase: GSTPurchase = {
       ...purchase,
+      invoice_number: invoiceNumber,
       id: Date.now(),
       type: 'gst',
       created_at: new Date().toISOString(),
@@ -114,8 +124,18 @@ export const purchaseService = {
   },
 
   createSimple: async (purchase: Omit<SimplePurchase, 'id' | 'created_at' | 'updated_at'>): Promise<SimplePurchase> => {
+    // Generate invoice number with company code if not provided
+    let invoiceNumber = purchase.invoice_number
+    if (!invoiceNumber) {
+      const { generatePurchaseInvoiceNumber } = await import('../utils/companyCodeHelper')
+      const allPurchases = await purchaseService.getAll('simple', purchase.company_id)
+      const existingInvoiceNumbers = allPurchases.map(p => p.invoice_number || '').filter(Boolean) as string[]
+      invoiceNumber = await generatePurchaseInvoiceNumber(purchase.company_id, existingInvoiceNumbers)
+    }
+    
     const newPurchase: SimplePurchase = {
       ...purchase,
+      invoice_number: invoiceNumber || undefined,
       id: Date.now(),
       type: 'simple',
       created_at: new Date().toISOString(),

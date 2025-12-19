@@ -1,5 +1,6 @@
 export interface Company {
   id: number
+  unique_code: string // Unique company identifier (e.g., COMP001, ABC, SHOP1)
   name: string
   email?: string
   phone?: string
