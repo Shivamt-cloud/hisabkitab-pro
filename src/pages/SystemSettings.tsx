@@ -2,18 +2,56 @@ import { useState, useEffect, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { settingsService } from '../services/settingsService'
+import { companyService } from '../services/companyService'
+import { userService, UserWithPassword } from '../services/userService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { CompanySettings, InvoiceSettings, TaxSettings, GeneralSettings } from '../types/settings'
-import { Home, Save, Building2, FileText, Percent, Settings, RotateCcw, Download, Upload } from 'lucide-react'
+import { Company } from '../types/company'
+import { UserRole } from '../types/auth'
+import { Home, Save, Building2, FileText, Percent, Settings, RotateCcw, Download, Upload, Plus, Edit, Trash2, Users, Eye, EyeOff, X } from 'lucide-react'
 
-type SettingsTab = 'company' | 'invoice' | 'tax' | 'general'
+type SettingsTab = 'company' | 'companies' | 'users' | 'invoice' | 'tax' | 'general'
 
 const SystemSettings = () => {
-  const { hasPermission, user } = useAuth()
+  const { user, getCurrentCompanyId, switchCompany } = useAuth()
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<SettingsTab>('company')
   const [loading, setLoading] = useState(false)
   const [saved, setSaved] = useState(false)
+  
+  // Company management states
+  const [companies, setCompanies] = useState<Company[]>([])
+  const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(getCurrentCompanyId())
+  const [showCompanyForm, setShowCompanyForm] = useState(false)
+  const [editingCompany, setEditingCompany] = useState<Company | null>(null)
+  const [companyFormData, setCompanyFormData] = useState<Partial<Company>>({
+    name: '',
+    email: '',
+    phone: '',
+    address: '',
+    city: '',
+    state: '',
+    pincode: '',
+    country: 'India',
+    gstin: '',
+    pan: '',
+    website: '',
+    valid_from: '',
+    valid_to: '',
+    is_active: true,
+  })
+  
+  // User management states
+  const [allUsers, setAllUsers] = useState<UserWithPassword[]>([])
+  const [showUserForm, setShowUserForm] = useState(false)
+  const [editingUser, setEditingUser] = useState<UserWithPassword | null>(null)
+  const [userFormData, setUserFormData] = useState<Partial<UserWithPassword>>({
+    name: '',
+    email: '',
+    password: '',
+    role: 'staff',
+    company_id: undefined,
+  })
 
   const [company, setCompany] = useState<CompanySettings>({
     company_name: '',
@@ -69,7 +107,161 @@ const SystemSettings = () => {
       }
     }
     loadSettings()
+    loadCompanies()
+    loadUsers()
   }, [])
+
+  useEffect(() => {
+    if (selectedCompanyId) {
+      switchCompany(selectedCompanyId)
+    }
+    loadUsers() // Reload users when company changes
+  }, [selectedCompanyId])
+
+  const loadCompanies = async () => {
+    try {
+      if (user?.role === 'admin') {
+        const allCompanies = await companyService.getAll(true)
+        setCompanies(allCompanies)
+      }
+    } catch (error) {
+      console.error('Error loading companies:', error)
+    }
+  }
+
+  const loadUsers = async () => {
+    try {
+      if (user?.role === 'admin') {
+        const users = await userService.getAll()
+        // Filter users by selected company if a company is selected
+        let filteredUsers = users
+        if (selectedCompanyId) {
+          filteredUsers = users.filter(u => u.company_id === selectedCompanyId)
+        }
+        setAllUsers(filteredUsers)
+      } else {
+        // Non-admin users only see themselves (though they shouldn't access this page)
+        const currentUser = await userService.getByEmail(user?.email || '')
+        if (currentUser) {
+          setAllUsers([currentUser])
+        }
+      }
+    } catch (error) {
+      console.error('Error loading users:', error)
+    }
+  }
+
+  const handleCompanySubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    try {
+      if (editingCompany) {
+        await companyService.update(editingCompany.id, companyFormData)
+        alert('Company updated successfully!')
+      } else {
+        await companyService.create(companyFormData as Omit<Company, 'id' | 'created_at' | 'updated_at'>)
+        alert('Company created successfully!')
+      }
+      setShowCompanyForm(false)
+      setEditingCompany(null)
+      setCompanyFormData({
+        name: '',
+        email: '',
+        phone: '',
+        address: '',
+        city: '',
+        state: '',
+        pincode: '',
+        country: 'India',
+        gstin: '',
+        pan: '',
+        website: '',
+        valid_from: '',
+        valid_to: '',
+        is_active: true,
+      })
+      loadCompanies()
+    } catch (error: any) {
+      alert(error.message || 'Failed to save company')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleEditCompany = (company: Company) => {
+    setEditingCompany(company)
+    setCompanyFormData(company)
+    setShowCompanyForm(true)
+  }
+
+  const handleDeleteCompany = async (id: number, name: string) => {
+    if (window.confirm(`Are you sure you want to deactivate company "${name}"?`)) {
+      try {
+        await companyService.delete(id)
+        alert('Company deactivated successfully')
+        loadCompanies()
+      } catch (error) {
+        alert('Failed to deactivate company')
+      }
+    }
+  }
+
+  const handleUserSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    try {
+      if (editingUser) {
+        await userService.update(editingUser.id, userFormData)
+        alert('User updated successfully!')
+      } else {
+        if (!userFormData.password) {
+          alert('Password is required for new users')
+          setLoading(false)
+          return
+        }
+        await userService.create(userFormData as Omit<UserWithPassword, 'id'>)
+        alert('User created successfully!')
+      }
+      setShowUserForm(false)
+      setEditingUser(null)
+      setUserFormData({
+        name: '',
+        email: '',
+        password: '',
+        role: 'staff',
+        company_id: selectedCompanyId || undefined,
+      })
+      loadUsers()
+    } catch (error: any) {
+      alert(error.message || 'Failed to save user')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleEditUser = (userData: UserWithPassword) => {
+    setEditingUser(userData)
+    setUserFormData({
+      name: userData.name,
+      email: userData.email,
+      role: userData.role,
+      company_id: userData.company_id,
+      password: '', // Don't show password
+    })
+    setShowUserForm(true)
+  }
+
+  const handleDeleteUser = async (id: string, name: string) => {
+    if (window.confirm(`Are you sure you want to delete user "${name}"?`)) {
+      try {
+        await userService.delete(id)
+        alert('User deleted successfully')
+        loadUsers()
+      } catch (error) {
+        alert('Failed to delete user')
+      }
+    }
+  }
 
   useEffect(() => {
     if (saved) {
@@ -104,11 +296,11 @@ const SystemSettings = () => {
     }
   }
 
-  const handleSaveInvoice = (e: FormEvent) => {
+  const handleSaveInvoice = async (e: FormEvent) => {
     e.preventDefault()
     setLoading(true)
     try {
-      settingsService.updateInvoice(invoice, user?.id ? parseInt(user.id) : undefined)
+      await settingsService.updateInvoice(invoice, user?.id ? parseInt(user.id) : undefined)
       setSaved(true)
     } catch (error) {
       alert('Failed to save invoice settings')
@@ -117,11 +309,11 @@ const SystemSettings = () => {
     }
   }
 
-  const handleSaveTax = (e: FormEvent) => {
+  const handleSaveTax = async (e: FormEvent) => {
     e.preventDefault()
     setLoading(true)
     try {
-      settingsService.updateTax(tax, user?.id ? parseInt(user.id) : undefined)
+      await settingsService.updateTax(tax, user?.id ? parseInt(user.id) : undefined)
       setSaved(true)
     } catch (error) {
       alert('Failed to save tax settings')
@@ -130,11 +322,11 @@ const SystemSettings = () => {
     }
   }
 
-  const handleSaveGeneral = (e: FormEvent) => {
+  const handleSaveGeneral = async (e: FormEvent) => {
     e.preventDefault()
     setLoading(true)
     try {
-      settingsService.updateGeneral(general, user?.id ? parseInt(user.id) : undefined)
+      await settingsService.updateGeneral(general, user?.id ? parseInt(user.id) : undefined)
       setSaved(true)
     } catch (error) {
       alert('Failed to save general settings')
@@ -143,19 +335,25 @@ const SystemSettings = () => {
     }
   }
 
-  const handleReset = () => {
+  const handleReset = async () => {
     if (window.confirm('Are you sure you want to reset all settings to default values?')) {
-      settingsService.resetToDefaults(user?.id ? parseInt(user.id) : undefined)
-      setCompany(settingsService.getCompany())
-      setInvoice(settingsService.getInvoice())
-      setTax(settingsService.getTax())
-      setGeneral(settingsService.getGeneral())
+      await settingsService.resetToDefaults(user?.id ? parseInt(user.id) : undefined)
+      const [companySettings, invoiceSettings, taxSettings, generalSettings] = await Promise.all([
+        settingsService.getCompany(),
+        settingsService.getInvoice(),
+        settingsService.getTax(),
+        settingsService.getGeneral(),
+      ])
+      setCompany(companySettings)
+      setInvoice(invoiceSettings)
+      setTax(taxSettings)
+      setGeneral(generalSettings)
       setSaved(true)
     }
   }
 
-  const handleExport = () => {
-    const settingsJson = settingsService.export()
+  const handleExport = async () => {
+    const settingsJson = await settingsService.export()
     const blob = new Blob([settingsJson], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -271,6 +469,34 @@ const SystemSettings = () => {
                   <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
                 )}
               </button>
+              {user?.role === 'admin' && (
+                <>
+                  <button
+                    onClick={() => setActiveTab('companies')}
+                    className={`px-6 py-3 font-semibold text-sm transition-colors relative flex items-center gap-2 ${
+                      activeTab === 'companies' ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <Building2 className="w-4 h-4" />
+                    Companies
+                    {activeTab === 'companies' && (
+                      <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('users')}
+                    className={`px-6 py-3 font-semibold text-sm transition-colors relative flex items-center gap-2 ${
+                      activeTab === 'users' ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <Users className="w-4 h-4" />
+                    Users
+                    {activeTab === 'users' && (
+                      <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
+                    )}
+                  </button>
+                </>
+              )}
               <button
                 onClick={() => setActiveTab('invoice')}
                 className={`px-6 py-3 font-semibold text-sm transition-colors relative flex items-center gap-2 ${
@@ -505,6 +731,487 @@ const SystemSettings = () => {
                   </button>
                 </div>
               </form>
+            )}
+
+            {/* Companies Management */}
+            {activeTab === 'companies' && user?.role === 'admin' && (
+              <div className="space-y-6">
+                {/* Company Selector */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Select Company (to view/manage its settings)
+                  </label>
+                  <select
+                    value={selectedCompanyId || ''}
+                    onChange={(e) => setSelectedCompanyId(e.target.value ? parseInt(e.target.value) : null)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                  >
+                    <option value="">All Companies (Admin View)</option>
+                    {companies.filter(c => c.is_active).map(comp => (
+                      <option key={comp.id} value={comp.id}>{comp.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-600 mt-2">
+                    {selectedCompanyId 
+                      ? `Viewing settings for: ${companies.find(c => c.id === selectedCompanyId)?.name}`
+                      : 'Viewing all companies (Admin mode)'}
+                  </p>
+                </div>
+
+                {/* Companies List */}
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-gray-900">All Companies</h3>
+                    <button
+                      onClick={() => {
+                        setEditingCompany(null)
+                        setCompanyFormData({
+                          name: '',
+                          email: '',
+                          phone: '',
+                          address: '',
+                          city: '',
+                          state: '',
+                          pincode: '',
+                          country: 'India',
+                          gstin: '',
+                          pan: '',
+                          website: '',
+                          valid_from: '',
+                          valid_to: '',
+                          is_active: true,
+                        })
+                        setShowCompanyForm(true)
+                      }}
+                      className="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" />
+                      New Company
+                    </button>
+                  </div>
+
+                  {showCompanyForm ? (
+                    <form onSubmit={handleCompanySubmit} className="bg-white border border-gray-200 rounded-xl p-6 mb-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-lg font-bold text-gray-900">
+                          {editingCompany ? 'Edit Company' : 'New Company'}
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCompanyForm(false)
+                            setEditingCompany(null)
+                          }}
+                          className="text-gray-500 hover:text-gray-700"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">
+                            Company Name <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={companyFormData.name || ''}
+                            onChange={(e) => setCompanyFormData({ ...companyFormData, name: e.target.value })}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">Email</label>
+                          <input
+                            type="email"
+                            value={companyFormData.email || ''}
+                            onChange={(e) => setCompanyFormData({ ...companyFormData, email: e.target.value })}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">Phone</label>
+                          <input
+                            type="tel"
+                            value={companyFormData.phone || ''}
+                            onChange={(e) => setCompanyFormData({ ...companyFormData, phone: e.target.value })}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">GSTIN</label>
+                          <input
+                            type="text"
+                            value={companyFormData.gstin || ''}
+                            onChange={(e) => setCompanyFormData({ ...companyFormData, gstin: e.target.value.toUpperCase() })}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                            maxLength={15}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">City</label>
+                          <input
+                            type="text"
+                            value={companyFormData.city || ''}
+                            onChange={(e) => setCompanyFormData({ ...companyFormData, city: e.target.value })}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">State</label>
+                          <input
+                            type="text"
+                            value={companyFormData.state || ''}
+                            onChange={(e) => setCompanyFormData({ ...companyFormData, state: e.target.value })}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">Valid From</label>
+                          <input
+                            type="date"
+                            value={companyFormData.valid_from || ''}
+                            onChange={(e) => setCompanyFormData({ ...companyFormData, valid_from: e.target.value })}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">Valid To</label>
+                          <input
+                            type="date"
+                            value={companyFormData.valid_to || ''}
+                            onChange={(e) => setCompanyFormData({ ...companyFormData, valid_to: e.target.value })}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                            min={companyFormData.valid_from || undefined}
+                          />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="flex items-center">
+                            <input
+                              type="checkbox"
+                              checked={companyFormData.is_active !== false}
+                              onChange={(e) => setCompanyFormData({ ...companyFormData, is_active: e.target.checked })}
+                              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                            />
+                            <span className="ml-2 text-sm font-medium text-gray-700">Active</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-3 mt-6">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCompanyForm(false)
+                            setEditingCompany(null)
+                          }}
+                          className="px-4 py-2 bg-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-400 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={loading}
+                          className="px-4 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                          <Save className="w-4 h-4" />
+                          {loading ? 'Saving...' : editingCompany ? 'Update Company' : 'Create Company'}
+                        </button>
+                      </div>
+                    </form>
+                  ) : null}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {companies.map((comp) => (
+                      <div
+                        key={comp.id}
+                        className={`bg-white border-2 rounded-xl p-4 ${
+                          selectedCompanyId === comp.id ? 'border-blue-500' : 'border-gray-200'
+                        } ${!comp.is_active ? 'opacity-60' : ''}`}
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <h4 className="text-lg font-bold text-gray-900">{comp.name}</h4>
+                          {!comp.is_active && (
+                            <span className="text-xs text-red-600 font-semibold">Inactive</span>
+                          )}
+                        </div>
+                        {comp.email && <p className="text-sm text-gray-600 mb-1">{comp.email}</p>}
+                        {comp.valid_from && comp.valid_to && (
+                          <p className="text-xs text-gray-500 mb-3">
+                            Valid: {new Date(comp.valid_from).toLocaleDateString()} - {new Date(comp.valid_to).toLocaleDateString()}
+                          </p>
+                        )}
+                        <div className="flex gap-2 mt-3">
+                          <button
+                            onClick={() => handleEditCompany(comp)}
+                            className="flex-1 text-blue-600 hover:text-blue-800 p-2 hover:bg-blue-50 rounded-lg transition-colors text-sm font-medium flex items-center justify-center gap-1"
+                          >
+                            <Edit className="w-4 h-4" />
+                            Edit
+                          </button>
+                          {comp.is_active ? (
+                            <button
+                              onClick={() => handleDeleteCompany(comp.id, comp.name)}
+                              className="flex-1 text-red-600 hover:text-red-800 p-2 hover:bg-red-50 rounded-lg transition-colors text-sm font-medium flex items-center justify-center gap-1"
+                            >
+                              <EyeOff className="w-4 h-4" />
+                              Deactivate
+                            </button>
+                          ) : (
+                            <button
+                              onClick={async () => {
+                                await companyService.update(comp.id, { is_active: true })
+                                loadCompanies()
+                              }}
+                              className="flex-1 text-green-600 hover:text-green-800 p-2 hover:bg-green-50 rounded-lg transition-colors text-sm font-medium flex items-center justify-center gap-1"
+                            >
+                              <Eye className="w-4 h-4" />
+                              Activate
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {companies.length === 0 && (
+                    <div className="text-center py-8 text-gray-500">
+                      <Building2 className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+                      <p>No companies found. Create your first company.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Users Management */}
+            {activeTab === 'users' && user?.role === 'admin' && (
+              <div className="space-y-6">
+                {/* Company Selector for Users */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Filter Users by Company
+                  </label>
+                  <select
+                    value={selectedCompanyId || ''}
+                    onChange={(e) => setSelectedCompanyId(e.target.value ? parseInt(e.target.value) : null)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                  >
+                    <option value="">All Users</option>
+                    {companies.filter(c => c.is_active).map(comp => (
+                      <option key={comp.id} value={comp.id}>{comp.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-600 mt-2">
+                    {selectedCompanyId 
+                      ? `Showing users for: ${companies.find(c => c.id === selectedCompanyId)?.name}`
+                      : 'Showing all users'}
+                  </p>
+                </div>
+
+                {/* Users List */}
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-gray-900">Users</h3>
+                    <button
+                      onClick={() => {
+                        setEditingUser(null)
+                        setUserFormData({
+                          name: '',
+                          email: '',
+                          password: '',
+                          role: 'staff',
+                          company_id: selectedCompanyId || undefined,
+                        })
+                        setShowUserForm(true)
+                      }}
+                      className="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" />
+                      New User
+                    </button>
+                  </div>
+
+                  {showUserForm ? (
+                    <form onSubmit={handleUserSubmit} className="bg-white border border-gray-200 rounded-xl p-6 mb-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-lg font-bold text-gray-900">
+                          {editingUser ? 'Edit User' : 'New User'}
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowUserForm(false)
+                            setEditingUser(null)
+                          }}
+                          className="text-gray-500 hover:text-gray-700"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">
+                            Name <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={userFormData.name || ''}
+                            onChange={(e) => setUserFormData({ ...userFormData, name: e.target.value })}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">
+                            Email <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="email"
+                            value={userFormData.email || ''}
+                            onChange={(e) => setUserFormData({ ...userFormData, email: e.target.value })}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">
+                            {editingUser ? 'New Password (leave blank to keep current)' : 'Password'} 
+                            {!editingUser && <span className="text-red-500">*</span>}
+                          </label>
+                          <input
+                            type="password"
+                            value={userFormData.password || ''}
+                            onChange={(e) => setUserFormData({ ...userFormData, password: e.target.value })}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                            required={!editingUser}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">
+                            Role <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            value={userFormData.role || 'staff'}
+                            onChange={(e) => setUserFormData({ ...userFormData, role: e.target.value as UserRole })}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                            required
+                          >
+                            <option value="staff">Staff</option>
+                            <option value="manager">Manager</option>
+                            <option value="viewer">Viewer</option>
+                          </select>
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">
+                            Company
+                          </label>
+                          <select
+                            value={userFormData.company_id || ''}
+                            onChange={(e) => setUserFormData({ ...userFormData, company_id: e.target.value ? parseInt(e.target.value) : undefined })}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                          >
+                            <option value="">No Company (Admin only)</option>
+                            {companies.filter(c => c.is_active).map(comp => (
+                              <option key={comp.id} value={comp.id}>{comp.name}</option>
+                            ))}
+                          </select>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Assign user to a company. Leave empty for admin access to all companies.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-3 mt-6">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowUserForm(false)
+                            setEditingUser(null)
+                          }}
+                          className="px-4 py-2 bg-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-400 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={loading}
+                          className="px-4 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                          <Save className="w-4 h-4" />
+                          {loading ? 'Saving...' : editingUser ? 'Update User' : 'Create User'}
+                        </button>
+                      </div>
+                    </form>
+                  ) : null}
+
+                  <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Name</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Email</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Role</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Company</th>
+                          <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {allUsers.map((usr) => (
+                          <tr key={usr.id} className="hover:bg-gray-50">
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{usr.name}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{usr.email}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                usr.role === 'admin' ? 'bg-purple-100 text-purple-800' :
+                                usr.role === 'manager' ? 'bg-blue-100 text-blue-800' :
+                                usr.role === 'staff' ? 'bg-green-100 text-green-800' :
+                                'bg-gray-100 text-gray-800'
+                              }`}>
+                                {usr.role}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                              {usr.company_id 
+                                ? companies.find(c => c.id === usr.company_id)?.name || `Company ID: ${usr.company_id}`
+                                : 'All Companies (Admin)'}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => handleEditUser(usr)}
+                                  className="text-blue-600 hover:text-blue-900 p-1 hover:bg-blue-50 rounded transition-colors"
+                                  title="Edit User"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                {usr.id !== user?.id && (
+                                  <button
+                                    onClick={() => handleDeleteUser(usr.id, usr.name)}
+                                    className="text-red-600 hover:text-red-900 p-1 hover:bg-red-50 rounded transition-colors"
+                                    title="Delete User"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {allUsers.length === 0 && (
+                    <div className="text-center py-8 text-gray-500">
+                      <Users className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+                      <p>No users found{selectedCompanyId ? ' for this company' : ''}.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
 
             {/* Invoice Settings */}

@@ -32,10 +32,6 @@ import SalesReports from './pages/SalesReports'
 import OutstandingPayments from './pages/OutstandingPayments'
 import SystemSettings from './pages/SystemSettings'
 import BackupRestore from './pages/BackupRestore'
-import UserManagement from './pages/UserManagement'
-import UserForm from './pages/UserForm'
-import CompanyManagement from './pages/CompanyManagement'
-import CompanyForm from './pages/CompanyForm'
 import AuditLogs from './pages/AuditLogs'
 import AnalyticsDashboard from './pages/AnalyticsDashboard'
 import Notifications from './pages/Notifications'
@@ -389,54 +385,6 @@ function App() {
             element={
               <ProtectedRoute requiredPermission="settings:update">
                 <IndexedDBInspector />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/companies"
-            element={
-              <ProtectedRoute requiredPermission="users:read" requiredRole="admin">
-                <CompanyManagement />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/companies/new"
-            element={
-              <ProtectedRoute requiredPermission="users:create" requiredRole="admin">
-                <CompanyForm />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/companies/:id/edit"
-            element={
-              <ProtectedRoute requiredPermission="users:update" requiredRole="admin">
-                <CompanyForm />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/users"
-            element={
-              <ProtectedRoute requiredPermission="users:read">
-                <UserManagement />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/users/new"
-            element={
-              <ProtectedRoute requiredPermission="users:create">
-                <UserForm />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/users/:id/edit"
-            element={
-              <ProtectedRoute requiredPermission="users:update">
-                <UserForm />
               </ProtectedRoute>
             }
           />
