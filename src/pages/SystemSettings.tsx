@@ -409,13 +409,11 @@ const SystemSettings = () => {
   const handleReset = async () => {
     if (window.confirm('Are you sure you want to reset all settings to default values?')) {
       await settingsService.resetToDefaults(user?.id ? parseInt(user.id) : undefined)
-      const [companySettings, invoiceSettings, taxSettings, generalSettings] = await Promise.all([
-        settingsService.getCompany(),
-        settingsService.getInvoice(),
-        settingsService.getTax(),
-        settingsService.getGeneral(),
+      const [invoiceSettings, taxSettings, generalSettings] = await Promise.all([
+        settingsService.getInvoice(selectedCompanyForSettings || undefined),
+        settingsService.getTax(selectedCompanyForSettings || undefined),
+        settingsService.getGeneral(selectedCompanyForSettings || undefined),
       ])
-      setCompany(companySettings)
       setInvoice(invoiceSettings)
       setTax(taxSettings)
       setGeneral(generalSettings)
@@ -446,13 +444,11 @@ const SystemSettings = () => {
           try {
             const json = event.target?.result as string
             await settingsService.import(json, user?.id ? parseInt(user.id) : undefined)
-            const [companySettings, invoiceSettings, taxSettings, generalSettings] = await Promise.all([
-              settingsService.getCompany(),
-              settingsService.getInvoice(),
-              settingsService.getTax(),
-              settingsService.getGeneral(),
+            const [invoiceSettings, taxSettings, generalSettings] = await Promise.all([
+              settingsService.getInvoice(selectedCompanyForSettings || undefined),
+              settingsService.getTax(selectedCompanyForSettings || undefined),
+              settingsService.getGeneral(selectedCompanyForSettings || undefined),
             ])
-            setCompany(companySettings)
             setInvoice(invoiceSettings)
             setTax(taxSettings)
             setGeneral(generalSettings)
