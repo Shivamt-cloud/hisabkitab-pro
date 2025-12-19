@@ -5,23 +5,36 @@ import { getAll, getById, put, deleteById, getByIndex, STORES } from '../databas
 async function initializeUsers(): Promise<void> {
   const users = await getAll<{ id: string; password: string } & User>(STORES.USERS)
   
+  const adminEmail = 'hisabkitabpro@hisabkitab.com'
+  const adminPassword = 'Shiv845496!@#'
+  
   // Check if admin user exists
-  const adminExists = users.some(u => 
-    u.email.toLowerCase() === 'hisabkitabpro@hisabkitab.com'
+  const existingAdmin = users.find(u => 
+    u.email.toLowerCase() === adminEmail.toLowerCase()
   )
   
-  // Create default admin user if it doesn't exist (either empty DB or admin not found)
-  if (!adminExists) {
+  // Create or update default admin user
+  if (!existingAdmin) {
+    // Create new admin user
     const defaultAdminUser: (User & { password: string }) = {
       id: users.length === 0 ? '1' : Date.now().toString(),
       name: 'HisabKitab Pro Admin',
-      email: 'hisabkitabpro@hisabkitab.com',
-      password: 'Shiv845496!@#',
+      email: adminEmail,
+      password: adminPassword,
       role: 'admin',
       company_id: undefined, // Admin has no company_id - can access all companies
     }
     await put(STORES.USERS, defaultAdminUser)
-    console.log('Default admin user created/updated')
+    console.log('Default admin user created')
+  } else if (!existingAdmin.password || existingAdmin.password !== adminPassword) {
+    // Update admin user password if it doesn't match
+    console.log('Updating admin user password')
+    const updatedAdmin: (User & { password: string }) = {
+      ...existingAdmin,
+      password: adminPassword,
+    }
+    await put(STORES.USERS, updatedAdmin)
+    console.log('Admin user password updated')
   }
 }
 
@@ -109,11 +122,41 @@ export const userService = {
     // Ensure users are initialized before verifying
     await initializeUsers()
     const user = await userService.getByEmail(email)
+    
+    // Debug logging
+    if (!user) {
+      console.error('Login failed: User not found for email:', email)
+      const allUsers = await userService.getAll()
+      console.log('Available users:', allUsers.map(u => ({ email: u.email, role: u.role })))
+    } else if (user.password !== password) {
+      console.error('Login failed: Password mismatch for email:', email)
+      console.log('Expected password:', password)
+      console.log('Stored password:', user.password ? '***' : '(empty)')
+    }
+    
     if (user && user.password === password) {
       // Return user without password
       const { password: _, ...userWithoutPassword } = user
       return userWithoutPassword
     }
     return null
+  },
+  
+  // Force reset admin user (utility function)
+  resetAdminUser: async (): Promise<void> => {
+    const adminEmail = 'hisabkitabpro@hisabkitab.com'
+    const adminPassword = 'Shiv845496!@#'
+    
+    const existingUser = await userService.getByEmail(adminEmail)
+    const adminUser: (User & { password: string }) = {
+      id: existingUser?.id || '1',
+      name: 'HisabKitab Pro Admin',
+      email: adminEmail,
+      password: adminPassword,
+      role: 'admin',
+      company_id: undefined,
+    }
+    await put(STORES.USERS, adminUser)
+    console.log('Admin user reset successfully')
   },
 }
