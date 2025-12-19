@@ -10,7 +10,7 @@ async function initializeUsers(): Promise<void> {
     const defaultAdminUser: (User & { password: string }) = {
       id: '1',
       name: 'HisabKitab Pro Admin',
-      email: 'hisabkitabpro',
+      email: 'hisabkitabpro@hisabkitab.com',
       password: 'Shiv845496!@#',
       role: 'admin',
     }
