@@ -41,7 +41,7 @@ const Login = () => {
           <div className="inline-flex items-center justify-center w-20 h-20 bg-white/20 backdrop-blur-lg rounded-2xl mb-4 shadow-xl">
             <User className="w-10 h-10 text-white" />
           </div>
-          <h1 className="text-4xl font-extrabold text-white mb-2">HisabKitab</h1>
+          <h1 className="text-4xl font-extrabold text-white mb-2">HisabKitab-Pro</h1>
           <p className="text-blue-100 text-lg">Inventory Management System</p>
         </div>
 
