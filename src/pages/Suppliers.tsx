@@ -15,7 +15,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 
 const Suppliers = () => {
-  const { hasPermission } = useAuth()
+  const { hasPermission, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [searchQuery, setSearchQuery] = useState('')

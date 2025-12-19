@@ -43,7 +43,7 @@ interface ReportSummary {
 type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
 
 const Dashboard = () => {
-  const { hasPermission, user } = useAuth()
+  const { hasPermission, user, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [reports, setReports] = useState<ReportSummary[]>([])
   const [currentTime, setCurrentTime] = useState(new Date())
