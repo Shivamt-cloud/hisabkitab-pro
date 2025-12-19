@@ -96,20 +96,47 @@ export const settingsService = {
     return settings.company
   },
 
-  // Get invoice settings
-  getInvoice: async (): Promise<InvoiceSettings> => {
+  // Get invoice settings (optionally for a specific company)
+  getInvoice: async (companyId?: number): Promise<InvoiceSettings> => {
+    if (companyId) {
+      // Get company-specific settings
+      const key = `company_${companyId}_invoice`
+      const record = await getById<SettingsRecord>(STORES.SETTINGS, key)
+      if (record?.settings?.invoice) {
+        return { ...defaultSettings.invoice, ...record.settings.invoice }
+      }
+    }
+    // Fall back to main settings
     const settings = await settingsService.getAll()
     return settings.invoice
   },
 
-  // Get tax settings
-  getTax: async (): Promise<TaxSettings> => {
+  // Get tax settings (optionally for a specific company)
+  getTax: async (companyId?: number): Promise<TaxSettings> => {
+    if (companyId) {
+      // Get company-specific settings
+      const key = `company_${companyId}_tax`
+      const record = await getById<SettingsRecord>(STORES.SETTINGS, key)
+      if (record?.settings?.tax) {
+        return { ...defaultSettings.tax, ...record.settings.tax }
+      }
+    }
+    // Fall back to main settings
     const settings = await settingsService.getAll()
     return settings.tax
   },
 
-  // Get general settings
-  getGeneral: async (): Promise<GeneralSettings> => {
+  // Get general settings (optionally for a specific company)
+  getGeneral: async (companyId?: number): Promise<GeneralSettings> => {
+    if (companyId) {
+      // Get company-specific settings
+      const key = `company_${companyId}_general`
+      const record = await getById<SettingsRecord>(STORES.SETTINGS, key)
+      if (record?.settings?.general) {
+        return { ...defaultSettings.general, ...record.settings.general }
+      }
+    }
+    // Fall back to main settings
     const settings = await settingsService.getAll()
     return settings.general
   },
@@ -124,34 +151,94 @@ export const settingsService = {
     return settings.company
   },
 
-  // Update invoice settings
-  updateInvoice: async (invoice: Partial<InvoiceSettings>, userId?: number): Promise<InvoiceSettings> => {
-    const settings = await settingsService.getAll()
-    settings.invoice = { ...settings.invoice, ...invoice }
-    settings.updated_at = new Date().toISOString()
-    settings.updated_by = userId
-    await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings })
-    return settings.invoice
+  // Update invoice settings (optionally for a specific company)
+  updateInvoice: async (invoice: Partial<InvoiceSettings>, userId?: number, companyId?: number): Promise<InvoiceSettings> => {
+    if (companyId) {
+      // Store company-specific invoice settings
+      const key = `company_${companyId}_invoice`
+      const existing = await getById<SettingsRecord>(STORES.SETTINGS, key)
+      const updatedInvoice = existing?.settings?.invoice 
+        ? { ...existing.settings.invoice, ...invoice }
+        : { ...defaultSettings.invoice, ...invoice }
+      
+      await put(STORES.SETTINGS, {
+        key,
+        settings: {
+          invoice: updatedInvoice,
+          updated_at: new Date().toISOString(),
+          updated_by: userId,
+        },
+      })
+      return updatedInvoice as InvoiceSettings
+    } else {
+      // Update main settings
+      const settings = await settingsService.getAll()
+      settings.invoice = { ...settings.invoice, ...invoice }
+      settings.updated_at = new Date().toISOString()
+      settings.updated_by = userId
+      await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings })
+      return settings.invoice
+    }
   },
 
-  // Update tax settings
-  updateTax: async (tax: Partial<TaxSettings>, userId?: number): Promise<TaxSettings> => {
-    const settings = await settingsService.getAll()
-    settings.tax = { ...settings.tax, ...tax }
-    settings.updated_at = new Date().toISOString()
-    settings.updated_by = userId
-    await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings })
-    return settings.tax
+  // Update tax settings (optionally for a specific company)
+  updateTax: async (tax: Partial<TaxSettings>, userId?: number, companyId?: number): Promise<TaxSettings> => {
+    if (companyId) {
+      // Store company-specific tax settings
+      const key = `company_${companyId}_tax`
+      const existing = await getById<SettingsRecord>(STORES.SETTINGS, key)
+      const updatedTax = existing?.settings?.tax
+        ? { ...existing.settings.tax, ...tax }
+        : { ...defaultSettings.tax, ...tax }
+      
+      await put(STORES.SETTINGS, {
+        key,
+        settings: {
+          tax: updatedTax,
+          updated_at: new Date().toISOString(),
+          updated_by: userId,
+        },
+      })
+      return updatedTax as TaxSettings
+    } else {
+      // Update main settings
+      const settings = await settingsService.getAll()
+      settings.tax = { ...settings.tax, ...tax }
+      settings.updated_at = new Date().toISOString()
+      settings.updated_by = userId
+      await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings })
+      return settings.tax
+    }
   },
 
-  // Update general settings
-  updateGeneral: async (general: Partial<GeneralSettings>, userId?: number): Promise<GeneralSettings> => {
-    const settings = await settingsService.getAll()
-    settings.general = { ...settings.general, ...general }
-    settings.updated_at = new Date().toISOString()
-    settings.updated_by = userId
-    await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings })
-    return settings.general
+  // Update general settings (optionally for a specific company)
+  updateGeneral: async (general: Partial<GeneralSettings>, userId?: number, companyId?: number): Promise<GeneralSettings> => {
+    if (companyId) {
+      // Store company-specific general settings
+      const key = `company_${companyId}_general`
+      const existing = await getById<SettingsRecord>(STORES.SETTINGS, key)
+      const updatedGeneral = existing?.settings?.general
+        ? { ...existing.settings.general, ...general }
+        : { ...defaultSettings.general, ...general }
+      
+      await put(STORES.SETTINGS, {
+        key,
+        settings: {
+          general: updatedGeneral,
+          updated_at: new Date().toISOString(),
+          updated_by: userId,
+        },
+      })
+      return updatedGeneral as GeneralSettings
+    } else {
+      // Update main settings
+      const settings = await settingsService.getAll()
+      settings.general = { ...settings.general, ...general }
+      settings.updated_at = new Date().toISOString()
+      settings.updated_by = userId
+      await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings })
+      return settings.general
+    }
   },
 
   // Update all settings

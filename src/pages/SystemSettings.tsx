@@ -10,12 +10,12 @@ import { Company } from '../types/company'
 import { UserRole } from '../types/auth'
 import { Home, Save, Building2, FileText, Percent, Settings, RotateCcw, Download, Upload, Plus, Edit, Trash2, Users, Eye, EyeOff, X } from 'lucide-react'
 
-type SettingsTab = 'company' | 'companies' | 'users' | 'invoice' | 'tax' | 'general'
+type SettingsTab = 'companies' | 'users' | 'invoice' | 'tax' | 'general'
 
 const SystemSettings = () => {
   const { user, getCurrentCompanyId, switchCompany } = useAuth()
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState<SettingsTab>('company')
+  const [activeTab, setActiveTab] = useState<SettingsTab>('companies')
   const [loading, setLoading] = useState(false)
   const [saved, setSaved] = useState(false)
   
@@ -53,11 +53,8 @@ const SystemSettings = () => {
     company_id: undefined,
   })
 
-  const [company, setCompany] = useState<CompanySettings>({
-    company_name: '',
-    valid_from: '',
-    valid_to: '',
-  })
+  // Settings for currently selected company
+  const [selectedCompanyForSettings, setSelectedCompanyForSettings] = useState<number | null>(selectedCompanyId)
   const [invoice, setInvoice] = useState<InvoiceSettings>({
     invoice_prefix: 'INV',
     invoice_number_format: 'INV-{YYYY}-{NNNN}',
@@ -90,26 +87,35 @@ const SystemSettings = () => {
   })
 
   useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const [companySettings, invoiceSettings, taxSettings, generalSettings] = await Promise.all([
-          settingsService.getCompany(),
-          settingsService.getInvoice(),
-          settingsService.getTax(),
-          settingsService.getGeneral(),
-        ])
-        setCompany(companySettings)
-        setInvoice(invoiceSettings)
-        setTax(taxSettings)
-        setGeneral(generalSettings)
-      } catch (error) {
-        console.error('Error loading settings:', error)
-      }
-    }
-    loadSettings()
     loadCompanies()
     loadUsers()
+    // Load settings when company is selected
+    if (selectedCompanyForSettings) {
+      loadCompanySettings(selectedCompanyForSettings)
+    }
   }, [])
+
+  useEffect(() => {
+    // Reload settings when company changes
+    if (selectedCompanyForSettings) {
+      loadCompanySettings(selectedCompanyForSettings)
+    }
+  }, [selectedCompanyForSettings])
+
+  const loadCompanySettings = async (companyId: number) => {
+    try {
+      const [invoiceSettings, taxSettings, generalSettings] = await Promise.all([
+        settingsService.getInvoice(companyId),
+        settingsService.getTax(companyId),
+        settingsService.getGeneral(companyId),
+      ])
+      setInvoice(invoiceSettings)
+      setTax(taxSettings)
+      setGeneral(generalSettings)
+    } catch (error) {
+      console.error('Error loading company settings:', error)
+    }
+  }
 
   useEffect(() => {
     if (selectedCompanyId) {
@@ -270,37 +276,16 @@ const SystemSettings = () => {
     }
   }, [saved])
 
-  const handleSaveCompany = async (e: FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    try {
-      // Validate validity dates
-      if (company.valid_from && company.valid_to) {
-        const fromDate = new Date(company.valid_from)
-        const toDate = new Date(company.valid_to)
-        if (toDate < fromDate) {
-          alert('Validity end date must be after start date')
-          setLoading(false)
-          return
-        }
-      }
-      await settingsService.updateCompany(company, user?.id ? parseInt(user.id) : undefined)
-      setSaved(true)
-      // Reload company settings after save
-      const updatedCompany = await settingsService.getCompany()
-      setCompany(updatedCompany)
-    } catch (error) {
-      alert('Failed to save company settings')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const handleSaveInvoice = async (e: FormEvent) => {
     e.preventDefault()
+    if (!selectedCompanyForSettings) {
+      alert('Please select a company first')
+      return
+    }
     setLoading(true)
     try {
-      await settingsService.updateInvoice(invoice, user?.id ? parseInt(user.id) : undefined)
+      await settingsService.updateInvoice(invoice, user?.id ? parseInt(user.id) : undefined, selectedCompanyForSettings)
       setSaved(true)
     } catch (error) {
       alert('Failed to save invoice settings')
@@ -311,9 +296,13 @@ const SystemSettings = () => {
 
   const handleSaveTax = async (e: FormEvent) => {
     e.preventDefault()
+    if (!selectedCompanyForSettings) {
+      alert('Please select a company first')
+      return
+    }
     setLoading(true)
     try {
-      await settingsService.updateTax(tax, user?.id ? parseInt(user.id) : undefined)
+      await settingsService.updateTax(tax, user?.id ? parseInt(user.id) : undefined, selectedCompanyForSettings)
       setSaved(true)
     } catch (error) {
       alert('Failed to save tax settings')
@@ -324,9 +313,13 @@ const SystemSettings = () => {
 
   const handleSaveGeneral = async (e: FormEvent) => {
     e.preventDefault()
+    if (!selectedCompanyForSettings) {
+      alert('Please select a company first')
+      return
+    }
     setLoading(true)
     try {
-      await settingsService.updateGeneral(general, user?.id ? parseInt(user.id) : undefined)
+      await settingsService.updateGeneral(general, user?.id ? parseInt(user.id) : undefined, selectedCompanyForSettings)
       setSaved(true)
     } catch (error) {
       alert('Failed to save general settings')
@@ -457,18 +450,6 @@ const SystemSettings = () => {
           {/* Tabs */}
           <div className="bg-white/70 backdrop-blur-xl rounded-xl shadow-xl p-6 mb-8 border border-white/50">
             <div className="flex gap-4 border-b border-gray-200 mb-6">
-              <button
-                onClick={() => setActiveTab('company')}
-                className={`px-6 py-3 font-semibold text-sm transition-colors relative flex items-center gap-2 ${
-                  activeTab === 'company' ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <Building2 className="w-4 h-4" />
-                Company Info
-                {activeTab === 'company' && (
-                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
-                )}
-              </button>
               {user?.role === 'admin' && (
                 <>
                   <button
@@ -534,204 +515,6 @@ const SystemSettings = () => {
                 )}
               </button>
             </div>
-
-            {/* Company Settings */}
-            {activeTab === 'company' && (
-              <form onSubmit={handleSaveCompany} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Company Name <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={company.company_name}
-                      onChange={(e) => setCompany({ ...company, company_name: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      GSTIN
-                    </label>
-                    <input
-                      type="text"
-                      value={company.company_gstin || ''}
-                      onChange={(e) => setCompany({ ...company, company_gstin: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                      placeholder="29ABCDE1234F1Z5"
-                      maxLength={15}
-                    />
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Address
-                    </label>
-                    <textarea
-                      value={company.company_address || ''}
-                      onChange={(e) => setCompany({ ...company, company_address: e.target.value })}
-                      rows={3}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      City
-                    </label>
-                    <input
-                      type="text"
-                      value={company.company_city || ''}
-                      onChange={(e) => setCompany({ ...company, company_city: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      State
-                    </label>
-                    <input
-                      type="text"
-                      value={company.company_state || ''}
-                      onChange={(e) => setCompany({ ...company, company_state: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Pincode
-                    </label>
-                    <input
-                      type="text"
-                      value={company.company_pincode || ''}
-                      onChange={(e) => setCompany({ ...company, company_pincode: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                      maxLength={6}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Country
-                    </label>
-                    <input
-                      type="text"
-                      value={company.company_country || ''}
-                      onChange={(e) => setCompany({ ...company, company_country: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Phone
-                    </label>
-                    <input
-                      type="tel"
-                      value={company.company_phone || ''}
-                      onChange={(e) => setCompany({ ...company, company_phone: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Email
-                    </label>
-                    <input
-                      type="email"
-                      value={company.company_email || ''}
-                      onChange={(e) => setCompany({ ...company, company_email: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Website
-                    </label>
-                    <input
-                      type="url"
-                      value={company.company_website || ''}
-                      onChange={(e) => setCompany({ ...company, company_website: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      PAN
-                    </label>
-                    <input
-                      type="text"
-                      value={company.company_pan || ''}
-                      onChange={(e) => setCompany({ ...company, company_pan: e.target.value.toUpperCase() })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                      maxLength={10}
-                      placeholder="ABCDE1234F"
-                    />
-                  </div>
-                </div>
-
-                {/* License Validity Section */}
-                <div className="border-t border-gray-200 pt-6 mt-6">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">License Validity</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">
-                        Valid From <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="date"
-                        value={company.valid_from || ''}
-                        onChange={(e) => setCompany({ ...company, valid_from: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                        required
-                      />
-                      <p className="text-xs text-gray-500 mt-1">License validity start date</p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">
-                        Valid To <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="date"
-                        value={company.valid_to || ''}
-                        onChange={(e) => setCompany({ ...company, valid_to: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                        required
-                        min={company.valid_from || undefined}
-                      />
-                      <p className="text-xs text-gray-500 mt-1">License validity end date</p>
-                    </div>
-                  </div>
-                  {company.valid_from && company.valid_to && (
-                    <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                      <p className="text-sm text-blue-800">
-                        <strong>License Period:</strong> {new Date(company.valid_from).toLocaleDateString()} to {new Date(company.valid_to).toLocaleDateString()}
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex justify-end">
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  >
-                    <Save className="w-5 h-5" />
-                    {loading ? 'Saving...' : 'Save Company Settings'}
-                  </button>
-                </div>
-              </form>
-            )}
 
             {/* Companies Management */}
             {activeTab === 'companies' && user?.role === 'admin' && (
@@ -1216,6 +999,37 @@ const SystemSettings = () => {
 
             {/* Invoice Settings */}
             {activeTab === 'invoice' && (
+              <div className="space-y-6">
+                {/* Company Selector */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Select Company <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={selectedCompanyForSettings || ''}
+                    onChange={(e) => {
+                      const companyId = e.target.value ? parseInt(e.target.value) : null
+                      setSelectedCompanyForSettings(companyId)
+                      if (companyId) {
+                        loadCompanySettings(companyId)
+                      }
+                    }}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                    required
+                  >
+                    <option value="">Select a company</option>
+                    {companies.filter(c => c.is_active).map(comp => (
+                      <option key={comp.id} value={comp.id}>{comp.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-600 mt-2">
+                    {selectedCompanyForSettings 
+                      ? `Managing invoice settings for: ${companies.find(c => c.id === selectedCompanyForSettings)?.name}`
+                      : 'Please select a company to manage its invoice settings'}
+                  </p>
+                </div>
+
+                {selectedCompanyForSettings ? (
               <form onSubmit={handleSaveInvoice} className="space-y-6">
                 <div className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1329,10 +1143,47 @@ const SystemSettings = () => {
                   </button>
                 </div>
               </form>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <p>Please select a company to manage invoice settings</p>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Tax Settings */}
             {activeTab === 'tax' && (
+              <div className="space-y-6">
+                {/* Company Selector */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Select Company <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={selectedCompanyForSettings || ''}
+                    onChange={(e) => {
+                      const companyId = e.target.value ? parseInt(e.target.value) : null
+                      setSelectedCompanyForSettings(companyId)
+                      if (companyId) {
+                        loadCompanySettings(companyId)
+                      }
+                    }}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                    required
+                  >
+                    <option value="">Select a company</option>
+                    {companies.filter(c => c.is_active).map(comp => (
+                      <option key={comp.id} value={comp.id}>{comp.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-600 mt-2">
+                    {selectedCompanyForSettings 
+                      ? `Managing tax settings for: ${companies.find(c => c.id === selectedCompanyForSettings)?.name}`
+                      : 'Please select a company to manage its tax settings'}
+                  </p>
+                </div>
+
+                {selectedCompanyForSettings ? (
               <form onSubmit={handleSaveTax} className="space-y-6">
                 <div className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1440,10 +1291,47 @@ const SystemSettings = () => {
                   </button>
                 </div>
               </form>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <p>Please select a company to manage tax settings</p>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* General Settings */}
             {activeTab === 'general' && (
+              <div className="space-y-6">
+                {/* Company Selector */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Select Company <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={selectedCompanyForSettings || ''}
+                    onChange={(e) => {
+                      const companyId = e.target.value ? parseInt(e.target.value) : null
+                      setSelectedCompanyForSettings(companyId)
+                      if (companyId) {
+                        loadCompanySettings(companyId)
+                      }
+                    }}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                    required
+                  >
+                    <option value="">Select a company</option>
+                    {companies.filter(c => c.is_active).map(comp => (
+                      <option key={comp.id} value={comp.id}>{comp.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-600 mt-2">
+                    {selectedCompanyForSettings 
+                      ? `Managing general settings for: ${companies.find(c => c.id === selectedCompanyForSettings)?.name}`
+                      : 'Please select a company to manage its general settings'}
+                  </p>
+                </div>
+
+                {selectedCompanyForSettings ? (
               <form onSubmit={handleSaveGeneral} className="space-y-6">
                 <div className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1590,6 +1478,12 @@ const SystemSettings = () => {
                   </button>
                 </div>
               </form>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <p>Please select a company to manage general settings</p>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </main>
