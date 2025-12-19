@@ -12,8 +12,8 @@ export const stockAdjustmentService = {
   },
 
   // Get adjustments by product ID
-  getByProductId: async (productId: number): Promise<StockAdjustment[]> => {
-    const allAdjustments = await stockAdjustmentService.getAll()
+  getByProductId: async (productId: number, companyId?: number): Promise<StockAdjustment[]> => {
+    const allAdjustments = await stockAdjustmentService.getAll(companyId)
     return allAdjustments.filter(adj => adj.product_id === productId)
       .sort((a, b) => new Date(b.adjustment_date).getTime() - new Date(a.adjustment_date).getTime())
   },
@@ -100,8 +100,8 @@ export const stockAdjustmentService = {
   },
 
   // Get statistics
-  getStats: async () => {
-    const stockAdjustments = await stockAdjustmentService.getAll()
+  getStats: async (companyId?: number) => {
+    const stockAdjustments = await stockAdjustmentService.getAll(companyId)
     const now = new Date()
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1)

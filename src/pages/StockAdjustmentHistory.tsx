@@ -28,7 +28,7 @@ const StockAdjustmentHistory = () => {
       const companyId = getCurrentCompanyId()
       const [allAdjustmentsResult, adjustmentStats] = await Promise.all([
         stockAdjustmentService.getAll(companyId || undefined),
-        stockAdjustmentService.getStats()
+        stockAdjustmentService.getStats(companyId || undefined)
       ])
       
       let allAdjustments = allAdjustmentsResult
