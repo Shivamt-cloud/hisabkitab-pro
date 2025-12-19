@@ -1139,6 +1139,8 @@ const SystemSettings = () => {
                           onClick={() => {
                             setShowUserForm(false)
                             setEditingUser(null)
+                            setUseCustomPermissions(false)
+                            setCustomPermissions([])
                           }}
                           className="px-4 py-2 bg-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-400 transition-colors"
                         >
