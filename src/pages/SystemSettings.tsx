@@ -4,11 +4,13 @@ import { useAuth } from '../context/AuthContext'
 import { settingsService } from '../services/settingsService'
 import { companyService } from '../services/companyService'
 import { userService, UserWithPassword } from '../services/userService'
+import { permissionService } from '../services/permissionService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { CompanySettings, InvoiceSettings, TaxSettings, GeneralSettings } from '../types/settings'
 import { Company } from '../types/company'
 import { UserRole } from '../types/auth'
-import { Home, Save, Building2, FileText, Percent, Settings, RotateCcw, Download, Upload, Plus, Edit, Trash2, Users, Eye, EyeOff, X } from 'lucide-react'
+import { PermissionModule, PermissionAction, PERMISSION_MODULES, ModulePermission } from '../types/permissions'
+import { Home, Save, Building2, FileText, Percent, Settings, RotateCcw, Download, Upload, Plus, Edit, Trash2, Users, Eye, EyeOff, X, Shield, UserCog, UserCheck, Lock, Unlock } from 'lucide-react'
 
 type SettingsTab = 'companies' | 'users' | 'invoice' | 'tax' | 'general'
 
@@ -49,9 +51,12 @@ const SystemSettings = () => {
     name: '',
     email: '',
     password: '',
+    confirmPassword: '',
     role: 'staff',
     company_id: undefined,
   })
+  const [useCustomPermissions, setUseCustomPermissions] = useState(false)
+  const [customPermissions, setCustomPermissions] = useState<ModulePermission[]>([])
 
   // Settings for currently selected company
   const [selectedCompanyForSettings, setSelectedCompanyForSettings] = useState<number | null>(selectedCompanyId)
@@ -214,29 +219,84 @@ const SystemSettings = () => {
 
   const handleUserSubmit = async (e: FormEvent) => {
     e.preventDefault()
+    
+    // Validation
+    if (!userFormData.name?.trim()) {
+      alert('Name is required')
+      return
+    }
+    if (!userFormData.email?.trim()) {
+      alert('Email is required')
+      return
+    }
+    if (!editingUser && !userFormData.password) {
+      alert('Password is required for new users')
+      return
+    }
+    if (userFormData.password && userFormData.password.length < 6) {
+      alert('Password must be at least 6 characters long')
+      return
+    }
+    if (userFormData.password && userFormData.password !== userFormData.confirmPassword) {
+      alert('Passwords do not match')
+      return
+    }
+    
     setLoading(true)
     try {
+      let userId: string
+      
       if (editingUser) {
-        await userService.update(editingUser.id, userFormData)
+        // Update existing user
+        const updateData: any = {
+          name: userFormData.name,
+          email: userFormData.email,
+          role: userFormData.role,
+          company_id: userFormData.company_id,
+        }
+        if (userFormData.password) {
+          updateData.password = userFormData.password
+        }
+        await userService.update(editingUser.id, updateData)
+        userId = editingUser.id
         alert('User updated successfully!')
       } else {
-        if (!userFormData.password) {
-          alert('Password is required for new users')
-          setLoading(false)
-          return
-        }
-        await userService.create(userFormData as Omit<UserWithPassword, 'id'>)
+        // Create new user
+        const newUser = await userService.create({
+          name: userFormData.name!,
+          email: userFormData.email!,
+          password: userFormData.password!,
+          role: userFormData.role || 'staff',
+          company_id: userFormData.company_id,
+        } as Omit<UserWithPassword, 'id'>)
+        userId = newUser.id
         alert('User created successfully!')
       }
+      
+      // Save custom permissions if enabled
+      if (useCustomPermissions && userId) {
+        await permissionService.saveUserPermissions({
+          userId,
+          useCustomPermissions: true,
+          customPermissions,
+        })
+      } else if (userId) {
+        // Delete custom permissions if not using them (will fall back to role-based)
+        await permissionService.deleteUserPermissions(userId)
+      }
+      
       setShowUserForm(false)
       setEditingUser(null)
       setUserFormData({
         name: '',
         email: '',
         password: '',
+        confirmPassword: '',
         role: 'staff',
         company_id: selectedCompanyId || undefined,
       })
+      setUseCustomPermissions(false)
+      setCustomPermissions([])
       loadUsers()
     } catch (error: any) {
       alert(error.message || 'Failed to save user')
@@ -245,7 +305,7 @@ const SystemSettings = () => {
     }
   }
 
-  const handleEditUser = (userData: UserWithPassword) => {
+  const handleEditUser = async (userData: UserWithPassword) => {
     setEditingUser(userData)
     setUserFormData({
       name: userData.name,
@@ -253,7 +313,25 @@ const SystemSettings = () => {
       role: userData.role,
       company_id: userData.company_id,
       password: '', // Don't show password
+      confirmPassword: '',
     })
+    
+    // Load custom permissions if they exist
+    try {
+      const userPerms = await permissionService.getUserPermissions(userData.id)
+      if (userPerms) {
+        setUseCustomPermissions(userPerms.useCustomPermissions)
+        setCustomPermissions(userPerms.customPermissions)
+      } else {
+        setUseCustomPermissions(false)
+        setCustomPermissions([])
+      }
+    } catch (error) {
+      console.error('Error loading user permissions:', error)
+      setUseCustomPermissions(false)
+      setCustomPermissions([])
+    }
+    
     setShowUserForm(true)
   }
 
@@ -804,9 +882,12 @@ const SystemSettings = () => {
                           name: '',
                           email: '',
                           password: '',
+                          confirmPassword: '',
                           role: 'staff',
                           company_id: selectedCompanyId || undefined,
                         })
+                        setUseCustomPermissions(false)
+                        setCustomPermissions([])
                         setShowUserForm(true)
                       }}
                       className="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
@@ -827,6 +908,8 @@ const SystemSettings = () => {
                           onClick={() => {
                             setShowUserForm(false)
                             setEditingUser(null)
+                            setUseCustomPermissions(false)
+                            setCustomPermissions([])
                           }}
                           className="text-gray-500 hover:text-gray-700"
                         >
@@ -905,6 +988,149 @@ const SystemSettings = () => {
                             Assign user to a company. Leave empty for admin access to all companies.
                           </p>
                         </div>
+                      </div>
+
+                      {/* Custom Permissions Section */}
+                      <div className="border-t border-gray-200 pt-6 mt-6">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-1">
+                              Custom Permissions
+                            </label>
+                            <p className="text-xs text-gray-500">
+                              Override role-based permissions with custom module access
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const newUseCustom = !useCustomPermissions
+                              setUseCustomPermissions(newUseCustom)
+                              if (newUseCustom && !editingUser) {
+                                // Initialize with role-based permissions when enabling for new user
+                                const effective = await permissionService.getEffectivePermissions(
+                                  '',
+                                  (userFormData.role || 'staff') as UserRole
+                                )
+                                setCustomPermissions(effective)
+                              } else if (newUseCustom && editingUser) {
+                                // For existing user, load their current effective permissions
+                                const effective = await permissionService.getEffectivePermissions(
+                                  editingUser.id,
+                                  (userFormData.role || 'staff') as UserRole
+                                )
+                                setCustomPermissions(effective)
+                              }
+                            }}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors ${
+                              useCustomPermissions
+                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                          >
+                            {useCustomPermissions ? (
+                              <>
+                                <Unlock className="w-4 h-4" />
+                                <span>Custom Enabled</span>
+                              </>
+                            ) : (
+                              <>
+                                <Lock className="w-4 h-4" />
+                                <span>Use Role Defaults</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {useCustomPermissions && (
+                          <div className="bg-gray-50 rounded-lg p-4 space-y-4 max-h-96 overflow-y-auto">
+                            {(Object.keys(PERMISSION_MODULES) as PermissionModule[]).map((module) => {
+                              const moduleInfo = PERMISSION_MODULES[module]
+                              const modulePerm = customPermissions.find(p => p.module === module)
+                              const selectedActions = modulePerm?.actions || []
+
+                              const toggleAction = (action: PermissionAction) => {
+                                const updated = [...customPermissions]
+                                const index = updated.findIndex(p => p.module === module)
+                                
+                                if (index >= 0) {
+                                  if (selectedActions.includes(action)) {
+                                    updated[index].actions = updated[index].actions.filter(a => a !== action)
+                                    if (updated[index].actions.length === 0) {
+                                      updated.splice(index, 1)
+                                    }
+                                  } else {
+                                    updated[index].actions.push(action)
+                                  }
+                                } else {
+                                  updated.push({ module, actions: [action] })
+                                }
+                                
+                                setCustomPermissions(updated)
+                              }
+
+                              const hasAllActions = moduleInfo.actions.every(a => selectedActions.includes(a))
+                              const hasSomeActions = selectedActions.length > 0
+
+                              return (
+                                <div key={module} className="border border-gray-200 rounded-lg p-4 bg-white">
+                                  <div className="flex items-start justify-between mb-3">
+                                    <div className="flex-1">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <input
+                                          type="checkbox"
+                                          checked={hasAllActions}
+                                          ref={(input) => {
+                                            if (input) input.indeterminate = hasSomeActions && !hasAllActions
+                                          }}
+                                          onChange={() => {
+                                            if (hasAllActions) {
+                                              // Remove all
+                                              setCustomPermissions(
+                                                customPermissions.filter(p => p.module !== module)
+                                              )
+                                            } else {
+                                              // Add all
+                                              const updated = customPermissions.filter(p => p.module !== module)
+                                              updated.push({
+                                                module,
+                                                actions: [...moduleInfo.actions],
+                                              })
+                                              setCustomPermissions(updated)
+                                            }
+                                          }}
+                                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                        />
+                                        <label className="font-semibold text-gray-900">
+                                          {moduleInfo.label}
+                                        </label>
+                                      </div>
+                                      <p className="text-xs text-gray-500 ml-6">{moduleInfo.description}</p>
+                                    </div>
+                                  </div>
+                                  <div className="ml-6 flex flex-wrap gap-2">
+                                    {moduleInfo.actions.map((action) => (
+                                      <label
+                                        key={action}
+                                        className="flex items-center gap-2 cursor-pointer"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={selectedActions.includes(action)}
+                                          onChange={() => toggleAction(action)}
+                                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                        />
+                                        <span className="text-sm text-gray-700 capitalize">
+                                          {action}
+                                        </span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex justify-end gap-3 mt-6">
