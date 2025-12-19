@@ -18,6 +18,7 @@ async function initializeUsers(): Promise<void> {
       email: 'hisabkitabpro@hisabkitab.com',
       password: 'Shiv845496!@#',
       role: 'admin',
+      company_id: undefined, // Admin has no company_id - can access all companies
     }
     await put(STORES.USERS, defaultAdminUser)
     console.log('Default admin user created/updated')

@@ -9,17 +9,30 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
+  const [currentCompanyId, setCurrentCompanyId] = useState<number | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
     // Check if user is logged in from localStorage
     const savedUser = localStorage.getItem('hisabkitab_user')
+    const savedCompanyId = localStorage.getItem('hisabkitab_company_id')
+    
     if (savedUser) {
       try {
-        setUser(JSON.parse(savedUser))
+        const parsedUser = JSON.parse(savedUser)
+        setUser(parsedUser)
+        
+        // Set company ID if user is not admin
+        if (parsedUser.role !== 'admin' && parsedUser.company_id) {
+          setCurrentCompanyId(parsedUser.company_id)
+        } else if (savedCompanyId) {
+          // Admin can switch companies
+          setCurrentCompanyId(parseInt(savedCompanyId))
+        }
       } catch (error) {
         console.error('Error parsing saved user:', error)
         localStorage.removeItem('hisabkitab_user')
+        localStorage.removeItem('hisabkitab_company_id')
       }
     }
     setIsLoading(false)
@@ -37,6 +50,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (foundUser) {
       setUser(foundUser)
       localStorage.setItem('hisabkitab_user', JSON.stringify(foundUser))
+      
+      // Set company ID for non-admin users
+      if (foundUser.role !== 'admin' && foundUser.company_id) {
+        setCurrentCompanyId(foundUser.company_id)
+        localStorage.setItem('hisabkitab_company_id', foundUser.company_id.toString())
+      }
       
       // Log login (fire and forget)
       auditService.log(
@@ -73,7 +92,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ).catch(err => console.error('Error logging logout:', err))
     }
     setUser(null)
+    setCurrentCompanyId(null)
     localStorage.removeItem('hisabkitab_user')
+    localStorage.removeItem('hisabkitab_company_id')
+  }
+
+  // Switch company (admin only)
+  const switchCompany = (companyId: number | null) => {
+    if (user?.role === 'admin') {
+      setCurrentCompanyId(companyId)
+      if (companyId) {
+        localStorage.setItem('hisabkitab_company_id', companyId.toString())
+      } else {
+        localStorage.removeItem('hisabkitab_company_id')
+      }
+    }
+  }
+
+  // Get current company ID (for non-admin, use their assigned company; for admin, use selected company)
+  const getCurrentCompanyId = (): number | null => {
+    if (user?.role === 'admin') {
+      return currentCompanyId
+    }
+    return user?.company_id || null
   }
 
   const hasPermission = (permission: string): boolean => {
@@ -89,7 +130,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, hasPermission, isLoading }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      login, 
+      logout, 
+      hasPermission, 
+      isLoading,
+      currentCompanyId,
+      switchCompany,
+      getCurrentCompanyId,
+    }}>
       {children}
     </AuthContext.Provider>
   )

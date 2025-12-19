@@ -6,6 +6,7 @@ export interface User {
   email: string
   role: UserRole
   avatar?: string
+  company_id?: number // Company this user belongs to (undefined for admin means all companies)
 }
 
 export interface AuthContextType {
@@ -14,6 +15,9 @@ export interface AuthContextType {
   logout: () => void
   hasPermission: (permission: string) => boolean
   isLoading: boolean
+  currentCompanyId: number | null
+  switchCompany: (companyId: number | null) => void
+  getCurrentCompanyId: () => number | null
 }
 
 export interface Permission {

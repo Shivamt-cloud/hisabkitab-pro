@@ -2,10 +2,11 @@
 // Provides a simple interface to interact with IndexedDB
 
 const DB_NAME = 'hisabkitab_db'
-const DB_VERSION = 1
+const DB_VERSION = 2 // Incremented to add company_id indexes and COMPANIES store
 
 // Object store names (tables)
 export const STORES = {
+  COMPANIES: 'companies',
   PRODUCTS: 'products',
   CATEGORIES: 'categories',
   CUSTOMERS: 'customers',
@@ -62,8 +63,16 @@ export function initDB(config: DBConfig = {}): Promise<IDBDatabase> {
       const db = (event.target as IDBOpenDBRequest).result
 
       // Create object stores if they don't exist
+      if (!db.objectStoreNames.contains(STORES.COMPANIES)) {
+        const companiesStore = db.createObjectStore(STORES.COMPANIES, { keyPath: 'id' })
+        companiesStore.createIndex('name', 'name', { unique: false })
+        companiesStore.createIndex('email', 'email', { unique: false })
+        companiesStore.createIndex('is_active', 'is_active', { unique: false })
+      }
+
       if (!db.objectStoreNames.contains(STORES.PRODUCTS)) {
         const productsStore = db.createObjectStore(STORES.PRODUCTS, { keyPath: 'id' })
+        productsStore.createIndex('company_id', 'company_id', { unique: false })
         productsStore.createIndex('category_id', 'category_id', { unique: false })
         productsStore.createIndex('sku', 'sku', { unique: false })
         productsStore.createIndex('barcode', 'barcode', { unique: false })
@@ -72,41 +81,48 @@ export function initDB(config: DBConfig = {}): Promise<IDBDatabase> {
 
       if (!db.objectStoreNames.contains(STORES.CATEGORIES)) {
         const categoriesStore = db.createObjectStore(STORES.CATEGORIES, { keyPath: 'id' })
+        categoriesStore.createIndex('company_id', 'company_id', { unique: false })
         categoriesStore.createIndex('parent_id', 'parent_id', { unique: false })
       }
 
       if (!db.objectStoreNames.contains(STORES.CUSTOMERS)) {
         const customersStore = db.createObjectStore(STORES.CUSTOMERS, { keyPath: 'id' })
+        customersStore.createIndex('company_id', 'company_id', { unique: false })
         customersStore.createIndex('email', 'email', { unique: false })
         customersStore.createIndex('phone', 'phone', { unique: false })
       }
 
       if (!db.objectStoreNames.contains(STORES.SUPPLIERS)) {
         const suppliersStore = db.createObjectStore(STORES.SUPPLIERS, { keyPath: 'id' })
+        suppliersStore.createIndex('company_id', 'company_id', { unique: false })
         suppliersStore.createIndex('email', 'email', { unique: false })
         suppliersStore.createIndex('phone', 'phone', { unique: false })
       }
 
       if (!db.objectStoreNames.contains(STORES.SALES)) {
         const salesStore = db.createObjectStore(STORES.SALES, { keyPath: 'id' })
+        salesStore.createIndex('company_id', 'company_id', { unique: false })
         salesStore.createIndex('customer_id', 'customer_id', { unique: false })
         salesStore.createIndex('sale_date', 'sale_date', { unique: false })
-        salesStore.createIndex('invoice_number', 'invoice_number', { unique: true })
+        salesStore.createIndex('invoice_number', 'invoice_number', { unique: false })
       }
 
       if (!db.objectStoreNames.contains(STORES.PURCHASES)) {
         const purchasesStore = db.createObjectStore(STORES.PURCHASES, { keyPath: 'id' })
+        purchasesStore.createIndex('company_id', 'company_id', { unique: false })
         purchasesStore.createIndex('supplier_id', 'supplier_id', { unique: false })
         purchasesStore.createIndex('purchase_date', 'purchase_date', { unique: false })
       }
 
       if (!db.objectStoreNames.contains(STORES.STOCK_ADJUSTMENTS)) {
-        db.createObjectStore(STORES.STOCK_ADJUSTMENTS, { keyPath: 'id' })
+        const stockAdjustmentsStore = db.createObjectStore(STORES.STOCK_ADJUSTMENTS, { keyPath: 'id' })
+        stockAdjustmentsStore.createIndex('company_id', 'company_id', { unique: false })
       }
 
       if (!db.objectStoreNames.contains(STORES.USERS)) {
         const usersStore = db.createObjectStore(STORES.USERS, { keyPath: 'id' })
         usersStore.createIndex('email', 'email', { unique: true })
+        usersStore.createIndex('company_id', 'company_id', { unique: false })
       }
 
       if (!db.objectStoreNames.contains(STORES.AUDIT_LOGS)) {
