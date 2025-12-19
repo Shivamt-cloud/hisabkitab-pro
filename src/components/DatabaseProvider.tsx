@@ -49,19 +49,26 @@ export function DatabaseProvider({ children }: DatabaseProviderProps) {
           }
         }
 
-        if (timeoutId) clearTimeout(timeoutId)
-        setIsInitialized(true)
+               if (timeoutId) clearTimeout(timeoutId)
+               setIsInitialized(true)
 
-        // Start automatic backup service after database is initialized
-        // Get user ID from localStorage if available
-        try {
-          const savedUser = localStorage.getItem('hisabkitab_user')
-          const user = savedUser ? JSON.parse(savedUser) : null
-          await autoBackupService.start(user?.id)
-        } catch (backupError) {
-          console.warn('Could not start automatic backup service:', backupError)
-          // Continue even if backup service fails to start
-        }
+               // Ensure admin user exists after database is initialized
+               try {
+                 await userService.getAll() // This will trigger user initialization
+               } catch (userError) {
+                 console.warn('Could not initialize users:', userError)
+               }
+
+               // Start automatic backup service after database is initialized
+               // Get user ID from localStorage if available
+               try {
+                 const savedUser = localStorage.getItem('hisabkitab_user')
+                 const user = savedUser ? JSON.parse(savedUser) : null
+                 await autoBackupService.start(user?.id)
+               } catch (backupError) {
+                 console.warn('Could not start automatic backup service:', backupError)
+                 // Continue even if backup service fails to start
+               }
       } catch (err: any) {
         if (timeoutId) clearTimeout(timeoutId)
         console.error('Database initialization error:', err)

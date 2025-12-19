@@ -5,16 +5,22 @@ import { getAll, getById, put, deleteById, getByIndex, STORES } from '../databas
 async function initializeUsers(): Promise<void> {
   const users = await getAll<{ id: string; password: string } & User>(STORES.USERS)
   
-  // Create default admin user if database is empty
-  if (users.length === 0) {
+  // Check if admin user exists
+  const adminExists = users.some(u => 
+    u.email.toLowerCase() === 'hisabkitabpro@hisabkitab.com'
+  )
+  
+  // Create default admin user if it doesn't exist (either empty DB or admin not found)
+  if (!adminExists) {
     const defaultAdminUser: (User & { password: string }) = {
-      id: '1',
+      id: users.length === 0 ? '1' : Date.now().toString(),
       name: 'HisabKitab Pro Admin',
       email: 'hisabkitabpro@hisabkitab.com',
       password: 'Shiv845496!@#',
       role: 'admin',
     }
     await put(STORES.USERS, defaultAdminUser)
+    console.log('Default admin user created/updated')
   }
 }
 
