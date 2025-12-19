@@ -2,7 +2,7 @@
 
 import { Customer, CustomerSummary } from '../types/customer'
 import { saleService } from './saleService'
-import { getAll, getById, put, deleteById, STORES } from '../database/db'
+import { getAll, getById, put, deleteById, getByIndex, STORES } from '../database/db'
 
 // Initialize with sample data if empty
 async function initializeData(): Promise<void> {
@@ -19,9 +19,15 @@ async function initializeData(): Promise<void> {
 }
 
 export const customerService = {
-  getAll: async (includeInactive: boolean = false): Promise<Customer[]> => {
+  getAll: async (includeInactive: boolean = false, companyId?: number): Promise<Customer[]> => {
     await initializeData()
-    let customers = await getAll<Customer>(STORES.CUSTOMERS)
+    let customers: Customer[]
+    
+    if (companyId !== undefined) {
+      customers = await getByIndex<Customer>(STORES.CUSTOMERS, 'company_id', companyId)
+    } else {
+      customers = await getAll<Customer>(STORES.CUSTOMERS)
+    }
     
     if (!includeInactive) {
       customers = customers.filter(c => c.is_active)

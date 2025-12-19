@@ -9,7 +9,7 @@ import { Plus, Eye, Edit, Filter, FileText, TrendingUp, Home, FileSpreadsheet } 
 type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
 
 const PurchaseHistory = () => {
-  const { hasPermission } = useAuth()
+  const { hasPermission, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [purchases, setPurchases] = useState<Purchase[]>([])
   const [filterType, setFilterType] = useState<PurchaseType | 'all'>('all')
@@ -76,9 +76,10 @@ const PurchaseHistory = () => {
     try {
       const [allPurchasesResult, statistics] = await Promise.all([
         (async () => {
+          const companyId = getCurrentCompanyId()
           let allPurchases = filterType === 'all' 
-            ? await purchaseService.getAll() 
-            : await purchaseService.getAll(filterType)
+            ? await purchaseService.getAll(undefined, companyId || undefined) 
+            : await purchaseService.getAll(filterType, companyId || undefined)
           
           // Filter by date range
           const { startDate, endDate } = getDateRange()
@@ -99,7 +100,7 @@ const PurchaseHistory = () => {
             new Date(b.purchase_date).getTime() - new Date(a.purchase_date).getTime()
           )
         })(),
-        purchaseService.getStats()
+        purchaseService.getStats(getCurrentCompanyId() || undefined)
       ])
       
       setPurchases(allPurchasesResult)

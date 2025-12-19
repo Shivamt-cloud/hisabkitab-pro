@@ -8,7 +8,7 @@ import { StockAdjustmentType, StockAdjustmentReason } from '../types/stock'
 import { ArrowLeft, Save, Package, Home, AlertTriangle } from 'lucide-react'
 
 const StockAdjustmentForm = () => {
-  const { hasPermission, user } = useAuth()
+  const { hasPermission, user, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const productIdParam = searchParams.get('productId')
@@ -31,7 +31,8 @@ const StockAdjustmentForm = () => {
 
   const loadProducts = async () => {
     try {
-      const allProducts = await productService.getAll(false) // Only active products
+      const companyId = getCurrentCompanyId()
+      const allProducts = await productService.getAll(false, companyId || undefined) // Only active products
       setProducts(allProducts)
     } catch (error) {
       console.error('Error loading products:', error)
@@ -93,6 +94,7 @@ const StockAdjustmentForm = () => {
         previous_stock: selectedProduct.stock_quantity,
         new_stock: newStock,
         notes: notes.trim() || undefined,
+        company_id: getCurrentCompanyId() || undefined,
         adjusted_by: user?.id ? parseInt(user.id) || 0 : 0,
         adjusted_by_name: user?.email || 'Unknown',
         adjustment_date: new Date().toISOString().split('T')[0],

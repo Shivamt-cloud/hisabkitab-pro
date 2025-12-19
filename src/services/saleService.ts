@@ -5,12 +5,18 @@ import { Sale, SaleItem, Customer } from '../types/sale'
 import { productService } from './productService'
 import { salesCommissionService } from './salespersonService'
 import { customerService } from './customerService'
-import { getAll, getById, put, deleteById, STORES } from '../database/db'
+import { getAll, getById, put, deleteById, getByIndex, STORES } from '../database/db'
 
 // Sales
 export const saleService = {
-  getAll: async (includeArchived: boolean = false): Promise<Sale[]> => {
-    let sales = await getAll<Sale>(STORES.SALES)
+  getAll: async (includeArchived: boolean = false, companyId?: number): Promise<Sale[]> => {
+    let sales: Sale[]
+    
+    if (companyId !== undefined) {
+      sales = await getByIndex<Sale>(STORES.SALES, 'company_id', companyId)
+    } else {
+      sales = await getAll<Sale>(STORES.SALES)
+    }
     
     if (!includeArchived) {
       sales = sales.filter(s => !s.archived)

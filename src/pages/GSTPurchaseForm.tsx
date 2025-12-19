@@ -11,7 +11,7 @@ import { calculateTax, GST_RATES } from '../utils/taxCalculator'
 import { generateBarcode, BarcodeFormat, validateBarcode, BARCODE_FORMAT_INFO } from '../utils/barcodeGenerator'
 
 const GSTPurchaseForm = () => {
-  const { hasPermission, user } = useAuth()
+  const { hasPermission, user, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const { id } = useParams<{ id?: string }>()
   const isEditing = !!id
@@ -42,9 +42,10 @@ const GSTPurchaseForm = () => {
 
   const loadData = async () => {
     try {
+      const companyId = getCurrentCompanyId()
       const [suppliersData, productsData] = await Promise.all([
-        supplierService.getAll(),
-        productService.getAll(true)
+        supplierService.getAll(companyId || undefined),
+        productService.getAll(true, companyId || undefined)
       ])
       setSuppliers(suppliersData)
       setProducts(productsData)
@@ -355,6 +356,7 @@ const GSTPurchaseForm = () => {
           cgst_amount: totals.cgstAmount,
           sgst_amount: totals.sgstAmount,
           grand_total: totals.grandTotal,
+          company_id: getCurrentCompanyId() || undefined,
           payment_status: paymentStatus,
           payment_method: paymentMethod,
           notes,

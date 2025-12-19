@@ -29,7 +29,8 @@ const Suppliers = () => {
   const loadSuppliers = async () => {
     setLoading(true)
     try {
-      const allSuppliers = await supplierService.getAll()
+      const companyId = getCurrentCompanyId()
+      const allSuppliers = await supplierService.getAll(companyId || undefined)
       setSuppliers(allSuppliers)
     } catch (error) {
       console.error('Error loading suppliers:', error)

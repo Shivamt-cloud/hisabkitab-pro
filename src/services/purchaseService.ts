@@ -3,11 +3,14 @@
 
 import { Purchase, GSTPurchase, SimplePurchase, PurchaseItem, Supplier, PurchaseType } from '../types/purchase'
 import { productService } from './productService'
-import { getAll, getById, put, deleteById, STORES } from '../database/db'
+import { getAll, getById, put, deleteById, getByIndex, STORES } from '../database/db'
 
 // Suppliers
 export const supplierService = {
-  getAll: async (): Promise<Supplier[]> => {
+  getAll: async (companyId?: number): Promise<Supplier[]> => {
+    if (companyId !== undefined) {
+      return await getByIndex<Supplier>(STORES.SUPPLIERS, 'company_id', companyId)
+    }
     return await getAll<Supplier>(STORES.SUPPLIERS)
   },
 
@@ -53,8 +56,14 @@ export const supplierService = {
 
 // Purchases
 export const purchaseService = {
-  getAll: async (type?: PurchaseType): Promise<Purchase[]> => {
-    let purchases = await getAll<Purchase>(STORES.PURCHASES)
+  getAll: async (type?: PurchaseType, companyId?: number): Promise<Purchase[]> => {
+    let purchases: Purchase[]
+    
+    if (companyId !== undefined) {
+      purchases = await getByIndex<Purchase>(STORES.PURCHASES, 'company_id', companyId)
+    } else {
+      purchases = await getAll<Purchase>(STORES.PURCHASES)
+    }
     
     if (type) {
       purchases = purchases.filter(p => p.type === type)
@@ -195,8 +204,8 @@ export const purchaseService = {
   },
 
   // Get purchase statistics
-  getStats: async () => {
-    const purchases = await purchaseService.getAll()
+  getStats: async (companyId?: number) => {
+    const purchases = await purchaseService.getAll(undefined, companyId)
     const gstPurchases = purchases.filter(p => p.type === 'gst') as GSTPurchase[]
     const simplePurchases = purchases.filter(p => p.type === 'simple') as SimplePurchase[]
     

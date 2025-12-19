@@ -38,6 +38,7 @@ export interface GSTPurchase {
   payment_status: PaymentStatus
   payment_method?: string
   notes?: string
+  company_id?: number
   created_by: number
   created_at: string
   updated_at?: string
@@ -55,6 +56,7 @@ export interface SimplePurchase {
   payment_status: PaymentStatus
   payment_method?: string
   notes?: string
+  company_id?: number
   created_by: number
   created_at: string
   updated_at?: string
@@ -74,6 +76,7 @@ export interface Supplier {
   state?: string
   pincode?: string
   is_registered: boolean // Has GST registration
+  company_id?: number
   created_at?: string
   updated_at?: string
 }

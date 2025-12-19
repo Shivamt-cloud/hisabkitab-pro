@@ -33,6 +33,7 @@ export interface Sale {
   payment_status: PaymentStatus
   payment_method: string
   notes?: string
+  company_id?: number
   created_by: number
   archived: boolean
   created_at: string
@@ -46,6 +47,7 @@ export interface Customer {
   phone?: string
   address?: string
   gstin?: string
+  company_id?: number
   created_at?: string
   updated_at?: string
 }

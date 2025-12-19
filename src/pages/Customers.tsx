@@ -9,7 +9,7 @@ import { Customer } from '../types/customer'
 
 const Customers = () => {
   const navigate = useNavigate()
-  const { hasPermission } = useAuth()
+  const { hasPermission, getCurrentCompanyId } = useAuth()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -21,7 +21,8 @@ const Customers = () => {
   const loadCustomers = async () => {
     setLoading(true)
     try {
-      const allCustomers = await customerService.getAll(true)
+      const companyId = getCurrentCompanyId()
+      const allCustomers = await customerService.getAll(true, companyId || undefined)
       setCustomers(allCustomers)
     } catch (error) {
       console.error('Error loading customers:', error)

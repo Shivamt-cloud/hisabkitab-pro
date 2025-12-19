@@ -9,7 +9,7 @@ import { Eye, ShoppingCart, TrendingUp, DollarSign, Archive, Home, FileSpreadshe
 type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
 
 const SalesHistory = () => {
-  const { user, hasPermission } = useAuth()
+  const { user, hasPermission, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [sales, setSales] = useState<Sale[]>([])
   const [loading, setLoading] = useState(true)
@@ -77,7 +77,8 @@ const SalesHistory = () => {
     setLoading(true)
     try {
       // Admin sees all sales including archived
-      const allSales = await saleService.getAll(true)
+      const companyId = getCurrentCompanyId()
+      const allSales = await saleService.getAll(true, companyId || undefined)
       
       // Filter by date range
       const { startDate, endDate } = getDateRange()

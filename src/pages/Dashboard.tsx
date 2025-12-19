@@ -145,12 +145,13 @@ const Dashboard = () => {
 
   const calculateReports = async () => {
     // Get actual data
+    const companyId = getCurrentCompanyId()
     const [allSales, allPurchases, allProducts, allCustomers, allSuppliers] = await Promise.all([
-      saleService.getAll(true),
-      purchaseService.getAll(),
-      productService.getAll(false),
-      customerService.getAll(),
-      supplierService.getAll()
+      saleService.getAll(true, companyId || undefined),
+      purchaseService.getAll(undefined, companyId || undefined),
+      productService.getAll(false, companyId || undefined),
+      customerService.getAll(false, companyId || undefined),
+      supplierService.getAll(companyId || undefined)
     ])
 
     // Get date range based on selected time period

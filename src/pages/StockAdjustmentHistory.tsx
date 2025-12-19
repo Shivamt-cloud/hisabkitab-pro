@@ -7,7 +7,7 @@ import { StockAdjustment, StockAdjustmentType } from '../types/stock'
 import { Plus, Eye, Package, Home, Filter, TrendingUp, TrendingDown } from 'lucide-react'
 
 const StockAdjustmentHistory = () => {
-  const { hasPermission } = useAuth()
+  const { hasPermission, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [adjustments, setAdjustments] = useState<StockAdjustment[]>([])
   const [loading, setLoading] = useState(true)
@@ -25,8 +25,9 @@ const StockAdjustmentHistory = () => {
   const loadAdjustments = async () => {
     setLoading(true)
     try {
+      const companyId = getCurrentCompanyId()
       const [allAdjustmentsResult, adjustmentStats] = await Promise.all([
-        stockAdjustmentService.getAll(),
+        stockAdjustmentService.getAll(companyId || undefined),
         stockAdjustmentService.getStats()
       ])
       

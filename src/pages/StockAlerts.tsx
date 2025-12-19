@@ -7,7 +7,7 @@ import { StockAlert } from '../types/stock'
 import { AlertTriangle, Package, Home, TrendingDown, ShoppingCart } from 'lucide-react'
 
 const StockAlerts = () => {
-  const { hasPermission } = useAuth()
+  const { hasPermission, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [lowStockAlerts, setLowStockAlerts] = useState<StockAlert[]>([])
   const [outOfStockAlerts, setOutOfStockAlerts] = useState<StockAlert[]>([])

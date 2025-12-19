@@ -21,6 +21,7 @@ export interface StockAdjustment {
   previous_stock: number
   new_stock: number
   notes?: string
+  company_id?: number
   adjusted_by: number // User ID
   adjusted_by_name?: string
   adjustment_date: string

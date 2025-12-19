@@ -23,7 +23,7 @@ interface FormData {
 const CustomerForm = () => {
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
-  const { hasPermission } = useAuth()
+  const { hasPermission, getCurrentCompanyId } = useAuth()
   const isEditing = !!id
 
   const [formData, setFormData] = useState<FormData>({
@@ -125,6 +125,7 @@ const CustomerForm = () => {
         contact_person: formData.contact_person.trim() || undefined,
         credit_limit: formData.credit_limit ? parseFloat(formData.credit_limit) : undefined,
         is_active: formData.is_active,
+        company_id: getCurrentCompanyId() || undefined,
       }
 
       if (isEditing && id) {

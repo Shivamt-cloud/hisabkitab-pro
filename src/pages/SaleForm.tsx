@@ -12,7 +12,7 @@ import { SaleItem } from '../types/sale'
 
 const SaleForm = () => {
   const navigate = useNavigate()
-  const { hasPermission, user } = useAuth()
+  const { hasPermission, user, getCurrentCompanyId } = useAuth()
   const [saleItems, setSaleItems] = useState<SaleItem[]>([])
   const [availableProducts, setAvailableProducts] = useState<Product[]>([])
   const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([])
@@ -27,8 +27,9 @@ const SaleForm = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
+        const companyId = getCurrentCompanyId()
         // Load only active products (exclude sold/archived)
-        const allProducts = await productService.getAll(false)
+        const allProducts = await productService.getAll(false, companyId || undefined)
         const products = allProducts.filter(p => p.status === 'active' && p.stock_quantity > 0)
         setAvailableProducts(products)
         
@@ -37,7 +38,7 @@ const SaleForm = () => {
         setSalesPersons(activeSalesPersons)
         
         // Load active customers
-        const activeCustomers = await customerService.getAll(false)
+        const activeCustomers = await customerService.getAll(false, companyId || undefined)
         setCustomers(activeCustomers)
         
         // Set default "Walk-in Customer" if available
@@ -176,6 +177,7 @@ const SaleForm = () => {
       payment_status: 'paid' as const,
       payment_method: paymentMethod,
       sale_date: new Date().toISOString(),
+      company_id: getCurrentCompanyId() || undefined,
       created_by: parseInt(user?.id || '1')
     }
 

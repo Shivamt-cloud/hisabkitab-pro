@@ -1,10 +1,13 @@
 import { StockAdjustment, StockAdjustmentType, StockAdjustmentReason } from '../types/stock'
 import { productService } from './productService'
-import { getAll, getById, put, deleteById, STORES } from '../database/db'
+import { getAll, getById, put, deleteById, getByIndex, STORES } from '../database/db'
 
 export const stockAdjustmentService = {
   // Get all stock adjustments
-  getAll: async (): Promise<StockAdjustment[]> => {
+  getAll: async (companyId?: number): Promise<StockAdjustment[]> => {
+    if (companyId !== undefined) {
+      return await getByIndex<StockAdjustment>(STORES.STOCK_ADJUSTMENTS, 'company_id', companyId)
+    }
     return await getAll<StockAdjustment>(STORES.STOCK_ADJUSTMENTS)
   },
 

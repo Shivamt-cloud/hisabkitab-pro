@@ -131,9 +131,15 @@ export const categoryService = {
 
 // Products
 export const productService = {
-  getAll: async (includeArchived: boolean = false): Promise<Product[]> => {
+  getAll: async (includeArchived: boolean = false, companyId?: number): Promise<Product[]> => {
     await initializeDefaultCategories()
-    let products = await getAll<Product>(STORES.PRODUCTS)
+    let products: Product[]
+    
+    if (companyId !== undefined) {
+      products = await getByIndex<Product>(STORES.PRODUCTS, 'company_id', companyId)
+    } else {
+      products = await getAll<Product>(STORES.PRODUCTS)
+    }
     
     // Filter by status if needed
     if (!includeArchived) {
