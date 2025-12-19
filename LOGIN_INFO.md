@@ -1,8 +1,8 @@
 # Login & Permission System
 
-## Demo Accounts
+## User Management
 
-The application includes 4 demo accounts with different permission levels:
+Users must be created through the User Management interface in the application. Demo accounts have been removed for security.
 
 ### 1. Admin Account (Full Access)
 - **Email:** `admin@hisabkitab.com`

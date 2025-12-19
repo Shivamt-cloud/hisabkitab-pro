@@ -30,18 +30,6 @@ const Login = () => {
     }
   }
 
-  const demoUsers = [
-    { email: 'admin@hisabkitab.com', password: 'admin123', role: 'Admin' },
-    { email: 'manager@hisabkitab.com', password: 'manager123', role: 'Manager' },
-    { email: 'staff@hisabkitab.com', password: 'staff123', role: 'Staff' },
-    { email: 'viewer@hisabkitab.com', password: 'viewer123', role: 'Viewer' },
-  ]
-
-  const fillDemoCredentials = (demoEmail: string, demoPassword: string) => {
-    setEmail(demoEmail)
-    setPassword(demoPassword)
-    setError('')
-  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-600 via-indigo-700 to-purple-800 flex items-center justify-center p-4">
@@ -125,24 +113,6 @@ const Login = () => {
               )}
             </button>
           </form>
-
-          {/* Demo Users */}
-          <div className="mt-6 pt-6 border-t border-gray-200">
-            <p className="text-sm font-medium text-gray-600 mb-3 text-center">
-              Try Demo Accounts:
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {demoUsers.map((demo, index) => (
-                <button
-                  key={index}
-                  onClick={() => fillDemoCredentials(demo.email, demo.password)}
-                  className="text-xs bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 font-medium transition-all hover:shadow-md"
-                >
-                  {demo.role}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* Footer */}
