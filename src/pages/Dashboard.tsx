@@ -26,7 +26,8 @@ import {
   Settings,
   Database,
   Users,
-  Bell
+  Bell,
+  Building2
 } from 'lucide-react'
 
 interface ReportSummary {
