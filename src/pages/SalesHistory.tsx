@@ -78,7 +78,9 @@ const SalesHistory = () => {
     try {
       // Admin sees all sales including archived
       const companyId = getCurrentCompanyId()
-      const allSales = await saleService.getAll(true, companyId || undefined)
+      // Pass companyId directly - services will handle null by returning empty array for data isolation
+      // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
+      const allSales = await saleService.getAll(true, companyId)
       
       // Filter by date range
       const { startDate, endDate } = getDateRange()

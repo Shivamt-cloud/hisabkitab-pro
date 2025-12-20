@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { customerService } from '../services/customerService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
@@ -22,9 +22,14 @@ interface FormData {
 
 const CustomerForm = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const { id } = useParams<{ id: string }>()
   const { hasPermission, getCurrentCompanyId } = useAuth()
   const isEditing = !!id
+  
+  // Check if we should return to sale page after adding customer
+  const searchParams = new URLSearchParams(location.search)
+  const returnTo = searchParams.get('returnTo')
 
   const [formData, setFormData] = useState<FormData>({
     name: '',
@@ -134,14 +139,24 @@ const CustomerForm = () => {
         await customerService.create(customerData)
       }
 
-      navigate('/customers')
+      // If we came from sale page, return there; otherwise go to customers list
+      if (returnTo === 'sale') {
+        navigate('/sales/new')
+      } else {
+        navigate('/customers')
+      }
     } catch (error: any) {
       alert(error.message || 'Error saving customer')
     }
   }
 
   const handleCancel = () => {
-    navigate('/customers')
+    // If we came from sale page, return there; otherwise go to customers list
+    if (returnTo === 'sale') {
+      navigate('/sales/new')
+    } else {
+      navigate('/customers')
+    }
   }
 
   return (

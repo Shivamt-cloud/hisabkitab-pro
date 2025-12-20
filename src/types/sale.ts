@@ -14,6 +14,11 @@ export interface SaleItem {
   sale_type: 'sale' | 'return' // Whether this item is a sale or return
   total: number // Final total after discount
   product_snapshot?: any // Store product details at time of sale
+  // Purchase item tracking for inventory management
+  purchase_id?: number // ID of the purchase this item was sold from
+  purchase_item_id?: number // ID of the specific purchase item (for tracking which purchase item was sold)
+  purchase_item_article?: string // Article from the purchase item
+  purchase_item_barcode?: string // Barcode from the purchase item
 }
 
 export interface Sale {
@@ -31,7 +36,8 @@ export interface Sale {
   grand_total: number
   total_commission?: number // Total commission for this sale
   payment_status: PaymentStatus
-  payment_method: string
+  payment_method: string // Legacy: single payment method (for backward compatibility)
+  payment_methods?: Array<{ method: string; amount: number }> // New: multiple payment methods
   notes?: string
   company_id?: number
   created_by: number

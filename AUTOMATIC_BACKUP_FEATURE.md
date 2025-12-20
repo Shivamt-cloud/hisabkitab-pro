@@ -168,3 +168,4 @@ if (result.success) {
 **Users are now protected from data loss when switching browsers!** 🎉
 
 
+

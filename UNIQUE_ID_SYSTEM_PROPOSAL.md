@@ -244,3 +244,4 @@ const companyCode = await getCompanyCode(companyId)
 const sku = customSku ? `${companyCode}-${customSku}` : `${companyCode}-PROD-${sequentialNumber}`
 ```
 
+

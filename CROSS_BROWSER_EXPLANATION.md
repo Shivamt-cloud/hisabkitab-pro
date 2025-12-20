@@ -166,3 +166,4 @@ This is a **browser security feature**, not a limitation:
 **This is normal behavior for all web apps using IndexedDB.**
 
 
+

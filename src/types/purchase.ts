@@ -9,6 +9,8 @@ export interface PurchaseItem {
   barcode?: string // Barcode for this purchase item (generated during purchase entry)
   hsn_code?: string
   quantity: number
+  sold_quantity?: number // Quantity sold from this purchase item (for inventory tracking)
+  available_quantity?: number // Available quantity (quantity - sold_quantity), calculated dynamically
   unit_price: number // Purchase price per unit
   mrp?: number // Maximum Retail Price
   sale_price?: number // Selling price

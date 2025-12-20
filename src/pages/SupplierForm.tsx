@@ -7,7 +7,7 @@ import { Supplier } from '../types/purchase'
 import { ArrowLeft, Save, Building2 } from 'lucide-react'
 
 const SupplierForm = () => {
-  const { hasPermission } = useAuth()
+  const { hasPermission, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
   const isEditing = !!id
@@ -91,7 +91,7 @@ const SupplierForm = () => {
     return Object.keys(newErrors).length === 0
   }
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
 
     if (!validate()) {
@@ -110,6 +110,7 @@ const SupplierForm = () => {
         state: formData.state.trim() || undefined,
         pincode: formData.pincode.trim() || undefined,
         is_registered: !!formData.gstin.trim(),
+        company_id: getCurrentCompanyId() || undefined,
       }
 
       if (isEditing) {
@@ -117,14 +118,14 @@ const SupplierForm = () => {
           alert('You do not have permission to update suppliers')
           return
         }
-        supplierService.update(parseInt(id!), supplierData)
+        await supplierService.update(parseInt(id!), supplierData)
         alert('Supplier updated successfully!')
       } else {
         if (!hasPermission('purchases:create')) {
           alert('You do not have permission to create suppliers')
           return
         }
-        supplierService.create(supplierData)
+        await supplierService.create(supplierData)
         alert('Supplier created successfully!')
       }
 

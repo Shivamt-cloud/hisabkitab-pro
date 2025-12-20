@@ -3,7 +3,8 @@ export type UserRole = 'admin' | 'manager' | 'staff' | 'viewer'
 export interface User {
   id: string
   name: string
-  email: string
+  email: string // For login (e.g., cs01@hisabkitab.com)
+  user_code?: string // For identification (e.g., cs01@COMP002)
   role: UserRole
   avatar?: string
   company_id?: number // Company this user belongs to (undefined for admin means all companies)

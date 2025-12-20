@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { customerService } from '../services/customerService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
@@ -9,6 +9,7 @@ import { Customer } from '../types/customer'
 
 const Customers = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const { hasPermission, getCurrentCompanyId } = useAuth()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -16,13 +17,13 @@ const Customers = () => {
 
   useEffect(() => {
     loadCustomers()
-  }, [])
+  }, [location.pathname])
 
   const loadCustomers = async () => {
     setLoading(true)
     try {
       const companyId = getCurrentCompanyId()
-      const allCustomers = await customerService.getAll(true, companyId || undefined)
+      const allCustomers = await customerService.getAll(true, companyId)
       setCustomers(allCustomers)
     } catch (error) {
       console.error('Error loading customers:', error)

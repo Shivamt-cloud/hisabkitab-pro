@@ -151,3 +151,4 @@ export async function generateSupplierCode(
   return `${prefix}${String(nextNumber).padStart(4, '0')}`
 }
 
+

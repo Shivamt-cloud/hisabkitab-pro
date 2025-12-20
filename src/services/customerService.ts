@@ -19,13 +19,21 @@ async function initializeData(): Promise<void> {
 }
 
 export const customerService = {
-  getAll: async (includeInactive: boolean = false, companyId?: number): Promise<Customer[]> => {
+  getAll: async (includeInactive: boolean = false, companyId?: number | null): Promise<Customer[]> => {
     await initializeData()
     let customers: Customer[]
     
-    if (companyId !== undefined) {
+    // If companyId is provided, filter STRICTLY by company_id (no backward compatibility - data isolation is critical)
+    // Also explicitly exclude records with null/undefined company_id to prevent data leakage
+    if (companyId !== undefined && companyId !== null) {
       customers = await getByIndex<Customer>(STORES.CUSTOMERS, 'company_id', companyId)
+      // Additional filter to ensure we only get records with matching company_id
+      customers = customers.filter(c => c.company_id === companyId)
+    } else if (companyId === null) {
+      // If companyId is explicitly null (user has no company), return empty array for data isolation
+      customers = []
     } else {
+      // If companyId is undefined, return all (for admin users who haven't selected a company)
       customers = await getAll<Customer>(STORES.CUSTOMERS)
     }
     
@@ -42,7 +50,8 @@ export const customerService = {
   },
 
   create: async (customer: Omit<Customer, 'id' | 'created_at' | 'updated_at'>): Promise<Customer> => {
-    const customers = await customerService.getAll(true)
+    // Check for duplicates only within the same company
+    const customers = await customerService.getAll(true, customer.company_id)
     
     // Check for duplicate email if provided
     if (customer.email && customer.email.trim()) {
@@ -76,18 +85,20 @@ export const customerService = {
     const existing = await getById<Customer>(STORES.CUSTOMERS, id)
     if (!existing) return null
 
-    // Check for duplicate email if provided and different from current
+    // Check for duplicate email if provided and different from current (within same company)
     if (customer.email && customer.email.trim()) {
-      const customers = await customerService.getAll(true)
+      const companyId = customer.company_id !== undefined ? customer.company_id : existing.company_id
+      const customers = await customerService.getAll(true, companyId)
       const duplicate = customers.find(c => c.email && c.email.toLowerCase() === customer.email!.toLowerCase() && c.id !== id)
       if (duplicate) {
         throw new Error('Customer with this email already exists')
       }
     }
     
-    // Check for duplicate phone if provided and different from current
+    // Check for duplicate phone if provided and different from current (within same company)
     if (customer.phone && customer.phone.trim()) {
-      const customers = await customerService.getAll(true)
+      const companyId = customer.company_id !== undefined ? customer.company_id : existing.company_id
+      const customers = await customerService.getAll(true, companyId)
       const duplicate = customers.find(c => c.phone === customer.phone && c.id !== id)
       if (duplicate) {
         throw new Error('Customer with this phone number already exists')

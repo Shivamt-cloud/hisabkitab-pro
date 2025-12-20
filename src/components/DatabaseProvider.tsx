@@ -61,15 +61,16 @@ export function DatabaseProvider({ children }: DatabaseProviderProps) {
                }
 
                // Start automatic backup service after database is initialized
+               // DISABLED: Auto backup functionality temporarily disabled
                // Get user ID from localStorage if available
-               try {
-                 const savedUser = localStorage.getItem('hisabkitab_user')
-                 const user = savedUser ? JSON.parse(savedUser) : null
-                 await autoBackupService.start(user?.id)
-               } catch (backupError) {
-                 console.warn('Could not start automatic backup service:', backupError)
-                 // Continue even if backup service fails to start
-               }
+               // try {
+               //   const savedUser = localStorage.getItem('hisabkitab_user')
+               //   const user = savedUser ? JSON.parse(savedUser) : null
+               //   await autoBackupService.start(user?.id)
+               // } catch (backupError) {
+               //   console.warn('Could not start automatic backup service:', backupError)
+               //   // Continue even if backup service fails to start
+               // }
       } catch (err: any) {
         if (timeoutId) clearTimeout(timeoutId)
         console.error('Database initialization error:', err)

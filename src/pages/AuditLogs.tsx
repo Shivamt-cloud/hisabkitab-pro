@@ -7,7 +7,7 @@ import { AuditLog, AuditModule, AuditAction, AuditLogFilter } from '../types/aud
 import { Home, Search, Filter, Download, Calendar, User, FileText, Activity } from 'lucide-react'
 
 const AuditLogs = () => {
-  const { hasPermission } = useAuth()
+  const { hasPermission, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(true)
@@ -22,12 +22,15 @@ const AuditLogs = () => {
   const loadLogs = async () => {
     setLoading(true)
     try {
+      const companyId = getCurrentCompanyId()
+      // Pass companyId directly - services will handle null by returning empty array for data isolation
+      // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
       const [filteredLogs, statistics] = await Promise.all([
         auditService.getFiltered({
           ...filter,
           searchQuery: searchQuery || undefined,
-        }),
-        auditService.getStatistics()
+        }, companyId),
+        auditService.getStatistics(companyId)
       ])
       setLogs(filteredLogs)
       setStats(statistics)
@@ -43,7 +46,9 @@ const AuditLogs = () => {
   }, [searchQuery])
 
   const handleExport = async () => {
-    const data = await auditService.export(filter)
+    const companyId = getCurrentCompanyId()
+    // Pass companyId to export only company's audit logs
+    const data = await auditService.export(filter, companyId)
     const blob = new Blob([data], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')

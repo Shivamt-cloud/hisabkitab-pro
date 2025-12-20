@@ -159,7 +159,11 @@ const InvoiceView = () => {
         </div>
 
         {/* Invoice Component */}
-        <Invoice invoiceData={invoiceData} showActions={true} />
+        <Invoice 
+          invoiceData={invoiceData} 
+          showActions={true}
+          onNewSale={() => navigate('/sales/new')}
+        />
       </div>
     </ProtectedRoute>
   )

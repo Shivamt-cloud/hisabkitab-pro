@@ -16,7 +16,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 
 const Products = () => {
-  const { hasPermission } = useAuth()
+  const { hasPermission, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -33,8 +33,11 @@ const Products = () => {
     try {
       // Only load active products (sold/archived are hidden from non-admins)
       const includeArchived = hasPermission('products:delete') // Admin can see all
+      const companyId = getCurrentCompanyId()
+      // Pass companyId directly - services will handle null by returning empty array for data isolation
+      // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
       const [allProducts, allCategories] = await Promise.all([
-        productService.getAll(includeArchived),
+        productService.getAll(includeArchived, companyId),
         categoryService.getAll()
       ])
       setProducts(allProducts)

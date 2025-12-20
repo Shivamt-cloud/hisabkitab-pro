@@ -32,7 +32,7 @@ const StockAdjustmentForm = () => {
   const loadProducts = async () => {
     try {
       const companyId = getCurrentCompanyId()
-      const allProducts = await productService.getAll(false, companyId || undefined) // Only active products
+      const allProducts = await productService.getAll(false, companyId) // Only active products
       setProducts(allProducts)
     } catch (error) {
       console.error('Error loading products:', error)

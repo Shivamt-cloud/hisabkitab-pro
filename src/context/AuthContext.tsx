@@ -66,7 +66,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         'login',
         'User',
         foundUser.id,
-        `User ${foundUser.name} logged in`
+        `User ${foundUser.name} logged in`,
+        {
+          company_id: foundUser.company_id || (foundUser.role !== 'admin' ? foundUser.company_id : undefined)
+        }
       )
       
       setIsLoading(false)
@@ -80,6 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     if (user) {
       // Log logout (fire and forget)
+      const companyId = user.company_id || (user.role !== 'admin' ? user.company_id : currentCompanyId || undefined)
       auditService.log(
         user.id,
         user.name,
@@ -88,7 +92,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         'logout',
         'User',
         user.id,
-        `User ${user.name} logged out`
+        `User ${user.name} logged out`,
+        {
+          company_id: companyId
+        }
       ).catch(err => console.error('Error logging logout:', err))
     }
     setUser(null)

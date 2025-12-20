@@ -32,7 +32,7 @@ const BACKUP_VERSION = '1.0.0'
 
 export const backupService = {
   // Export all data
-  exportAll: async (userId?: string): Promise<BackupData> => {
+  exportAll: async (userId?: string, companyId?: number | null): Promise<BackupData> => {
     const [
       products,
       categories,
@@ -46,17 +46,17 @@ export const backupService = {
       stockAdjustments,
       settings,
     ] = await Promise.all([
-      productService.getAll(true), // Include archived products
+      productService.getAll(true, companyId), // Include archived products, filter by company
       categoryService.getAll(),
-      saleService.getAll(true), // Include archived sales
-      purchaseService.getAll(),
-      supplierService.getAll(),
-      customerService.getAll(true),
-      salesPersonService.getAll(true),
-      categoryCommissionService.getAll(true),
-      salesPersonCategoryAssignmentService.getAll(true),
-      stockAdjustmentService.getAll(),
-      settingsService.getAll(),
+      saleService.getAll(true, companyId), // Include archived sales, filter by company
+      purchaseService.getAll(undefined, companyId), // Filter by company
+      supplierService.getAll(companyId), // Filter by company
+      customerService.getAll(true, companyId), // Filter by company
+      salesPersonService.getAll(true), // Sales persons might be shared, but we can filter if needed
+      categoryCommissionService.getAll(true), // Commissions might be shared, but we can filter if needed
+      salesPersonCategoryAssignmentService.getAll(true), // Assignments might be shared
+      stockAdjustmentService.getAll(companyId), // Filter by company
+      settingsService.getAll(), // Settings might be shared
     ])
 
     const backup: BackupData = {
@@ -83,8 +83,8 @@ export const backupService = {
   },
 
   // Export to JSON file
-  exportToFile: async (userId?: string): Promise<void> => {
-    const backup = await backupService.exportAll(userId)
+  exportToFile: async (userId?: string, companyId?: number | null): Promise<void> => {
+    const backup = await backupService.exportAll(userId, companyId)
     const jsonString = JSON.stringify(backup, null, 2)
     const blob = new Blob([jsonString], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -96,8 +96,8 @@ export const backupService = {
   },
 
   // Export to CSV (summary data)
-  exportSummaryToCSV: async (): Promise<void> => {
-    const backup = await backupService.exportAll()
+  exportSummaryToCSV: async (companyId?: number | null): Promise<void> => {
+    const backup = await backupService.exportAll(undefined, companyId)
     const summary = [
       ['Data Type', 'Count'],
       ['Products', backup.data.products.length],
@@ -316,7 +316,7 @@ export const backupService = {
   },
 
   // Get backup statistics
-  getStatistics: async () => {
+  getStatistics: async (companyId?: number | null) => {
     const [
       products,
       categories,
@@ -330,17 +330,17 @@ export const backupService = {
       salesPersonCategoryAssignments,
       stockAdjustments,
     ] = await Promise.all([
-      productService.getAll(true),
+      productService.getAll(true, companyId), // Filter by company
       categoryService.getAll(),
-      saleService.getAll(true),
-      purchaseService.getAll(),
-      supplierService.getAll(),
-      customerService.getAll(true),
-      salesPersonService.getAll(true),
-      categoryCommissionService.getAll(true),
+      saleService.getAll(true, companyId), // Filter by company
+      purchaseService.getAll(undefined, companyId), // Filter by company
+      supplierService.getAll(companyId), // Filter by company
+      customerService.getAll(true, companyId), // Filter by company
+      salesPersonService.getAll(true), // Sales persons might be shared
+      categoryCommissionService.getAll(true), // Commissions might be shared
       categoryService.getAll(),
-      salesPersonCategoryAssignmentService.getAll(true),
-      stockAdjustmentService.getAll(),
+      salesPersonCategoryAssignmentService.getAll(true), // Assignments might be shared
+      stockAdjustmentService.getAll(companyId), // Filter by company
     ])
 
     return {

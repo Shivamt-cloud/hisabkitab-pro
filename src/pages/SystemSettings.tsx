@@ -54,6 +54,7 @@ const SystemSettings = () => {
   const [userFormData, setUserFormData] = useState<UserFormData>({
     name: '',
     email: '',
+    user_code: '',
     password: '',
     confirmPassword: '',
     role: 'staff',
@@ -61,6 +62,8 @@ const SystemSettings = () => {
   })
   const [useCustomPermissions, setUseCustomPermissions] = useState(false)
   const [customPermissions, setCustomPermissions] = useState<ModulePermission[]>([])
+  const [autoGenerateEmail, setAutoGenerateEmail] = useState(true)
+  const [autoGenerateUserCode, setAutoGenerateUserCode] = useState(true)
 
   // Settings for currently selected company
   const [selectedCompanyForSettings, setSelectedCompanyForSettings] = useState<number | null>(selectedCompanyId)
@@ -103,6 +106,35 @@ const SystemSettings = () => {
       loadCompanySettings(selectedCompanyForSettings)
     }
   }, [])
+
+  // Auto-generate email (username@hisabkitab.com) when name is provided
+  useEffect(() => {
+    if (autoGenerateEmail && !editingUser && userFormData.name?.trim()) {
+      const usernamePart = userFormData.name.trim().toLowerCase().replace(/\s/g, '')
+      setUserFormData(prev => ({ ...prev, email: `${usernamePart}@hisabkitab.com` }))
+    } else if (!autoGenerateEmail && !editingUser) {
+      // Don't clear email if user manually edited it
+      if (userFormData.email && !userFormData.email.includes('@')) {
+        setUserFormData(prev => ({ ...prev, email: '' }))
+      }
+    }
+  }, [autoGenerateEmail, userFormData.name, editingUser])
+
+  // Auto-generate user_code (username@companycode) when name and company are provided
+  useEffect(() => {
+    if (autoGenerateUserCode && !editingUser && userFormData.name?.trim() && userFormData.company_id) {
+      const usernamePart = userFormData.name.trim().toLowerCase().replace(/\s/g, '')
+      const company = companies.find(c => c.id === userFormData.company_id)
+      if (company && company.unique_code) {
+        setUserFormData(prev => ({ ...prev, user_code: `${usernamePart}@${company.unique_code}` }))
+      }
+    } else if (!autoGenerateUserCode && !editingUser) {
+      // Don't clear user_code if user manually edited it
+      if (userFormData.user_code && !userFormData.user_code.includes('@')) {
+        setUserFormData(prev => ({ ...prev, user_code: '' }))
+      }
+    }
+  }, [autoGenerateUserCode, userFormData.name, userFormData.company_id, companies, editingUser])
 
   useEffect(() => {
     // Reload settings when company changes
@@ -242,12 +274,24 @@ const SystemSettings = () => {
       alert('Password is required for new users')
       return
     }
-    if (userFormData.password && userFormData.password.length < 6) {
+    // Trim passwords to avoid whitespace issues
+    const trimmedPassword = userFormData.password.trim()
+    const trimmedConfirmPassword = (userFormData.confirmPassword || '').trim()
+    
+    if (trimmedPassword && trimmedPassword.length < 6) {
       alert('Password must be at least 6 characters long')
       return
     }
-    if (userFormData.password && userFormData.password !== userFormData.confirmPassword) {
+    
+    // Only validate password match if password is provided
+    if (trimmedPassword && trimmedPassword !== trimmedConfirmPassword) {
       alert('Passwords do not match')
+      return
+    }
+    
+    // If password is provided, confirm password must also be provided
+    if (trimmedPassword && !trimmedConfirmPassword) {
+      alert('Please confirm your password')
       return
     }
     
@@ -260,24 +304,39 @@ const SystemSettings = () => {
         const updateData: any = {
           name: userFormData.name,
           email: userFormData.email,
+          user_code: userFormData.user_code,
           role: userFormData.role,
           company_id: userFormData.company_id,
         }
-        if (userFormData.password) {
-          updateData.password = userFormData.password
+        if (trimmedPassword) {
+          updateData.password = trimmedPassword
         }
         await userService.update(editingUser.id, updateData)
         userId = editingUser.id
         alert('User updated successfully!')
       } else {
         // Create new user
-        const newUser = await userService.create({
+        const userData: any = {
           name: userFormData.name!,
           email: userFormData.email!,
-          password: userFormData.password!,
+          user_code: userFormData.user_code || undefined,
+          password: trimmedPassword,
           role: userFormData.role || 'staff',
-          company_id: userFormData.company_id,
-        } as Omit<UserWithPassword, 'id'>)
+        }
+        
+        // Auto-assign company_id if company is selected (unless user is admin)
+        if (userFormData.company_id && userFormData.role !== 'admin') {
+          userData.company_id = userFormData.company_id
+        } else if (userFormData.role !== 'admin' && !userFormData.company_id) {
+          alert('Please select a company for non-admin users.')
+          setLoading(false)
+          return
+        } else if (userFormData.role === 'admin') {
+          // Admin can have no company_id (access to all companies)
+          userData.company_id = userFormData.company_id
+        }
+        
+        const newUser = await userService.create(userData as Omit<UserWithPassword, 'id'>)
         userId = newUser.id
         alert('User created successfully!')
       }
@@ -299,11 +358,14 @@ const SystemSettings = () => {
       setUserFormData({
         name: '',
         email: '',
+        user_code: '',
         password: '',
         confirmPassword: '',
         role: 'staff',
         company_id: selectedCompanyId || undefined,
       })
+      setAutoGenerateEmail(true)
+      setAutoGenerateUserCode(true)
       setUseCustomPermissions(false)
       setCustomPermissions([])
       loadUsers()
@@ -319,11 +381,14 @@ const SystemSettings = () => {
     setUserFormData({
       name: userData.name,
       email: userData.email,
+      user_code: userData.user_code || '',
       role: userData.role,
       company_id: userData.company_id,
       password: '', // Don't show password
       confirmPassword: '',
     })
+    setAutoGenerateEmail(false) // Disable auto-generation when editing
+    setAutoGenerateUserCode(false) // Disable auto-generation when editing
     
     // Load custom permissions if they exist
     try {
@@ -474,8 +539,7 @@ const SystemSettings = () => {
   }
 
   return (
-    <ProtectedRoute requiredPermission="settings:update">
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
         <header className="bg-white/80 backdrop-blur-lg shadow-lg border-b border-gray-200/50 sticky top-0 z-10">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <div className="flex items-center justify-between">
@@ -614,7 +678,9 @@ const SystemSettings = () => {
                   >
                     <option value="">All Companies (Admin View)</option>
                     {companies.filter(c => c.is_active).map(comp => (
-                      <option key={comp.id} value={comp.id}>{comp.name}</option>
+                      <option key={comp.id} value={comp.id}>
+                        {comp.name} {comp.unique_code ? `(${comp.unique_code})` : ''}
+                      </option>
                     ))}
                   </select>
                   <p className="text-xs text-gray-600 mt-2">
@@ -687,6 +753,42 @@ const SystemSettings = () => {
                             required
                           />
                         </div>
+                        {!editingCompany && (
+                          <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                              Company Code (Optional)
+                              <span className="text-xs text-gray-500 ml-2">Leave empty for auto-generation</span>
+                            </label>
+                            <input
+                              type="text"
+                              value={companyFormData.custom_unique_code || ''}
+                              onChange={(e) => setCompanyFormData({ 
+                                ...companyFormData, 
+                                custom_unique_code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') 
+                              })}
+                              placeholder="e.g., ABC, SHOP1 (3-6 characters)"
+                              maxLength={6}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                            />
+                            <p className="mt-1 text-xs text-gray-500">
+                              3-6 alphanumeric characters. Auto-generated if left empty.
+                            </p>
+                          </div>
+                        )}
+                        {editingCompany && (
+                          <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                              Company Code
+                            </label>
+                            <input
+                              type="text"
+                              value={editingCompany.unique_code || ''}
+                              disabled
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed"
+                            />
+                            <p className="mt-1 text-xs text-gray-500">Company code cannot be changed after creation</p>
+                          </div>
+                        )}
                         <div>
                           <label className="block text-sm font-semibold text-gray-700 mb-2">Email</label>
                           <input
@@ -797,7 +899,12 @@ const SystemSettings = () => {
                         } ${!comp.is_active ? 'opacity-60' : ''}`}
                       >
                         <div className="flex items-start justify-between mb-2">
-                          <h4 className="text-lg font-bold text-gray-900">{comp.name}</h4>
+                          <div>
+                            <h4 className="text-lg font-bold text-gray-900">{comp.name}</h4>
+                            {comp.unique_code && (
+                              <p className="text-xs text-blue-600 font-semibold mt-1">Code: {comp.unique_code}</p>
+                            )}
+                          </div>
                           {!comp.is_active && (
                             <span className="text-xs text-red-600 font-semibold">Inactive</span>
                           )}
@@ -886,11 +993,14 @@ const SystemSettings = () => {
                         setUserFormData({
                           name: '',
                           email: '',
+                          user_code: '',
                           password: '',
                           confirmPassword: '',
                           role: 'staff',
                           company_id: selectedCompanyId || undefined,
                         })
+                        setAutoGenerateEmail(true)
+                        setAutoGenerateUserCode(true)
                         setUseCustomPermissions(false)
                         setCustomPermissions([])
                         setShowUserForm(true)
@@ -913,6 +1023,17 @@ const SystemSettings = () => {
                           onClick={() => {
                             setShowUserForm(false)
                             setEditingUser(null)
+                            setUserFormData({
+                              name: '',
+                              email: '',
+                              user_code: '',
+                              password: '',
+                              confirmPassword: '',
+                              role: 'staff',
+                              company_id: selectedCompanyId || undefined,
+                            })
+                            setAutoGenerateEmail(true)
+                            setAutoGenerateUserCode(true)
                             setUseCustomPermissions(false)
                             setCustomPermissions([])
                           }}
@@ -935,18 +1056,102 @@ const SystemSettings = () => {
                             required
                           />
                         </div>
+                        {/* User Code - Show as read-only info when editing */}
+                        {editingUser && userFormData.user_code && (
+                          <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                              User Code
+                            </label>
+                            <div className="px-4 py-3 bg-gray-50 border border-gray-300 rounded-lg text-gray-700 font-mono">
+                              {userFormData.user_code}
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">
+                              User code format: username@companycode (e.g., cs01@COMP002)
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Email - For login */}
                         <div>
                           <label className="block text-sm font-semibold text-gray-700 mb-2">
-                            Email <span className="text-red-500">*</span>
+                            Email (for login) <span className="text-red-500">*</span>
+                            {!editingUser && (
+                              <span className="text-xs text-gray-500 ml-2">(Auto-generated: username@hisabkitab.com)</span>
+                            )}
                           </label>
-                          <input
-                            type="email"
-                            value={userFormData.email || ''}
-                            onChange={(e) => setUserFormData({ ...userFormData, email: e.target.value })}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                            required
-                          />
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="email"
+                              value={userFormData.email || ''}
+                              onChange={(e) => {
+                                setUserFormData({ ...userFormData, email: e.target.value })
+                                setAutoGenerateEmail(false) // Disable auto-generation if user manually edits
+                              }}
+                              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                              placeholder={!editingUser ? "Auto-generated: username@hisabkitab.com" : "user@hisabkitab.com"}
+                              required
+                              disabled={autoGenerateEmail && !editingUser}
+                            />
+                            {!editingUser && (
+                              <button
+                                type="button"
+                                onClick={() => setAutoGenerateEmail(!autoGenerateEmail)}
+                                className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                                title={autoGenerateEmail ? "Disable auto-generation" : "Enable auto-generation"}
+                              >
+                                {autoGenerateEmail ? <Lock className="w-4 h-4 text-gray-600" /> : <Unlock className="w-4 h-4 text-gray-600" />}
+                              </button>
+                            )}
+                          </div>
+                          {!editingUser && autoGenerateEmail && userFormData.name?.trim() && (
+                            <p className="text-xs text-green-600 mt-1">
+                              ✓ Email will be auto-generated as: {userFormData.name.trim().toLowerCase().replace(/\s/g, '')}@hisabkitab.com
+                            </p>
+                          )}
                         </div>
+
+                        {/* User Code - For identification (only when company is selected) */}
+                        {!editingUser && (
+                          <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                              User Code <span className="text-red-500">*</span>
+                              <span className="text-xs text-gray-500 ml-2">(Auto-generated: username@companycode)</span>
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={userFormData.user_code || ''}
+                                onChange={(e) => {
+                                  setUserFormData({ ...userFormData, user_code: e.target.value })
+                                  setAutoGenerateUserCode(false) // Disable auto-generation if user manually edits
+                                }}
+                                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none font-mono"
+                                placeholder="Auto-generated: username@COMP002"
+                                required
+                                disabled={autoGenerateUserCode || !userFormData.company_id}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setAutoGenerateUserCode(!autoGenerateUserCode)}
+                                className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                                title={autoGenerateUserCode ? "Disable auto-generation" : "Enable auto-generation"}
+                                disabled={!userFormData.company_id}
+                              >
+                                {autoGenerateUserCode ? <Lock className="w-4 h-4 text-gray-600" /> : <Unlock className="w-4 h-4 text-gray-600" />}
+                              </button>
+                            </div>
+                            {autoGenerateUserCode && userFormData.company_id && userFormData.name?.trim() && (
+                              <p className="text-xs text-green-600 mt-1">
+                                ✓ User code will be auto-generated as: {userFormData.name.trim().toLowerCase().replace(/\s/g, '')}@{companies.find(c => c.id === userFormData.company_id)?.unique_code}
+                              </p>
+                            )}
+                            {!userFormData.company_id && (
+                              <p className="text-xs text-gray-500 mt-1">
+                                Select a company to generate user code
+                              </p>
+                            )}
+                          </div>
+                        )}
                         <div>
                           <label className="block text-sm font-semibold text-gray-700 mb-2">
                             {editingUser ? 'New Password (leave blank to keep current)' : 'Password'} 
@@ -958,7 +1163,36 @@ const SystemSettings = () => {
                             onChange={(e) => setUserFormData({ ...userFormData, password: e.target.value })}
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                             required={!editingUser}
+                            placeholder={editingUser ? "Enter new password or leave blank" : "Minimum 6 characters"}
                           />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">
+                            Confirm Password {(userFormData.password || editingUser) && <span className="text-red-500">*</span>}
+                            {editingUser && !userFormData.password && (
+                              <span className="text-gray-500 text-xs ml-2">(Required if changing password)</span>
+                            )}
+                          </label>
+                          <input
+                            type="password"
+                            value={userFormData.confirmPassword || ''}
+                            onChange={(e) => setUserFormData({ ...userFormData, confirmPassword: e.target.value })}
+                            className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none ${
+                              userFormData.password && userFormData.confirmPassword && 
+                              userFormData.password.trim() !== (userFormData.confirmPassword || '').trim()
+                                ? 'border-red-300'
+                                : 'border-gray-300'
+                            }`}
+                            placeholder={editingUser ? "Re-enter password to confirm (leave blank if not changing)" : "Re-enter password to confirm"}
+                            required={!!(userFormData.password && userFormData.password.trim())}
+                          />
+                          {userFormData.password && userFormData.confirmPassword && 
+                           userFormData.password.trim() !== (userFormData.confirmPassword || '').trim() && (
+                            <p className="text-sm text-red-600 mt-1">Passwords do not match</p>
+                          )}
+                          {editingUser && !userFormData.password && (
+                            <p className="text-xs text-gray-500 mt-1">Leave both password fields blank to keep the current password</p>
+                          )}
                         </div>
                         <div>
                           <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -977,20 +1211,26 @@ const SystemSettings = () => {
                         </div>
                         <div className="md:col-span-2">
                           <label className="block text-sm font-semibold text-gray-700 mb-2">
-                            Company
+                            Company {userFormData.role !== 'admin' && <span className="text-red-500">*</span>}
                           </label>
                           <select
                             value={userFormData.company_id || ''}
-                            onChange={(e) => setUserFormData({ ...userFormData, company_id: e.target.value ? parseInt(e.target.value) : undefined })}
+                            onChange={(e) => {
+                              const companyId = e.target.value ? parseInt(e.target.value) : undefined
+                              setUserFormData({ ...userFormData, company_id: companyId })
+                            }}
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                            required={userFormData.role !== 'admin'}
                           >
-                            <option value="">No Company (Admin only)</option>
+                            <option value="">{userFormData.role === 'admin' ? 'No Company (Admin only)' : 'Select Company'}</option>
                             {companies.filter(c => c.is_active).map(comp => (
-                              <option key={comp.id} value={comp.id}>{comp.name}</option>
+                              <option key={comp.id} value={comp.id}>{comp.name} ({comp.unique_code})</option>
                             ))}
                           </select>
                           <p className="text-xs text-gray-500 mt-1">
-                            Assign user to a company. Leave empty for admin access to all companies.
+                            {userFormData.role === 'admin' 
+                              ? 'Assign user to a company. Leave empty for admin access to all companies.'
+                              : 'Select a company for this user. Email will be auto-generated based on username and company code.'}
                           </p>
                         </div>
                       </div>
@@ -1144,6 +1384,17 @@ const SystemSettings = () => {
                           onClick={() => {
                             setShowUserForm(false)
                             setEditingUser(null)
+                            setUserFormData({
+                              name: '',
+                              email: '',
+                              user_code: '',
+                              password: '',
+                              confirmPassword: '',
+                              role: 'staff',
+                              company_id: selectedCompanyId || undefined,
+                            })
+                            setAutoGenerateEmail(true)
+                            setAutoGenerateUserCode(true)
                             setUseCustomPermissions(false)
                             setCustomPermissions([])
                           }}
@@ -1168,7 +1419,8 @@ const SystemSettings = () => {
                       <thead className="bg-gray-50">
                         <tr>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Name</th>
-                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Email</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Email (Login)</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">User Code</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Role</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Company</th>
                           <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
@@ -1178,7 +1430,14 @@ const SystemSettings = () => {
                         {allUsers.map((usr) => (
                           <tr key={usr.id} className="hover:bg-gray-50">
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{usr.name}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{usr.email}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <p className="text-sm text-gray-900 font-medium">{usr.email}</p>
+                              <p className="text-xs text-gray-500 mt-0.5">For login</p>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <p className="text-sm text-gray-900 font-medium font-mono">{usr.user_code || '-'}</p>
+                              <p className="text-xs text-gray-500 mt-0.5">User Code</p>
+                            </td>
                             <td className="px-6 py-4 whitespace-nowrap">
                               <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
                                 usr.role === 'admin' ? 'bg-purple-100 text-purple-800' :
@@ -1189,10 +1448,19 @@ const SystemSettings = () => {
                                 {usr.role}
                               </span>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                              {usr.company_id 
-                                ? companies.find(c => c.id === usr.company_id)?.name || `Company ID: ${usr.company_id}`
-                                : 'All Companies (Admin)'}
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              {usr.company_id ? (
+                                <div>
+                                  <p className="text-sm text-gray-900 font-medium">
+                                    {companies.find(c => c.id === usr.company_id)?.name || `Company ID: ${usr.company_id}`}
+                                  </p>
+                                  <p className="text-xs text-gray-500 mt-0.5">
+                                    {companies.find(c => c.id === usr.company_id)?.unique_code || ''}
+                                  </p>
+                                </div>
+                              ) : (
+                                <span className="text-sm text-gray-400 italic">All Companies (Admin)</span>
+                              )}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                               <div className="flex items-center justify-end gap-2">
@@ -1721,7 +1989,6 @@ const SystemSettings = () => {
           </div>
         </main>
       </div>
-    </ProtectedRoute>
   )
 }
 

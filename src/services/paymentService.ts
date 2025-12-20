@@ -5,10 +5,10 @@ import { getAll, getById, put, STORES } from '../database/db'
 
 export const paymentService = {
   // Initialize payment records from sales and purchases
-  initializeFromSalesAndPurchases: async (): Promise<void> => {
+  initializeFromSalesAndPurchases: async (companyId?: number | null): Promise<void> => {
     const [sales, purchases] = await Promise.all([
-      saleService.getAll(true),
-      purchaseService.getAll()
+      saleService.getAll(true, companyId),
+      purchaseService.getAll(undefined, companyId)
     ])
 
     const existingRecords = await getAll<PaymentRecord>(STORES.PAYMENT_RECORDS)
@@ -74,9 +74,33 @@ export const paymentService = {
   },
 
   // Get all payment records
-  getAll: async (type?: PaymentType): Promise<PaymentRecord[]> => {
-    await paymentService.initializeFromSalesAndPurchases()
+  getAll: async (type?: PaymentType, companyId?: number | null): Promise<PaymentRecord[]> => {
+    await paymentService.initializeFromSalesAndPurchases(companyId)
     let records = await getAll<PaymentRecord>(STORES.PAYMENT_RECORDS)
+    
+    // Filter by company_id if provided
+    if (companyId !== undefined && companyId !== null) {
+      // Filter records based on their source (sale or purchase) company_id
+      // We need to check the source record's company_id
+      const filteredRecords: PaymentRecord[] = []
+      for (const record of records) {
+        if (record.type === 'sale') {
+          const sale = await saleService.getById(record.reference_id)
+          if (sale && sale.company_id === companyId) {
+            filteredRecords.push(record)
+          }
+        } else if (record.type === 'purchase') {
+          const purchase = await purchaseService.getById(record.reference_id)
+          if (purchase && purchase.company_id === companyId) {
+            filteredRecords.push(record)
+          }
+        }
+      }
+      records = filteredRecords
+    } else if (companyId === null) {
+      records = []
+    }
+    
     if (type) {
       records = records.filter(p => p.type === type)
     }
@@ -84,10 +108,32 @@ export const paymentService = {
   },
 
   // Get outstanding payments
-  getOutstandingPayments: async (type?: PaymentType): Promise<OutstandingPayment[]> => {
-    await paymentService.initializeFromSalesAndPurchases()
+  getOutstandingPayments: async (type?: PaymentType, companyId?: number | null): Promise<OutstandingPayment[]> => {
+    await paymentService.initializeFromSalesAndPurchases(companyId)
     let records = await getAll<PaymentRecord>(STORES.PAYMENT_RECORDS)
     records = records.filter(p => p.pending_amount > 0)
+    
+    // Filter by company_id if provided
+    if (companyId !== undefined && companyId !== null) {
+      // Filter records based on their source (sale or purchase) company_id
+      const filteredRecords: PaymentRecord[] = []
+      for (const record of records) {
+        if (record.type === 'sale') {
+          const sale = await saleService.getById(record.reference_id)
+          if (sale && sale.company_id === companyId) {
+            filteredRecords.push(record)
+          }
+        } else if (record.type === 'purchase') {
+          const purchase = await purchaseService.getById(record.reference_id)
+          if (purchase && purchase.company_id === companyId) {
+            filteredRecords.push(record)
+          }
+        }
+      }
+      records = filteredRecords
+    } else if (companyId === null) {
+      records = []
+    }
     
     if (type) {
       records = records.filter(p => p.type === type)
@@ -225,9 +271,9 @@ export const paymentService = {
   },
 
   // Get statistics
-  getStats: async () => {
-    await paymentService.initializeFromSalesAndPurchases()
-    const outstanding = await paymentService.getOutstandingPayments()
+  getStats: async (companyId?: number | null) => {
+    await paymentService.initializeFromSalesAndPurchases(companyId)
+    const outstanding = await paymentService.getOutstandingPayments(undefined, companyId)
     const customerOutstanding = outstanding.filter(p => p.type === 'sale')
     const supplierOutstanding = outstanding.filter(p => p.type === 'purchase')
 

@@ -26,9 +26,11 @@ const StockAdjustmentHistory = () => {
     setLoading(true)
     try {
       const companyId = getCurrentCompanyId()
+      // Pass companyId directly - services will handle null by returning empty array for data isolation
+      // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
       const [allAdjustmentsResult, adjustmentStats] = await Promise.all([
-        stockAdjustmentService.getAll(companyId || undefined),
-        stockAdjustmentService.getStats(companyId || undefined)
+        stockAdjustmentService.getAll(companyId),
+        stockAdjustmentService.getStats(companyId)
       ])
       
       let allAdjustments = allAdjustmentsResult

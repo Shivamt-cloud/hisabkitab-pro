@@ -127,3 +127,4 @@ PC Restart → Browser opens → App starts → Timer restarts → Backup create
 **It's completely safe to shut down!** 💯
 
 
+

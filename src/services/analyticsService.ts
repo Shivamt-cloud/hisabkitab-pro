@@ -38,10 +38,10 @@ export interface TopCustomerData {
 
 export const analyticsService = {
   // Get sales trends for a date range
-  getSalesTrends: async (days: number = 30): Promise<SalesTrendData[]> => {
+  getSalesTrends: async (days: number = 30, companyId?: number | null): Promise<SalesTrendData[]> => {
     const [allSales, allPurchases] = await Promise.all([
-      saleService.getAll(true),
-      purchaseService.getAll()
+      saleService.getAll(true, companyId),
+      purchaseService.getAll(undefined, companyId)
     ])
     const today = new Date()
     const startDate = new Date(today)
@@ -96,8 +96,8 @@ export const analyticsService = {
   },
 
   // Get top performing products
-  getTopProducts: async (limit: number = 10): Promise<ProductPerformanceData[]> => {
-    const allSales = await saleService.getAll(true)
+  getTopProducts: async (limit: number = 10, companyId?: number | null): Promise<ProductPerformanceData[]> => {
+    const allSales = await saleService.getAll(true, companyId)
     const productMap = new Map<number, {
       productName: string
       quantitySold: number
@@ -143,8 +143,8 @@ export const analyticsService = {
   },
 
   // Get revenue by period (daily, weekly, monthly)
-  getRevenueByPeriod: async (period: 'daily' | 'weekly' | 'monthly' = 'monthly', months: number = 12): Promise<RevenueData[]> => {
-    const allSales = await saleService.getAll(true)
+  getRevenueByPeriod: async (period: 'daily' | 'weekly' | 'monthly' = 'monthly', months: number = 12, companyId?: number | null): Promise<RevenueData[]> => {
+    const allSales = await saleService.getAll(true, companyId)
     const periodMap = new Map<string, { revenue: number; cost: number }>()
 
     allSales.forEach(sale => {
@@ -187,8 +187,8 @@ export const analyticsService = {
   },
 
   // Get top customers
-  getTopCustomers: async (limit: number = 10): Promise<TopCustomerData[]> => {
-    const allSales = await saleService.getAll(true)
+  getTopCustomers: async (limit: number = 10, companyId?: number | null): Promise<TopCustomerData[]> => {
+    const allSales = await saleService.getAll(true, companyId)
     const customerMap = new Map<number | undefined, {
       customerName: string
       totalOrders: number
@@ -225,10 +225,10 @@ export const analyticsService = {
   },
 
   // Get category-wise sales
-  getCategorySales: async () => {
+  getCategorySales: async (companyId?: number | null) => {
     const [allSales, allProducts] = await Promise.all([
-      saleService.getAll(true),
-      productService.getAll(true)
+      saleService.getAll(true, companyId),
+      productService.getAll(true, companyId)
     ])
     const categoryMap = new Map<number, {
       categoryName: string

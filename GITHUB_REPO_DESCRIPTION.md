@@ -88,3 +88,4 @@ A comprehensive offline-first inventory management system for sales, purchases, 
 
 **License:** ISC (or choose appropriate license)
 
+

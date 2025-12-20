@@ -21,50 +21,220 @@ const StockAlerts = () => {
   const loadStockAlerts = async () => {
     setLoading(true)
     try {
-      const products = await productService.getAll(false)
+      const companyId = getCurrentCompanyId()
+      const products = await productService.getAll(false, companyId)
+      
+      // Also load purchases to check if min_stock_level is set on purchase items but not on products
+      const { purchaseService } = await import('../services/purchaseService')
+      const purchases = await purchaseService.getAll(undefined, companyId)
+      
+      // Create a map of product_id to max min_stock_level from purchase items
+      const productMinStockMap = new Map<number, number>()
+      // Also calculate actual available stock from purchase items
+      const productAvailableStockMap = new Map<number, number>()
+      // Map to track purchase items with articles for article-based alerts
+      const articleToPurchaseItemMap = new Map<string, { product_id: number; article: string; availableQty: number; minStock: number; purchaseId: number }>()
+      
+      purchases.forEach(purchase => {
+        purchase.items.forEach(item => {
+          if (item.min_stock_level !== undefined && item.min_stock_level > 0) {
+            const current = productMinStockMap.get(item.product_id) || 0
+            productMinStockMap.set(item.product_id, Math.max(current, item.min_stock_level))
+          }
+          
+          // Calculate available stock from purchase items (quantity - sold_quantity)
+          const soldQty = item.sold_quantity || 0
+          const availableQty = item.quantity - soldQty
+          const currentAvailable = productAvailableStockMap.get(item.product_id) || 0
+          productAvailableStockMap.set(item.product_id, currentAvailable + availableQty)
+          
+          // Track purchase items by article code for article-based alerts
+          if (item.article && item.article.trim()) {
+            const articleKey = item.article.trim().toLowerCase()
+            const existing = articleToPurchaseItemMap.get(articleKey)
+            
+            // Special logging for "money" article
+            if (articleKey.includes('money')) {
+              console.log(`[StockAlerts] 🔍 Processing "money" article in purchase ${purchase.id}:`, {
+                article: item.article,
+                product_id: item.product_id,
+                quantity: item.quantity,
+                sold_quantity: item.sold_quantity,
+                availableQty: availableQty,
+                min_stock_level: item.min_stock_level
+              })
+            }
+            
+            // For articles, we need to aggregate available stock across all purchase items with the same article
+            // But use the max min_stock_level
+            if (existing) {
+              // Aggregate available stock and use max min_stock_level
+              articleToPurchaseItemMap.set(articleKey, {
+                product_id: item.product_id,
+                article: item.article,
+                availableQty: existing.availableQty + availableQty,
+                minStock: Math.max(existing.minStock, item.min_stock_level || 0),
+                purchaseId: purchase.id
+              })
+            } else {
+              articleToPurchaseItemMap.set(articleKey, {
+                product_id: item.product_id,
+                article: item.article,
+                availableQty: availableQty,
+                minStock: item.min_stock_level || 0,
+                purchaseId: purchase.id
+              })
+            }
+          }
+        })
+      })
 
       const lowStock: StockAlert[] = []
       const outOfStock: StockAlert[] = []
 
+      console.log('[StockAlerts] Loading products for alerts, companyId:', companyId)
+      console.log('[StockAlerts] Total products:', products.length)
+      console.log('[StockAlerts] Products with min_stock_level from purchases:', productMinStockMap.size)
+      console.log('[StockAlerts] Product min stock map:', Array.from(productMinStockMap.entries()))
+      console.log('[StockAlerts] Articles with purchase items:', articleToPurchaseItemMap.size)
+      console.log('[StockAlerts] Article map entries:', Array.from(articleToPurchaseItemMap.entries()).map(([article, data]) => ({
+        article,
+        product_id: data.product_id,
+        availableQty: data.availableQty,
+        minStock: data.minStock
+      })))
+
+      // First, check purchase items with articles directly (article-level alerts)
+      articleToPurchaseItemMap.forEach((itemData, articleKey) => {
+        // Special logging for "money" article
+        if (articleKey.toLowerCase().includes('money')) {
+          console.log(`[StockAlerts] 🔍 Found "money" article!`, itemData)
+        }
+        
+        if (itemData.minStock > 0) {
+          const product = products.find(p => p.id === itemData.product_id)
+          if (product) {
+            console.log(`[StockAlerts] Checking article "${itemData.article}" (product: ${product.name}, ID: ${product.id})`)
+            console.log(`  - Available Qty: ${itemData.availableQty}`)
+            console.log(`  - Min Stock: ${itemData.minStock}`)
+            console.log(`  - Condition check: ${itemData.availableQty} <= ${itemData.minStock} = ${itemData.availableQty <= itemData.minStock}`)
+            
+            if (itemData.availableQty === 0) {
+              // Out of stock for this article
+              const existingAlert = outOfStock.find(a => a.product_id === itemData.product_id && 
+                a.product_name.includes(`[${itemData.article}]`))
+              if (!existingAlert) {
+                outOfStock.push({
+                  product_id: itemData.product_id,
+                  product_name: `${product.name} [${itemData.article}]`,
+                  current_stock: itemData.availableQty,
+                  min_stock_level: itemData.minStock,
+                  category: product.category_name,
+                  unit: product.unit,
+                  alert_type: 'out_of_stock',
+                  suggested_quantity: Math.max(itemData.minStock * 2, 10)
+                })
+                console.log(`[StockAlerts] ✅ Added article "${itemData.article}" to out of stock`)
+              }
+            } else if (itemData.availableQty <= itemData.minStock) {
+              // Low stock for this article (including when equal)
+              const existingAlert = lowStock.find(a => a.product_id === itemData.product_id && 
+                a.product_name.includes(`[${itemData.article}]`))
+              if (!existingAlert) {
+                lowStock.push({
+                  product_id: itemData.product_id,
+                  product_name: `${product.name} [${itemData.article}]`,
+                  current_stock: itemData.availableQty,
+                  min_stock_level: itemData.minStock,
+                  category: product.category_name,
+                  unit: product.unit,
+                  alert_type: 'low_stock',
+                  suggested_quantity: Math.max(itemData.minStock * 2 - itemData.availableQty, itemData.minStock)
+                })
+                console.log(`[StockAlerts] ✅ Added article "${itemData.article}" to low stock (${itemData.availableQty} <= ${itemData.minStock})`)
+              } else {
+                console.log(`[StockAlerts] ⏭️ Article "${itemData.article}" already in alerts`)
+              }
+            } else {
+              console.log(`[StockAlerts] ⏭️ Article "${itemData.article}" skipped (${itemData.availableQty} > ${itemData.minStock})`)
+            }
+          } else {
+            console.log(`[StockAlerts] ⚠️ Product not found for article "${itemData.article}" (product_id: ${itemData.product_id})`)
+          }
+        } else {
+          if (articleKey.toLowerCase().includes('money')) {
+            console.log(`[StockAlerts] ⚠️ "money" article found but min_stock_level is ${itemData.minStock} (not > 0)`)
+          }
+        }
+      })
+
       products.forEach(product => {
-      if (product.min_stock_level !== undefined) {
-        if (product.stock_quantity === 0) {
+        // Use min_stock_level from product, or from purchase items if not set on product
+        let minStockLevel = product.min_stock_level
+        if (!minStockLevel || minStockLevel === 0) {
+          minStockLevel = productMinStockMap.get(product.id)
+        }
+        
+        // Use actual available stock from purchase items if available, otherwise use product.stock_quantity
+        const actualAvailableStock = productAvailableStockMap.get(product.id) ?? product.stock_quantity
+        
+        console.log(`[StockAlerts] Product: ${product.name} (ID: ${product.id})`)
+        console.log(`  - Product stock_quantity: ${product.stock_quantity}`)
+        console.log(`  - Available from purchases: ${productAvailableStockMap.get(product.id) ?? 'N/A'}`)
+        console.log(`  - Using stock: ${actualAvailableStock}`)
+        console.log(`  - Product min_stock_level: ${product.min_stock_level}`)
+        console.log(`  - Purchase item min_stock_level: ${productMinStockMap.get(product.id) ?? 'N/A'}`)
+        console.log(`  - Using min_stock_level: ${minStockLevel}`)
+        
+        // Check if product has min_stock_level set (either on product or from purchase items)
+        if (minStockLevel !== undefined && minStockLevel > 0) {
+          if (actualAvailableStock === 0) {
+            // Out of stock
+            outOfStock.push({
+              product_id: product.id,
+              product_name: product.name,
+              current_stock: actualAvailableStock,
+              min_stock_level: minStockLevel,
+              category: product.category_name,
+              unit: product.unit,
+              alert_type: 'out_of_stock',
+              suggested_quantity: Math.max(minStockLevel * 2, 10) // Suggest 2x min level or minimum 10
+            })
+            console.log(`[StockAlerts] ✅ Added to out of stock: ${product.name}`)
+          } else if (actualAvailableStock <= minStockLevel) {
+            // Low stock (including when stock equals min_stock_level)
+            lowStock.push({
+              product_id: product.id,
+              product_name: product.name,
+              current_stock: actualAvailableStock,
+              min_stock_level: minStockLevel,
+              category: product.category_name,
+              unit: product.unit,
+              alert_type: 'low_stock',
+              suggested_quantity: Math.max(minStockLevel * 2 - actualAvailableStock, minStockLevel)
+            })
+            console.log(`[StockAlerts] ✅ Added to low stock: ${product.name} (${actualAvailableStock} <= ${minStockLevel})`)
+          } else {
+            console.log(`[StockAlerts] ⏭️ Skipped: ${product.name} (${actualAvailableStock} > ${minStockLevel})`)
+          }
+        } else if (actualAvailableStock === 0) {
+          // Products without min_stock_level but are out of stock
           outOfStock.push({
             product_id: product.id,
             product_name: product.name,
-            current_stock: product.stock_quantity,
-            min_stock_level: product.min_stock_level,
+            current_stock: actualAvailableStock,
+            min_stock_level: 0,
             category: product.category_name,
             unit: product.unit,
             alert_type: 'out_of_stock',
-            suggested_quantity: Math.max(product.min_stock_level * 2, 10) // Suggest 2x min level or minimum 10
+            suggested_quantity: 10 // Default suggestion
           })
-        } else if (product.stock_quantity <= product.min_stock_level) {
-          lowStock.push({
-            product_id: product.id,
-            product_name: product.name,
-            current_stock: product.stock_quantity,
-            min_stock_level: product.min_stock_level,
-            category: product.category_name,
-            unit: product.unit,
-            alert_type: 'low_stock',
-            suggested_quantity: Math.max(product.min_stock_level * 2 - product.stock_quantity, product.min_stock_level)
-          })
+        } else {
+          console.log(`[StockAlerts] ⏭️ Skipped: ${product.name} (no min_stock_level set)`)
         }
-      } else if (product.stock_quantity === 0) {
-        // Products without min_stock_level but are out of stock
-        outOfStock.push({
-          product_id: product.id,
-          product_name: product.name,
-          current_stock: product.stock_quantity,
-          min_stock_level: 0,
-          category: product.category_name,
-          unit: product.unit,
-          alert_type: 'out_of_stock',
-          suggested_quantity: 10 // Default suggestion
-        })
-      }
-    })
+      })
+      
+      console.log(`[StockAlerts] Low stock alerts: ${lowStock.length}, Out of stock: ${outOfStock.length}`)
 
     // Sort by urgency (lower stock first)
     lowStock.sort((a, b) => {

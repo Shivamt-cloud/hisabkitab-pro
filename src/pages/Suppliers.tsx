@@ -12,11 +12,12 @@ import {
   Filter,
   Home
 } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 
 const Suppliers = () => {
   const { hasPermission, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [filterRegistered, setFilterRegistered] = useState<boolean | null>(null)
@@ -24,13 +25,13 @@ const Suppliers = () => {
 
   useEffect(() => {
     loadSuppliers()
-  }, [])
+  }, [location.pathname])
 
   const loadSuppliers = async () => {
     setLoading(true)
     try {
       const companyId = getCurrentCompanyId()
-      const allSuppliers = await supplierService.getAll(companyId || undefined)
+      const allSuppliers = await supplierService.getAll(companyId)
       setSuppliers(allSuppliers)
     } catch (error) {
       console.error('Error loading suppliers:', error)

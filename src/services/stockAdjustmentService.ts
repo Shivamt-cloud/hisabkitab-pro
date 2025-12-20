@@ -4,10 +4,17 @@ import { getAll, getById, put, deleteById, getByIndex, STORES } from '../databas
 
 export const stockAdjustmentService = {
   // Get all stock adjustments
-  getAll: async (companyId?: number): Promise<StockAdjustment[]> => {
-    if (companyId !== undefined) {
-      return await getByIndex<StockAdjustment>(STORES.STOCK_ADJUSTMENTS, 'company_id', companyId)
+  getAll: async (companyId?: number | null): Promise<StockAdjustment[]> => {
+    // If companyId is provided, filter STRICTLY by company_id (no backward compatibility - data isolation is critical)
+    if (companyId !== undefined && companyId !== null) {
+      const adjustments = await getByIndex<StockAdjustment>(STORES.STOCK_ADJUSTMENTS, 'company_id', companyId)
+      // Additional filter to ensure we only get records with matching company_id
+      return adjustments.filter(adj => adj.company_id === companyId)
+    } else if (companyId === null) {
+      // If companyId is explicitly null (user has no company), return empty array for data isolation
+      return []
     }
+    // If companyId is undefined, return all (for admin users who haven't selected a company)
     return await getAll<StockAdjustment>(STORES.STOCK_ADJUSTMENTS)
   },
 

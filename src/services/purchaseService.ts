@@ -7,11 +7,24 @@ import { getAll, getById, put, deleteById, getByIndex, STORES } from '../databas
 
 // Suppliers
 export const supplierService = {
-  getAll: async (companyId?: number): Promise<Supplier[]> => {
-    if (companyId !== undefined) {
-      return await getByIndex<Supplier>(STORES.SUPPLIERS, 'company_id', companyId)
+  getAll: async (companyId?: number | null): Promise<Supplier[]> => {
+    // Always load all suppliers first to avoid index issues
+    const allSuppliers = await getAll<Supplier>(STORES.SUPPLIERS)
+    
+    // If companyId is provided, filter STRICTLY by company_id (no backward compatibility - data isolation is critical)
+    // Also explicitly exclude records with null/undefined company_id to prevent data leakage
+    if (companyId !== undefined && companyId !== null) {
+      return allSuppliers.filter(s => {
+        // Only include records that have the exact matching company_id
+        return s.company_id === companyId
+      })
+    } else if (companyId === null) {
+      // If companyId is explicitly null (user has no company), return empty array for data isolation
+      return []
     }
-    return await getAll<Supplier>(STORES.SUPPLIERS)
+    // If companyId is undefined, return all (for admin users who haven't selected a company)
+    
+    return allSuppliers
   },
 
   getById: async (id: number): Promise<Supplier | undefined> => {
@@ -56,14 +69,33 @@ export const supplierService = {
 
 // Purchases
 export const purchaseService = {
-  getAll: async (type?: PurchaseType, companyId?: number): Promise<Purchase[]> => {
-    let purchases: Purchase[]
+  getAll: async (type?: PurchaseType, companyId?: number | null): Promise<Purchase[]> => {
+    // Always load all purchases first to avoid index issues
+    let purchases = await getAll<Purchase>(STORES.PURCHASES)
+    console.log('[PurchaseService] getAll called with companyId:', companyId, 'type:', typeof companyId)
+    console.log('[PurchaseService] Total purchases before filter:', purchases.length)
+    console.log('[PurchaseService] Purchase company_ids sample:', purchases.slice(0, 5).map(p => ({ id: p.id, company_id: p.company_id, type: typeof p.company_id })))
     
-    if (companyId !== undefined) {
-      purchases = await getByIndex<Purchase>(STORES.PURCHASES, 'company_id', companyId)
+    // If companyId is provided, filter STRICTLY by company_id (no backward compatibility - data isolation is critical)
+    // Also explicitly exclude records with null/undefined company_id to prevent data leakage
+    if (companyId !== undefined && companyId !== null) {
+      const beforeFilter = purchases.length
+      purchases = purchases.filter(p => {
+        // Only include records that have the exact matching company_id
+        // Explicitly exclude records with null or undefined company_id
+        const matches = p.company_id === companyId && p.company_id !== null && p.company_id !== undefined
+        return matches
+      })
+      console.log('[PurchaseService] Filtered purchases:', purchases.length, 'from', beforeFilter, 'for companyId:', companyId)
+      console.log('[PurchaseService] Filtered purchase company_ids:', purchases.map(p => ({ id: p.id, company_id: p.company_id })))
+    } else if (companyId === null) {
+      // If companyId is explicitly null (user has no company), return empty array for data isolation
+      console.log('[PurchaseService] companyId is null, returning empty array')
+      purchases = []
     } else {
-      purchases = await getAll<Purchase>(STORES.PURCHASES)
+      console.log('[PurchaseService] companyId is undefined, returning all purchases (admin mode)')
     }
+    // If companyId is undefined, return all (for admin users who haven't selected a company)
     
     if (type) {
       purchases = purchases.filter(p => p.type === type)
@@ -85,8 +117,16 @@ export const purchaseService = {
       invoiceNumber = await generatePurchaseInvoiceNumber(purchase.company_id, existingInvoiceNumbers)
     }
     
+    // Assign IDs to purchase items if they don't have them, and initialize sold_quantity
+    const itemsWithIds = purchase.items.map((item, index) => ({
+      ...item,
+      id: item.id || Date.now() + index, // Assign unique ID if not present
+      sold_quantity: item.sold_quantity || 0, // Initialize sold_quantity to 0
+    }))
+    
     const newPurchase: GSTPurchase = {
       ...purchase,
+      items: itemsWithIds,
       invoice_number: invoiceNumber,
       id: Date.now(),
       type: 'gst',
@@ -95,7 +135,7 @@ export const purchaseService = {
     }
     
     // Update product stock, purchase price, MRP, and selling price
-    for (const item of purchase.items) {
+    for (const item of newPurchase.items) {
       const product = await productService.getById(item.product_id, true)
       if (product) {
         await productService.updateStock(item.product_id, item.quantity, 'add')
@@ -133,8 +173,16 @@ export const purchaseService = {
       invoiceNumber = await generatePurchaseInvoiceNumber(purchase.company_id, existingInvoiceNumbers)
     }
     
+    // Assign IDs to purchase items if they don't have them, and initialize sold_quantity
+    const itemsWithIds = purchase.items.map((item, index) => ({
+      ...item,
+      id: item.id || Date.now() + index, // Assign unique ID if not present
+      sold_quantity: item.sold_quantity || 0, // Initialize sold_quantity to 0
+    }))
+    
     const newPurchase: SimplePurchase = {
       ...purchase,
+      items: itemsWithIds,
       invoice_number: invoiceNumber || undefined,
       id: Date.now(),
       type: 'simple',
@@ -143,7 +191,7 @@ export const purchaseService = {
     }
     
     // Update product stock, purchase price, MRP, and selling price
-    for (const item of purchase.items) {
+    for (const item of newPurchase.items) {
       const product = await productService.getById(item.product_id, true)
       if (product) {
         await productService.updateStock(item.product_id, item.quantity, 'add')
@@ -224,7 +272,7 @@ export const purchaseService = {
   },
 
   // Get purchase statistics
-  getStats: async (companyId?: number) => {
+  getStats: async (companyId?: number | null) => {
     const purchases = await purchaseService.getAll(undefined, companyId)
     const gstPurchases = purchases.filter(p => p.type === 'gst') as GSTPurchase[]
     const simplePurchases = purchases.filter(p => p.type === 'simple') as SimplePurchase[]

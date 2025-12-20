@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { purchaseService } from '../services/purchaseService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Purchase, PurchaseType } from '../types/purchase'
-import { Plus, Eye, Edit, Filter, FileText, TrendingUp, Home, FileSpreadsheet } from 'lucide-react'
+import { Plus, Eye, Edit, Filter, FileText, TrendingUp, Home, FileSpreadsheet, Search, X } from 'lucide-react'
 
 type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
 
@@ -12,11 +12,24 @@ const PurchaseHistory = () => {
   const { hasPermission, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [purchases, setPurchases] = useState<Purchase[]>([])
+  const [allPurchases, setAllPurchases] = useState<Purchase[]>([]) // Store all purchases for filtering
   const [filterType, setFilterType] = useState<PurchaseType | 'all'>('all')
   const [loading, setLoading] = useState(true)
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('all')
   const [customStartDate, setCustomStartDate] = useState('')
   const [customEndDate, setCustomEndDate] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
+  const [selectedSupplier, setSelectedSupplier] = useState<string>('all')
+  
+  // Debounce search query to avoid excessive filtering
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery)
+    }, 300) // 300ms delay
+    
+    return () => clearTimeout(timer)
+  }, [searchQuery])
   const [stats, setStats] = useState<{
     total: number
     gst: { count: number; total: number; tax: number }
@@ -27,9 +40,37 @@ const PurchaseHistory = () => {
     simple: { count: 0, total: 0 },
   })
 
+  const loadPurchases = async () => {
+    setLoading(true)
+    try {
+      const companyId = getCurrentCompanyId()
+      console.log('[PurchaseHistory] Loading purchases, companyId:', companyId, 'type:', typeof companyId)
+      // Pass companyId directly - services will handle null by returning empty array for data isolation
+      // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
+      const [allPurchasesResult, statistics] = await Promise.all([
+        purchaseService.getAll(undefined, companyId),
+        purchaseService.getStats(companyId)
+      ])
+      console.log('[PurchaseHistory] Loaded purchases:', allPurchasesResult.length)
+      console.log('[PurchaseHistory] Purchase company_ids:', allPurchasesResult.map(p => ({ id: p.id, company_id: p.company_id })))
+      
+      // Sort by date (newest first) - no normalization here, do it lazily when needed
+      const sortedPurchases = allPurchasesResult.sort((a, b) => 
+        new Date(b.purchase_date).getTime() - new Date(a.purchase_date).getTime()
+      )
+      
+      setAllPurchases(sortedPurchases)
+      setStats(statistics)
+    } catch (error) {
+      console.error('Error loading purchases:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
     loadPurchases()
-  }, [filterType, timePeriod, customStartDate, customEndDate])
+  }, [])
 
   const getDateRange = (): { startDate?: string; endDate?: string } => {
     const now = new Date()
@@ -71,59 +112,135 @@ const PurchaseHistory = () => {
     return { startDate, endDate }
   }
 
-  const loadPurchases = async () => {
-    setLoading(true)
-    try {
-      const [allPurchasesResult, statistics] = await Promise.all([
-        (async () => {
-          const companyId = getCurrentCompanyId()
-          let allPurchases = filterType === 'all' 
-            ? await purchaseService.getAll(undefined, companyId || undefined) 
-            : await purchaseService.getAll(filterType, companyId || undefined)
-          
-          // Filter by date range
-          const { startDate, endDate } = getDateRange()
-          if (startDate || endDate) {
-            allPurchases = allPurchases.filter(purchase => {
-              const purchaseDate = new Date(purchase.purchase_date).getTime()
-              if (startDate && purchaseDate < new Date(startDate).getTime()) return false
-              if (endDate) {
-                const endDateTime = new Date(endDate).getTime() + 86400000
-                if (purchaseDate > endDateTime) return false
-              }
-              return true
-            })
-          }
-          
-          // Sort by date (newest first)
-          return allPurchases.sort((a, b) => 
-            new Date(b.purchase_date).getTime() - new Date(a.purchase_date).getTime()
-          )
-        })(),
-        purchaseService.getStats(getCurrentCompanyId() || undefined)
-      ])
-      
-      setPurchases(allPurchasesResult)
-      setStats(statistics)
-    } catch (error) {
-      console.error('Error loading purchases:', error)
-    } finally {
-      setLoading(false)
+  // Helper function to get sold_quantity safely (lazy normalization)
+  const getSoldQuantity = (item: any): number => {
+    return item.sold_quantity !== undefined ? item.sold_quantity : 0
+  }
+
+  // Memoize filtered purchases to avoid recalculating on every render
+  const filteredPurchases = useMemo(() => {
+    let filtered = [...allPurchases]
+    
+    // Apply search filter (use debounced query)
+    if (debouncedSearchQuery.trim()) {
+      const query = debouncedSearchQuery.toLowerCase().trim()
+      filtered = filtered.filter(purchase => {
+        const supplierName = (purchase as any).supplier_name?.toLowerCase() || ''
+        const invoiceNumber = (purchase as any).invoice_number?.toLowerCase() || ''
+        const items = purchase.items || []
+        
+        // Search in supplier name
+        if (supplierName.includes(query)) return true
+        // Search in invoice number
+        if (invoiceNumber.includes(query)) return true
+        // Search in article codes
+        if (items.some(item => item.article?.toLowerCase().includes(query))) return true
+        // Search in barcodes
+        if (items.some(item => item.barcode?.toLowerCase().includes(query))) return true
+        // Search in product names
+        if (items.some(item => item.product_name?.toLowerCase().includes(query))) return true
+        
+        return false
+      })
     }
+    
+    // Apply supplier filter
+    if (selectedSupplier !== 'all') {
+      filtered = filtered.filter(purchase => 
+        (purchase as any).supplier_name === selectedSupplier
+      )
+    }
+    
+    // Apply type filter
+    if (filterType !== 'all') {
+      filtered = filtered.filter(p => p.type === filterType)
+    }
+    
+    // Apply date range filter
+    const { startDate, endDate } = getDateRange()
+    if (startDate || endDate) {
+      filtered = filtered.filter(purchase => {
+        const purchaseDate = new Date(purchase.purchase_date).getTime()
+        if (startDate && purchaseDate < new Date(startDate).getTime()) return false
+        if (endDate) {
+          const endDateTime = new Date(endDate).getTime() + 86400000
+          if (purchaseDate > endDateTime) return false
+        }
+        return true
+      })
+    }
+    
+    // Sort by date (newest first)
+    filtered.sort((a, b) => 
+      new Date(b.purchase_date).getTime() - new Date(a.purchase_date).getTime()
+    )
+    
+    return filtered
+  }, [allPurchases, debouncedSearchQuery, selectedSupplier, filterType, timePeriod, customStartDate, customEndDate])
+  
+  // Update purchases state only when filteredPurchases changes
+  useEffect(() => {
+    setPurchases(filteredPurchases)
+  }, [filteredPurchases])
+
+  // Reload when navigating back to this page
+  useEffect(() => {
+    const handleFocus = () => {
+      loadPurchases()
+    }
+    window.addEventListener('focus', handleFocus)
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+    }
+  }, [])
+
+  // Get unique suppliers for filter dropdown
+  const getUniqueSuppliers = (): string[] => {
+    const suppliers = allPurchases
+      .map(p => (p as any).supplier_name)
+      .filter((name): name is string => !!name && name !== 'N/A')
+    return [...new Set(suppliers)].sort()
   }
 
   const exportToExcel = () => {
-    const headers = ['Date', 'Type', 'Invoice', 'Supplier', 'Items', 'Amount', 'Payment Status', 'Last Modified']
-    const rows = purchases.map(purchase => [
-      new Date(purchase.purchase_date).toLocaleDateString('en-IN'),
-      purchase.type === 'gst' ? 'GST' : 'Simple',
-      (purchase as any).invoice_number || 'N/A',
-      (purchase as any).supplier_name || 'N/A',
-      purchase.items.length,
-      purchase.type === 'gst' ? (purchase as any).grand_total.toFixed(2) : (purchase as any).total_amount.toFixed(2),
-      purchase.payment_status,
-      (purchase as any).updated_at ? new Date((purchase as any).updated_at).toLocaleDateString('en-IN') : new Date(purchase.created_at).toLocaleDateString('en-IN')
-    ])
+    const headers = ['Date', 'Type', 'Invoice', 'Supplier', 'Items', 'Available Qty', 'Total Qty', 'Sold Qty', 'Articles', 'Barcodes', 'Amount', 'Payment Status', 'Last Modified']
+    const rows = purchases.map(purchase => {
+      const barcodes = purchase.items
+        .map(item => item.barcode)
+        .filter((barcode): barcode is string => !!barcode)
+      const uniqueBarcodes = [...new Set(barcodes)]
+      const barcodeString = uniqueBarcodes.length > 0 
+        ? uniqueBarcodes.join(', ') 
+        : 'No barcodes'
+      
+      const articles = purchase.items
+        .map(item => item.article)
+        .filter((article): article is string => !!article && article.trim() !== '')
+      const uniqueArticles = [...new Set(articles)]
+      const articleString = uniqueArticles.length > 0 
+        ? uniqueArticles.join(', ') 
+        : 'No articles'
+      
+      const totalQuantity = purchase.items.reduce((sum, item) => sum + item.quantity, 0)
+      const totalSoldQuantity = purchase.items.reduce((sum, item) => sum + getSoldQuantity(item), 0)
+      const totalAvailable = totalQuantity - totalSoldQuantity
+      
+      return [
+        new Date(purchase.purchase_date).toLocaleDateString('en-IN'),
+        purchase.type === 'gst' ? 'GST' : 'Simple',
+        (purchase as any).invoice_number || 'N/A',
+        (purchase as any).supplier_name || 'N/A',
+        purchase.items.length,
+        totalAvailable,
+        totalQuantity,
+        totalSoldQuantity,
+        articleString,
+        barcodeString,
+        purchase.type === 'gst' ? (purchase as any).grand_total.toFixed(2) : (purchase as any).total_amount.toFixed(2),
+        purchase.payment_status,
+        (purchase as any).updated_at ? new Date((purchase as any).updated_at).toLocaleDateString('en-IN') : new Date(purchase.created_at).toLocaleDateString('en-IN')
+      ]
+    })
 
     const csvContent = [
       headers.join(','),
@@ -176,24 +293,52 @@ const PurchaseHistory = () => {
                 <th>Invoice</th>
                 <th>Supplier</th>
                 <th>Items</th>
+                <th>Available Qty</th>
+                <th>Articles</th>
+                <th>Barcodes</th>
                 <th>Amount</th>
                 <th>Payment Status</th>
                 <th>Last Modified</th>
               </tr>
             </thead>
             <tbody>
-              ${purchases.map(purchase => `
+              ${purchases.map(purchase => {
+                const barcodes = purchase.items
+                  .map(item => item.barcode)
+                  .filter((barcode): barcode is string => !!barcode)
+                const uniqueBarcodes = [...new Set(barcodes)]
+                const barcodeString = uniqueBarcodes.length > 0 
+                  ? uniqueBarcodes.join(', ') 
+                  : 'No barcodes'
+                
+                const totalQuantity = purchase.items.reduce((sum, item) => sum + item.quantity, 0)
+                const totalSoldQuantity = purchase.items.reduce((sum, item) => sum + getSoldQuantity(item), 0)
+                const totalAvailable = totalQuantity - totalSoldQuantity
+                
+                const articles = purchase.items
+                  .map(item => item.article)
+                  .filter((article): article is string => !!article && article.trim() !== '')
+                const uniqueArticles = [...new Set(articles)]
+                const articleString = uniqueArticles.length > 0 
+                  ? uniqueArticles.join(', ') 
+                  : 'No articles'
+                
+                return `
                 <tr>
                   <td>${new Date(purchase.purchase_date).toLocaleDateString('en-IN')}</td>
                   <td>${purchase.type === 'gst' ? 'GST' : 'Simple'}</td>
                   <td>${(purchase as any).invoice_number || 'N/A'}</td>
                   <td>${(purchase as any).supplier_name || 'N/A'}</td>
                   <td>${purchase.items.length}</td>
+                  <td>${totalAvailable} / ${totalQuantity} (${totalSoldQuantity} sold)</td>
+                  <td>${articleString}</td>
+                  <td>${barcodeString}</td>
                   <td>₹${purchase.type === 'gst' ? (purchase as any).grand_total.toFixed(2) : (purchase as any).total_amount.toFixed(2)}</td>
                   <td>${purchase.payment_status}</td>
                   <td>${(purchase as any).updated_at ? new Date((purchase as any).updated_at).toLocaleDateString('en-IN') : new Date(purchase.created_at).toLocaleDateString('en-IN')}</td>
                 </tr>
-              `).join('')}
+              `
+              }).join('')}
             </tbody>
           </table>
         </body>
@@ -300,42 +445,82 @@ const PurchaseHistory = () => {
             </div>
           </div>
 
-          {/* Filters */}
+          {/* Search and Filters */}
           <div className="bg-white/70 backdrop-blur-xl rounded-xl shadow-xl p-6 mb-8 border border-white/50 space-y-4">
+            {/* Search Bar */}
             <div className="flex items-center gap-4">
-              <Filter className="w-5 h-5 text-gray-500" />
-              <span className="text-sm font-semibold text-gray-700">Filter by Type:</span>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setFilterType('all')}
-                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                    filterType === 'all'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+              <Search className="w-5 h-5 text-gray-500" />
+              <div className="flex-1 relative">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search by supplier, invoice, article, barcode, or product..."
+                  className="w-full pl-10 pr-10 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                />
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Filter Row */}
+            <div className="flex flex-wrap items-center gap-4 pt-4 border-t border-gray-200">
+              <div className="flex items-center gap-2">
+                <Filter className="w-5 h-5 text-gray-500" />
+                <span className="text-sm font-semibold text-gray-700">Supplier:</span>
+                <select
+                  value={selectedSupplier}
+                  onChange={(e) => setSelectedSupplier(e.target.value)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
                 >
-                  All
-                </button>
-                <button
-                  onClick={() => setFilterType('gst')}
-                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                    filterType === 'gst'
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  GST Purchases
-                </button>
-                <button
-                  onClick={() => setFilterType('simple')}
-                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                    filterType === 'simple'
-                      ? 'bg-green-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  Simple Purchases
-                </button>
+                  <option value="all">All Suppliers</option>
+                  {allPurchases.length > 0 && getUniqueSuppliers().map(supplier => (
+                    <option key={supplier} value={supplier}>{supplier}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-gray-700">Type:</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setFilterType('all')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      filterType === 'all'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    All
+                  </button>
+                  <button
+                    onClick={() => setFilterType('gst')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      filterType === 'gst'
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    GST Purchases
+                  </button>
+                  <button
+                    onClick={() => setFilterType('simple')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      filterType === 'simple'
+                        ? 'bg-green-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    Simple Purchases
+                  </button>
+                </div>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-4 pt-4 border-t border-gray-200">
@@ -428,6 +613,17 @@ const PurchaseHistory = () => {
             )}
           </div>
 
+          {/* Results Count */}
+          {(searchQuery || selectedSupplier !== 'all' || filterType !== 'all' || timePeriod !== 'all') && (
+            <div className="mb-4 px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-900">
+                Showing <span className="font-bold">{purchases.length}</span> of <span className="font-bold">{allPurchases.length}</span> purchases
+                {searchQuery && <span> matching "{searchQuery}"</span>}
+                {selectedSupplier !== 'all' && <span> from {selectedSupplier}</span>}
+              </p>
+            </div>
+          )}
+
           {/* Purchases Table */}
           <div className="bg-white/70 backdrop-blur-xl rounded-xl shadow-xl border border-white/50 overflow-hidden">
             {loading ? (
@@ -440,10 +636,23 @@ const PurchaseHistory = () => {
                 <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">No purchases found</h3>
                 <p className="text-gray-600 mb-6">
-                  {filterType === 'all'
-                    ? 'Get started by creating your first purchase'
-                    : `No ${filterType} purchases found`}
+                  {searchQuery || selectedSupplier !== 'all' || filterType !== 'all' || timePeriod !== 'all'
+                    ? 'Try adjusting your search or filters'
+                    : 'Get started by creating your first purchase'}
                 </p>
+                {(searchQuery || selectedSupplier !== 'all') && (
+                  <button
+                    onClick={() => {
+                      setSearchQuery('')
+                      setSelectedSupplier('all')
+                      setFilterType('all')
+                      setTimePeriod('all')
+                    }}
+                    className="mt-4 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                  >
+                    Clear All Filters
+                  </button>
+                )}
                 {hasPermission('purchases:create') && (
                   <div className="flex gap-3 justify-center">
                     <button
@@ -471,6 +680,9 @@ const PurchaseHistory = () => {
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Invoice</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Supplier</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Items</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Available Qty</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Articles</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Barcodes</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Amount</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Status</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Last Modified</th>
@@ -520,6 +732,111 @@ const PurchaseHistory = () => {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">
                             {purchase.items.length} item{purchase.items.length !== 1 ? 's' : ''}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">
+                            {(() => {
+                              // Calculate total available quantity for all items in this purchase
+                              const totalQuantity = purchase.items.reduce((sum, item) => sum + item.quantity, 0)
+                              const totalSoldQuantity = purchase.items.reduce((sum, item) => sum + getSoldQuantity(item), 0)
+                              const totalAvailable = totalQuantity - totalSoldQuantity
+                              
+                              return (
+                                <div className="flex flex-col gap-1">
+                                  <span className={`font-semibold ${
+                                    totalAvailable === 0 
+                                      ? 'text-red-600' 
+                                      : totalAvailable < totalQuantity * 0.2 
+                                      ? 'text-orange-600' 
+                                      : 'text-green-600'
+                                  }`}>
+                                    {totalAvailable} / {totalQuantity}
+                                  </span>
+                                  <span className="text-xs text-gray-500">
+                                    {totalSoldQuantity > 0 ? `${totalSoldQuantity} sold` : 'All available'}
+                                  </span>
+                                </div>
+                              )
+                            })()}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-sm text-gray-900">
+                            {(() => {
+                              const articles = purchase.items
+                                .map(item => item.article)
+                                .filter((article): article is string => !!article && article.trim() !== '')
+                              const uniqueArticles = [...new Set(articles)]
+                              
+                              if (uniqueArticles.length === 0) {
+                                return <span className="text-gray-400 italic text-xs">No articles</span>
+                              }
+                              
+                              if (uniqueArticles.length <= 3) {
+                                return (
+                                  <div className="space-y-1">
+                                    {uniqueArticles.map((article, idx) => (
+                                      <div key={idx} className="text-xs bg-blue-50 px-2 py-1 rounded border border-blue-200 text-blue-900">
+                                        {article}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )
+                              }
+                              
+                              return (
+                                <div className="space-y-1">
+                                  {uniqueArticles.slice(0, 2).map((article, idx) => (
+                                    <div key={idx} className="text-xs bg-blue-50 px-2 py-1 rounded border border-blue-200 text-blue-900">
+                                      {article}
+                                    </div>
+                                  ))}
+                                  <div className="text-xs text-gray-500 font-medium">
+                                    +{uniqueArticles.length - 2} more
+                                  </div>
+                                </div>
+                              )
+                            })()}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-sm text-gray-900">
+                            {(() => {
+                              const barcodes = purchase.items
+                                .map(item => item.barcode)
+                                .filter((barcode): barcode is string => !!barcode)
+                              const uniqueBarcodes = [...new Set(barcodes)]
+                              
+                              if (uniqueBarcodes.length === 0) {
+                                return <span className="text-gray-400 italic text-xs">No barcodes</span>
+                              }
+                              
+                              if (uniqueBarcodes.length <= 3) {
+                                return (
+                                  <div className="space-y-1">
+                                    {uniqueBarcodes.map((barcode, idx) => (
+                                      <div key={idx} className="font-mono text-xs bg-gray-50 px-2 py-1 rounded border border-gray-200">
+                                        {barcode}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )
+                              }
+                              
+                              return (
+                                <div className="space-y-1">
+                                  {uniqueBarcodes.slice(0, 2).map((barcode, idx) => (
+                                    <div key={idx} className="font-mono text-xs bg-gray-50 px-2 py-1 rounded border border-gray-200">
+                                      {barcode}
+                                    </div>
+                                  ))}
+                                  <div className="text-xs text-gray-500 font-medium">
+                                    +{uniqueBarcodes.length - 2} more
+                                  </div>
+                                </div>
+                              )
+                            })()}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">

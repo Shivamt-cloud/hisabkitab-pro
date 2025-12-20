@@ -42,6 +42,7 @@ export interface AuditLog {
   ipAddress?: string
   userAgent?: string
   metadata?: Record<string, any> // Additional context
+  company_id?: number // Company this audit log belongs to
 }
 
 export type AuditLogFilter = {

@@ -21,6 +21,7 @@ export interface Product {
   category_id?: number
   category_name?: string
   description?: string
+  company_id?: number // Company this product belongs to
   // Pricing & Stock managed during purchase entry
   purchase_price?: number // Optional: last known purchase price (for reference only)
   selling_price?: number // Optional: default selling price (can be overridden during purchase)
@@ -131,15 +132,23 @@ export const categoryService = {
 
 // Products
 export const productService = {
-  getAll: async (includeArchived: boolean = false, companyId?: number): Promise<Product[]> => {
+  getAll: async (includeArchived: boolean = false, companyId?: number | null): Promise<Product[]> => {
     await initializeDefaultCategories()
-    let products: Product[]
+    // Always load all products first to avoid index issues
+    let products = await getAll<Product>(STORES.PRODUCTS)
     
-    if (companyId !== undefined) {
-      products = await getByIndex<Product>(STORES.PRODUCTS, 'company_id', companyId)
-    } else {
-      products = await getAll<Product>(STORES.PRODUCTS)
+    // If companyId is provided, filter STRICTLY by company_id (no backward compatibility - data isolation is critical)
+    // Also explicitly exclude records with null/undefined company_id to prevent data leakage
+    if (companyId !== undefined && companyId !== null) {
+      products = products.filter(p => {
+        // Only include records that have the exact matching company_id
+        return p.company_id === companyId
+      })
+    } else if (companyId === null) {
+      // If companyId is explicitly null (user has no company), return empty array for data isolation
+      products = []
     }
+    // If companyId is undefined, return all (for admin users who haven't selected a company)
     
     // Filter by status if needed
     if (!includeArchived) {
@@ -189,16 +198,17 @@ export const productService = {
 
   create: async (product: Omit<Product, 'id' | 'created_at' | 'updated_at' | 'category_name'> & { custom_sku?: string }): Promise<Product> => {
     // Generate SKU with company code if not provided
+    const productWithCompanyId = product as Omit<Product, 'id' | 'created_at' | 'updated_at' | 'category_name'> & { custom_sku?: string; company_id?: number }
     let sku = product.sku
     if (!sku) {
       const { generateProductSKU } = await import('../utils/companyCodeHelper')
-      const allProducts = await productService.getAll(true, product.company_id)
+      const allProducts = await productService.getAll(true, productWithCompanyId.company_id)
       const existingSkus = allProducts.map(p => p.sku).filter(Boolean) as string[]
-      sku = await generateProductSKU(product.company_id, product.custom_sku, existingSkus)
-    } else if (product.company_id && !sku.includes('-')) {
+      sku = await generateProductSKU(productWithCompanyId.company_id, product.custom_sku, existingSkus)
+    } else if (productWithCompanyId.company_id && !sku.includes('-')) {
       // If SKU provided but doesn't have company code prefix, add it
       const { getCompanyCodeById } = await import('../utils/companyCodeHelper')
-      const companyCode = await getCompanyCodeById(product.company_id)
+      const companyCode = await getCompanyCodeById(productWithCompanyId.company_id)
       if (companyCode && !sku.startsWith(companyCode)) {
         sku = `${companyCode}-${sku}`
       }

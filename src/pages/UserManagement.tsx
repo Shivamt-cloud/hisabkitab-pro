@@ -2,14 +2,17 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { userService } from '../services/userService'
+import { companyService } from '../services/companyService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { User, UserRole } from '../types/auth'
+import { Company } from '../types/company'
 import { Home, Plus, Edit, Trash2, Users, Shield, UserCheck, Eye, UserCog } from 'lucide-react'
 
 const UserManagement = () => {
   const { user: currentUser, hasPermission } = useAuth()
   const navigate = useNavigate()
-  const [users, setUsers] = useState<(User & { password?: string })[]>([])
+  const [users, setUsers] = useState<(User & { password?: string; companyName?: string })[]>([])
+  const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -20,9 +23,22 @@ const UserManagement = () => {
   const loadUsers = async () => {
     setLoading(true)
     try {
-      const allUsers = await userService.getAll()
-      // Remove password from display
-      const usersWithoutPassword = allUsers.map(({ password, ...user }) => user)
+      const [allUsers, allCompanies] = await Promise.all([
+        userService.getAll(),
+        companyService.getAll(true)
+      ])
+      
+      // Store companies for lookup
+      setCompanies(allCompanies)
+      
+      // Remove password from display and add company name
+      const usersWithoutPassword = allUsers.map(({ password, ...user }) => {
+        const company = user.company_id ? allCompanies.find(c => c.id === user.company_id) : null
+        return {
+          ...user,
+          companyName: company?.name || 'No Company'
+        }
+      })
       setUsers(usersWithoutPassword)
     } catch (error) {
       console.error('Error loading users:', error)
@@ -158,7 +174,10 @@ const UserManagement = () => {
                         User
                       </th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                        Email
+                        User Code / Email
+                      </th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        Company
                       </th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                         Role
@@ -187,7 +206,22 @@ const UserManagement = () => {
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <p className="text-gray-600">{user.email}</p>
+                          <div>
+                            <p className="text-gray-900 font-medium font-mono">{user.email}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">User Code</p>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {user.company_id ? (
+                            <div>
+                              <p className="text-gray-900 font-medium">{user.companyName || 'Unknown'}</p>
+                              <p className="text-xs text-gray-500 mt-0.5">
+                                {companies.find(c => c.id === user.company_id)?.unique_code || ''}
+                              </p>
+                            </div>
+                          ) : (
+                            <span className="text-gray-400 italic">No Company</span>
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span

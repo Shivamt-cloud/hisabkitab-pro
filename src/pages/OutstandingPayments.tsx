@@ -9,7 +9,7 @@ import { Home, Users, Building2, AlertTriangle, DollarSign, Clock, CheckCircle }
 type PaymentTab = 'customers' | 'suppliers'
 
 const OutstandingPayments = () => {
-  const { hasPermission } = useAuth()
+  const { hasPermission, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<PaymentTab>('customers')
   const [loading, setLoading] = useState(true)
@@ -31,9 +31,12 @@ const OutstandingPayments = () => {
   const loadPayments = async () => {
     setLoading(true)
     try {
+      const companyId = getCurrentCompanyId()
+      // Pass companyId directly - services will handle null by returning empty array for data isolation
+      // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
       const [outstanding, paymentStats] = await Promise.all([
-        paymentService.getOutstandingPayments(),
-        paymentService.getStats()
+        paymentService.getOutstandingPayments(undefined, companyId),
+        paymentService.getStats(companyId)
       ])
       setCustomerPayments(outstanding.filter(p => p.type === 'sale'))
       setSupplierPayments(outstanding.filter(p => p.type === 'purchase'))

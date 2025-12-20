@@ -84,20 +84,23 @@ export const companyService = {
   },
 
   // Update company
-  update: async (id: number, companyData: Partial<Omit<Company, 'id' | 'created_at' | 'unique_code'>>): Promise<Company | null> => {
+  update: async (id: number, companyData: Partial<Omit<Company, 'id' | 'created_at' | 'unique_code'> | { unique_code?: string }>): Promise<Company | null> => {
     const existing = await getById<Company>(STORES.COMPANIES, id)
     if (!existing) return null
 
-    // Prevent changing unique_code (immutable) - remove it from updateData if present
+    // Allow setting unique_code only if it doesn't exist (migration scenario)
     const { unique_code, ...updateData } = companyData as any
-    if (unique_code && unique_code !== existing.unique_code) {
+    if (unique_code && existing.unique_code && unique_code !== existing.unique_code) {
       throw new Error('Company unique code cannot be changed once set')
     }
+    
+    // If unique_code is provided and company doesn't have one, use it (migration)
+    const finalUniqueCode = unique_code && !existing.unique_code ? unique_code : existing.unique_code
 
     // Check if name is being changed and conflicts with another company
-    if (companyData.name && existing.name !== companyData.name) {
+    if ((updateData as any).name && existing.name !== (updateData as any).name) {
       const companies = await companyService.getAll(true)
-      if (companies.some(c => c.id !== id && c.name.toLowerCase() === companyData.name!.toLowerCase())) {
+      if (companies.some(c => c.id !== id && c.name.toLowerCase() === ((updateData as any).name as string).toLowerCase())) {
         throw new Error('Company with this name already exists')
       }
     }
@@ -106,7 +109,7 @@ export const companyService = {
       ...existing,
       ...updateData,
       id: existing.id, // Ensure ID doesn't change
-      unique_code: existing.unique_code, // Preserve unique code (immutable)
+      unique_code: finalUniqueCode || existing.unique_code, // Use new code if provided (migration), otherwise preserve existing
       updated_at: new Date().toISOString(),
     }
     

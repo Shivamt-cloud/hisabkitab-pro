@@ -44,13 +44,28 @@ const GSTPurchaseForm = () => {
     try {
       const companyId = getCurrentCompanyId()
       const [suppliersData, productsData] = await Promise.all([
-        supplierService.getAll(companyId || undefined),
-        productService.getAll(true, companyId || undefined)
+        supplierService.getAll(companyId),
+        productService.getAll(true, companyId)
       ])
+      console.log('Loaded suppliers:', suppliersData.length, suppliersData)
+      console.log('Loaded products:', productsData.length, productsData)
       setSuppliers(suppliersData)
       setProducts(productsData)
     } catch (error) {
       console.error('Error loading data:', error)
+      // Fallback: try loading all data without company filter
+      try {
+        const [allSuppliers, allProducts] = await Promise.all([
+          supplierService.getAll(undefined),
+          productService.getAll(true, undefined)
+        ])
+        console.log('Fallback - loaded all suppliers:', allSuppliers.length)
+        console.log('Fallback - loaded all products:', allProducts.length)
+        setSuppliers(allSuppliers)
+        setProducts(allProducts)
+      } catch (fallbackError) {
+        console.error('Error loading data (fallback):', fallbackError)
+      }
     }
   }
 
@@ -69,6 +84,7 @@ const GSTPurchaseForm = () => {
           margin_percentage: item.margin_percentage || 0,
           margin_amount: item.margin_amount || 0,
           min_stock_level: item.min_stock_level,
+          sold_quantity: item.sold_quantity || 0, // Ensure sold_quantity is initialized
         })))
         setPaymentStatus(gstPurchase.payment_status)
         setPaymentMethod(gstPurchase.payment_method || '')
@@ -356,7 +372,7 @@ const GSTPurchaseForm = () => {
           cgst_amount: totals.cgstAmount,
           sgst_amount: totals.sgstAmount,
           grand_total: totals.grandTotal,
-          company_id: getCurrentCompanyId() || undefined,
+          company_id: getCurrentCompanyId() ?? undefined,
           payment_status: paymentStatus,
           payment_method: paymentMethod,
           notes,
@@ -432,13 +448,32 @@ const GSTPurchaseForm = () => {
                     }`}
                   >
                     <option value="">Select Supplier</option>
-                    {suppliers.filter(s => s.is_registered).map(supplier => (
-                      <option key={supplier.id} value={supplier.id}>
-                        {supplier.name} {supplier.gstin && `(${supplier.gstin})`}
-                      </option>
-                    ))}
+                    {suppliers.length === 0 ? (
+                      <option value="" disabled>No suppliers available. Please add suppliers first.</option>
+                    ) : (
+                      <>
+                        {suppliers.filter(s => s.is_registered || s.gstin).map(supplier => (
+                          <option key={supplier.id} value={supplier.id}>
+                            {supplier.name} {supplier.gstin && `(${supplier.gstin})`}
+                          </option>
+                        ))}
+                        {suppliers.filter(s => s.is_registered || s.gstin).length === 0 && (
+                          <option value="" disabled>No GST registered suppliers found. Showing all suppliers...</option>
+                        )}
+                        {suppliers.filter(s => !s.is_registered && !s.gstin).map(supplier => (
+                          <option key={supplier.id} value={supplier.id}>
+                            {supplier.name} (Not GST Registered)
+                          </option>
+                        ))}
+                      </>
+                    )}
                   </select>
                   {errors.supplier && <p className="mt-1 text-sm text-red-600">{errors.supplier}</p>}
+                  {suppliers.length > 0 && suppliers.filter(s => s.is_registered || s.gstin).length === 0 && (
+                    <p className="mt-1 text-sm text-yellow-600">
+                      ⚠️ No GST registered suppliers found. For GST purchases, suppliers should have a GSTIN.
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -520,56 +555,66 @@ const GSTPurchaseForm = () => {
                 <table className="w-full">
                   <thead className="bg-gray-100 border-b border-gray-300">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Product</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-24">Article</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-32">Barcode</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-20">Qty</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-24">Purchase Price</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-24">MRP</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-24">Sale Price</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-20">GST%</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-24">Margin</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-20">Min Stock</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-24">Total</th>
-                      <th className="px-3 py-2 text-center text-xs font-semibold text-gray-700 uppercase w-16">Action</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[200px]">Product</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[140px]">Article</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[170px]">Barcode</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[100px]">Qty</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[120px]">Remaining Qty</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[160px]">Purchase Price</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[160px]">MRP</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[160px]">Sale Price</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[120px]">GST%</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[140px]">Margin</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[120px]">Min Stock</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[160px]">Total</th>
+                      <th className="px-6 py-5 text-center text-xs font-semibold text-gray-700 uppercase min-w-[80px]">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
                     {items.map((item, index) => (
                       <tr key={index} className="hover:bg-blue-50/50 transition-colors">
-                        <td className="px-3 py-2">
+                        <td className="px-6 py-5">
                           <select
                             value={item.product_id || ''}
                             onChange={(e) => updateItem(index, 'product_id', parseInt(e.target.value) || 0)}
-                            className={`w-full px-2 py-1.5 text-sm border rounded focus:ring-1 focus:ring-blue-500 outline-none ${
+                            className={`w-full min-w-[180px] px-5 py-4 text-base border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white ${
                               errors[`item_${index}_product`] ? 'border-red-300' : 'border-gray-300'
                             }`}
                           >
                             <option value="">Select...</option>
-                            {products.map(product => (
-                              <option key={product.id} value={product.id}>
-                                {product.name} {product.barcode && `[${product.barcode}]`}
-                              </option>
-                            ))}
+                            {products.length === 0 ? (
+                              <option value="" disabled>No products available. Please add products first.</option>
+                            ) : (
+                              products.map(product => (
+                                <option key={product.id} value={product.id}>
+                                  {product.name} {product.barcode && `[${product.barcode}]`}
+                                </option>
+                              ))
+                            )}
                           </select>
+                          {products.length === 0 && (
+                            <p className="text-xs text-yellow-600 mt-1">
+                              No products found. <button type="button" onClick={() => navigate('/products/new')} className="text-blue-600 hover:underline">Add a product</button>
+                            </p>
+                          )}
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-6 py-5">
                           <input
                             type="text"
                             value={item.article || ''}
                             onChange={(e) => updateItem(index, 'article', e.target.value)}
-                            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                            className="w-full min-w-[140px] px-5 py-4 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                             placeholder="Article code"
                             title="Supplier's article number/code (optional)"
                           />
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-6 py-5">
                           <div className="flex gap-1">
                             <input
                               type="text"
                               value={item.barcode || ''}
                               onChange={(e) => updateItem(index, 'barcode', e.target.value)}
-                              className="flex-1 px-2 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                              className="flex-1 px-5 py-4 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                               placeholder="Scan/Enter"
                               readOnly={autoGenerateBarcode && item.product_id > 0}
                             />
@@ -588,80 +633,85 @@ const GSTPurchaseForm = () => {
                             )}
                           </div>
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-6 py-5">
                           <input
                             type="number"
                             min="1"
                             value={item.quantity}
                             onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 0)}
-                            className={`w-full px-2 py-1.5 text-sm border rounded focus:ring-1 focus:ring-blue-500 outline-none ${
+                            className={`w-full min-w-[100px] px-5 py-4 text-base border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none ${
                               errors[`item_${index}_quantity`] ? 'border-red-300' : 'border-gray-300'
                             }`}
                           />
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-6 py-5">
+                          <div className="w-full min-w-[120px] px-5 py-4 text-base font-semibold text-red-600">
+                            {item.quantity - (item.sold_quantity || 0)}
+                          </div>
+                        </td>
+                        <td className="px-6 py-5">
                           <input
                             type="number"
                             step="0.01"
                             min="0"
                             value={item.unit_price}
                             onChange={(e) => updateItem(index, 'unit_price', parseFloat(e.target.value) || 0)}
-                            className={`w-full px-2 py-1.5 text-sm border rounded focus:ring-1 focus:ring-blue-500 outline-none ${
+                            className={`w-full min-w-[140px] px-5 py-4 text-base border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none ${
                               errors[`item_${index}_price`] ? 'border-red-300' : 'border-gray-300'
                             }`}
                           />
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-6 py-5">
                           <input
                             type="number"
                             step="0.01"
                             min="0"
                             value={item.mrp || 0}
                             onChange={(e) => updateItem(index, 'mrp', parseFloat(e.target.value) || 0)}
-                            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                            className="w-full min-w-[140px] px-5 py-4 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                           />
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-6 py-5">
                           <input
                             type="number"
                             step="0.01"
                             min="0"
                             value={item.sale_price || 0}
                             onChange={(e) => updateItem(index, 'sale_price', parseFloat(e.target.value) || 0)}
-                            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                            className="w-full min-w-[140px] px-5 py-4 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                           />
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-6 py-5">
                           <select
                             value={item.gst_rate || 18}
                             onChange={(e) => updateItem(index, 'gst_rate', parseFloat(e.target.value))}
-                            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                            className="w-full min-w-[140px] px-5 py-4 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                           >
                             {GST_RATES.map((rate) => (
                               <option key={rate.value} value={rate.value}>{rate.value}%</option>
                             ))}
                           </select>
                         </td>
-                        <td className="px-3 py-2">
-                          <div className="text-xs">
+                        <td className="px-6 py-5">
+                          <div className="text-sm">
                             <div className="font-semibold text-green-700">{item.margin_percentage?.toFixed(1) || '0.0'}%</div>
                             <div className="text-gray-600">₹{item.margin_amount?.toFixed(2) || '0.00'}</div>
                           </div>
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-6 py-5">
                           <input
                             type="number"
                             min="0"
                             value={item.min_stock_level || ''}
                             onChange={(e) => updateItem(index, 'min_stock_level', e.target.value ? parseInt(e.target.value) : undefined)}
-                            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                            className="w-full min-w-[140px] px-5 py-4 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                             placeholder="Min"
                             title="Minimum stock level for alerts"
                           />
                         </td>
-                        <td className="px-3 py-2">
-                          <div className="font-semibold text-gray-900">₹{item.total.toFixed(2)}</div>
-                          {item.hsn_code && <div className="text-xs text-gray-500">HSN: {item.hsn_code}</div>}
+                        <td className="px-6 py-5">
+                          <div className="font-semibold text-base text-gray-900">₹{item.total.toFixed(2)}</div>
+                          {item.hsn_code && <div className="text-sm text-gray-500">HSN: {item.hsn_code}</div>}
                         </td>
                         <td className="px-3 py-2 text-center">
                           <button

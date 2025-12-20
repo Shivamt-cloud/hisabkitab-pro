@@ -24,7 +24,7 @@ interface CommissionSummary {
 }
 
 const CommissionReports = () => {
-  const { hasPermission } = useAuth()
+  const { hasPermission, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [commissions, setCommissions] = useState<SalesPersonCommission[]>([])
   const [summary, setSummary] = useState<CommissionSummary[]>([])
@@ -43,7 +43,10 @@ const CommissionReports = () => {
   const loadCommissions = async () => {
     setLoading(true)
     try {
-      const allCommissions = await salesCommissionService.getAll()
+      const companyId = getCurrentCompanyId()
+      // Pass companyId directly - services will handle null by returning empty array for data isolation
+      // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
+      const allCommissions = await salesCommissionService.getAll(companyId)
       
       let filtered: SalesPersonCommission[] = []
       

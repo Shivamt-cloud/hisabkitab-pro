@@ -1,5 +1,5 @@
 import { AuditLog, AuditAction, AuditModule, AuditLogFilter } from '../types/audit'
-import { getAll, put, deleteById, STORES } from '../database/db'
+import { getAll, put, deleteById, getByIndex, STORES } from '../database/db'
 
 const MAX_LOGS = 10000 // Maximum number of logs to keep
 
@@ -18,6 +18,7 @@ export const auditService = {
       entityName?: string
       changes?: { field: string; oldValue: any; newValue: any }[]
       metadata?: Record<string, any>
+      company_id?: number
     }
   ): Promise<AuditLog> => {
     const logs = await auditService.getAll()
@@ -36,6 +37,7 @@ export const auditService = {
       description,
       changes: options?.changes,
       metadata: options?.metadata,
+      company_id: options?.company_id,
     }
 
     // Keep only the most recent logs (delete old ones if over limit)
@@ -58,13 +60,28 @@ export const auditService = {
   },
 
   // Get all audit logs
-  getAll: async (): Promise<AuditLog[]> => {
-    return await getAll<AuditLog>(STORES.AUDIT_LOGS)
+  getAll: async (companyId?: number | null): Promise<AuditLog[]> => {
+    let logs: AuditLog[]
+    
+    // If companyId is provided, use index for efficient filtering
+    if (companyId !== undefined && companyId !== null) {
+      logs = await getByIndex<AuditLog>(STORES.AUDIT_LOGS, 'company_id', companyId)
+      // Additional filter to ensure we only get records with matching company_id
+      logs = logs.filter(log => log.company_id === companyId)
+    } else if (companyId === null) {
+      // If companyId is explicitly null (user has no company), return empty array for data isolation
+      logs = []
+    } else {
+      // If companyId is undefined, return all (for admin users who haven't selected a company)
+      logs = await getAll<AuditLog>(STORES.AUDIT_LOGS)
+    }
+    
+    return logs
   },
 
   // Get audit logs with filters
-  getFiltered: async (filter: AuditLogFilter = {}): Promise<AuditLog[]> => {
-    let logs = await auditService.getAll()
+  getFiltered: async (filter: AuditLogFilter = {}, companyId?: number | null): Promise<AuditLog[]> => {
+    let logs = await auditService.getAll(companyId)
 
     // Filter by user
     if (filter.userId) {
@@ -113,28 +130,28 @@ export const auditService = {
   },
 
   // Get audit logs for a specific entity
-  getByEntity: async (entityType: string, entityId: string | number): Promise<AuditLog[]> => {
-    const logs = await auditService.getAll()
+  getByEntity: async (entityType: string, entityId: string | number, companyId?: number | null): Promise<AuditLog[]> => {
+    const logs = await auditService.getAll(companyId)
     return logs.filter(
       log => log.entityType === entityType && log.entityId === entityId
     )
   },
 
   // Get audit logs for a specific user
-  getByUser: async (userId: string): Promise<AuditLog[]> => {
-    const logs = await auditService.getAll()
+  getByUser: async (userId: string, companyId?: number | null): Promise<AuditLog[]> => {
+    const logs = await auditService.getAll(companyId)
     return logs.filter(log => log.userId === userId)
   },
 
   // Get recent audit logs
-  getRecent: async (limit: number = 50): Promise<AuditLog[]> => {
-    const logs = await auditService.getAll()
+  getRecent: async (limit: number = 50, companyId?: number | null): Promise<AuditLog[]> => {
+    const logs = await auditService.getAll(companyId)
     return logs.slice(0, limit)
   },
 
   // Get statistics
-  getStatistics: async () => {
-    const logs = await auditService.getAll()
+  getStatistics: async (companyId?: number | null) => {
+    const logs = await auditService.getAll(companyId)
     const now = new Date()
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     const thisWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay())
@@ -157,14 +174,14 @@ export const auditService = {
   },
 
   // Export audit logs
-  export: async (filter: AuditLogFilter = {}): Promise<string> => {
-    const logs = await auditService.getFiltered(filter)
+  export: async (filter: AuditLogFilter = {}, companyId?: number | null): Promise<string> => {
+    const logs = await auditService.getFiltered(filter, companyId)
     return JSON.stringify(logs, null, 2)
   },
 
   // Clear old logs (keep last N days)
-  clearOldLogs: async (daysToKeep: number = 30): Promise<number> => {
-    const logs = await auditService.getAll()
+  clearOldLogs: async (daysToKeep: number = 30, companyId?: number | null): Promise<number> => {
+    const logs = await auditService.getAll(companyId)
     const cutoff = new Date()
     cutoff.setDate(cutoff.getDate() - daysToKeep)
     const cutoffTime = cutoff.getTime()

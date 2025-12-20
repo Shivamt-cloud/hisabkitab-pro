@@ -3,18 +3,23 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { userService } from '../services/userService'
 import { permissionService } from '../services/permissionService'
+import { companyService } from '../services/companyService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { UserRole } from '../types/auth'
 import { PermissionModule, PermissionAction, PERMISSION_MODULES, ModulePermission } from '../types/permissions'
 import { Home, Save, X, Shield, UserCog, UserCheck, Eye, Lock, Unlock } from 'lucide-react'
+import { Company } from '../types/company'
 
 const UserForm = () => {
-  const { hasPermission, user: currentUser } = useAuth()
+  const { hasPermission, user: currentUser, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
   const isEditing = !!id
 
   const [loading, setLoading] = useState(false)
+  const [companies, setCompanies] = useState<Company[]>([])
+  const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null)
+  const [autoGenerateEmail, setAutoGenerateEmail] = useState(true)
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -25,6 +30,27 @@ const UserForm = () => {
 
   const [useCustomPermissions, setUseCustomPermissions] = useState(false)
   const [customPermissions, setCustomPermissions] = useState<ModulePermission[]>([])
+
+  // Load companies for selection
+  useEffect(() => {
+    const loadCompanies = async () => {
+      try {
+        const allCompanies = await companyService.getAll(true)
+        setCompanies(allCompanies)
+        
+        // If not editing and current user is not admin, pre-select their company
+        if (!isEditing && currentUser && currentUser.role !== 'admin') {
+          const currentCompanyId = getCurrentCompanyId()
+          if (currentCompanyId) {
+            setSelectedCompanyId(currentCompanyId)
+          }
+        }
+      } catch (error) {
+        console.error('Error loading companies:', error)
+      }
+    }
+    loadCompanies()
+  }, [isEditing, currentUser, getCurrentCompanyId])
 
   useEffect(() => {
     if (isEditing && id) {
@@ -40,6 +66,11 @@ const UserForm = () => {
               role: user.role,
             })
             
+            // Set company ID if user has one
+            if (user.company_id) {
+              setSelectedCompanyId(user.company_id)
+            }
+            
             // Load custom permissions if they exist
             const userPerms = await permissionService.getUserPermissions(id)
             if (userPerms) {
@@ -54,6 +85,27 @@ const UserForm = () => {
       loadUser()
     }
   }, [isEditing, id])
+
+  // Auto-generate email when name or company changes (only for new users)
+  useEffect(() => {
+    if (!isEditing && autoGenerateEmail && formData.name.trim() && selectedCompanyId) {
+      const generateEmail = async () => {
+        try {
+          const company = await companyService.getById(selectedCompanyId)
+          if (company && company.unique_code) {
+            // Generate email: username@companycode
+            // Extract username from name (lowercase, remove spaces)
+            const username = formData.name.trim().toLowerCase().replace(/\s+/g, '')
+            const generatedEmail = `${username}@${company.unique_code}`
+            setFormData(prev => ({ ...prev, email: generatedEmail }))
+          }
+        } catch (error) {
+          console.error('Error generating email:', error)
+        }
+      }
+      generateEmail()
+    }
+  }, [formData.name, selectedCompanyId, autoGenerateEmail, isEditing])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -79,15 +131,32 @@ const UserForm = () => {
       return
     }
 
-    if (formData.password && formData.password.length < 6) {
-      alert('Password must be at least 6 characters long')
-      return
+    // Trim passwords to avoid whitespace issues
+    const trimmedPassword = formData.password.trim()
+    const trimmedConfirmPassword = formData.confirmPassword.trim()
+    
+    // If password is provided when editing, validate it
+    if (trimmedPassword) {
+      // Check length first
+      if (trimmedPassword.length < 6) {
+        alert('Password must be at least 6 characters long')
+        return
+      }
+      
+      // Check if confirm password is provided
+      if (!trimmedConfirmPassword) {
+        alert('Please confirm your password')
+        return
+      }
+      
+      // Check if passwords match
+      if (trimmedPassword !== trimmedConfirmPassword) {
+        alert('Passwords do not match')
+        return
+      }
     }
-
-    if (formData.password !== formData.confirmPassword) {
-      alert('Passwords do not match')
-      return
-    }
+    
+    // If no password provided when editing, that's fine (keeping current password)
 
     setLoading(true)
 
@@ -100,6 +169,14 @@ const UserForm = () => {
           role: formData.role,
         }
         
+        // Update company_id if company is selected (unless user is admin)
+        if (selectedCompanyId && formData.role !== 'admin') {
+          updateData.company_id = selectedCompanyId
+        } else if (formData.role === 'admin') {
+          // Admin users should not have company_id
+          updateData.company_id = undefined
+        }
+        
         // Only update password if provided
         if (formData.password) {
           updateData.password = formData.password
@@ -108,13 +185,35 @@ const UserForm = () => {
         await userService.update(id, updateData)
         alert('User updated successfully!')
       } else {
-        // Create new user
-        await userService.create({
+        // Create new user (use trimmed password)
+        // Auto-assign company_id if company is selected
+        const userData: any = {
           name: formData.name,
           email: formData.email,
-          password: formData.password,
+          password: trimmedPassword,
           role: formData.role,
-        })
+        }
+        
+        // Auto-assign company_id if company is selected (unless user is admin)
+        if (selectedCompanyId && formData.role !== 'admin') {
+          userData.company_id = selectedCompanyId
+        } else if (!selectedCompanyId && currentUser && currentUser.role !== 'admin' && formData.role !== 'admin') {
+          // If no company selected but current user is not admin, assign their company_id
+          const currentCompanyId = getCurrentCompanyId()
+          if (currentCompanyId) {
+            userData.company_id = currentCompanyId
+            setSelectedCompanyId(currentCompanyId) // Also set it in state for consistency
+          }
+        }
+        
+        // Validate: non-admin users must have a company_id
+        if (formData.role !== 'admin' && !userData.company_id) {
+          alert('Please select a company for non-admin users')
+          setLoading(false)
+          return
+        }
+        
+        await userService.create(userData)
         alert('User created successfully!')
       }
       navigate('/users')
@@ -185,19 +284,91 @@ const UserForm = () => {
                 />
               </div>
 
+              {/* Company Selection (for non-admin users or when creating new user) */}
+              {(!isEditing || currentUser?.role === 'admin') && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Company {formData.role !== 'admin' && <span className="text-red-500">*</span>}
+                  </label>
+                  <select
+                    value={selectedCompanyId || ''}
+                    onChange={(e) => {
+                      const companyId = e.target.value ? parseInt(e.target.value) : null
+                      setSelectedCompanyId(companyId)
+                    }}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                    required={formData.role !== 'admin'}
+                    disabled={currentUser?.role !== 'admin' && !isEditing}
+                  >
+                    <option value="">Select Company</option>
+                    {companies.map(company => (
+                      <option key={company.id} value={company.id}>
+                        {company.name} ({company.unique_code})
+                      </option>
+                    ))}
+                  </select>
+                  {!isEditing && selectedCompanyId && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Email will be auto-generated as: username@{companies.find(c => c.id === selectedCompanyId)?.unique_code}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* User Code (Email) - Show as read-only info when editing */}
+              {isEditing && formData.email && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    User Code
+                  </label>
+                  <div className="px-4 py-3 bg-gray-50 border border-gray-300 rounded-lg text-gray-700 font-mono">
+                    {formData.email}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    User code format: username@companycode (e.g., cs01@COMP002)
+                  </p>
+                </div>
+              )}
+
               {/* Email */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Email <span className="text-red-500">*</span>
+                  {!isEditing && (
+                    <span className="text-xs text-gray-500 ml-2">(Auto-generated from username + company code)</span>
+                  )}
+                  {isEditing && (
+                    <span className="text-xs text-gray-500 ml-2">(User Code - shown above)</span>
+                  )}
                 </label>
-                <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                  placeholder="user@example.com"
-                  required
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => {
+                      setFormData({ ...formData, email: e.target.value })
+                      setAutoGenerateEmail(false) // Disable auto-generation if user manually edits
+                    }}
+                    className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                    placeholder={!isEditing ? "Auto-generated: username@companycode" : "user@example.com"}
+                    required
+                  />
+                  {!isEditing && (
+                    <button
+                      type="button"
+                      onClick={() => setAutoGenerateEmail(!autoGenerateEmail)}
+                      className="px-3 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                      title={autoGenerateEmail ? "Disable auto-generation" : "Enable auto-generation"}
+                    >
+                      {autoGenerateEmail ? '🔒' : '🔓'}
+                    </button>
+                  )}
+                </div>
+                {!isEditing && autoGenerateEmail && selectedCompanyId && formData.name.trim() && (
+                  <p className="text-xs text-green-600 mt-1">
+                    ✓ Email will be auto-generated when you select a company
+                  </p>
+                )}
               </div>
 
               {/* Password */}
@@ -217,20 +388,33 @@ const UserForm = () => {
                 />
               </div>
 
-              {/* Confirm Password */}
-              {formData.password && (
+              {/* Confirm Password - Always visible when password is entered or when editing */}
+              {(formData.password || isEditing) && (
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Confirm Password <span className="text-red-500">*</span>
+                    Confirm Password {formData.password && <span className="text-red-500">*</span>}
+                    {isEditing && !formData.password && (
+                      <span className="text-gray-500 text-xs ml-2">(Required if changing password)</span>
+                    )}
                   </label>
                   <input
                     type="password"
                     value={formData.confirmPassword}
                     onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    placeholder="Confirm password"
-                    required={!!formData.password}
+                    className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none ${
+                      formData.password && formData.confirmPassword && formData.password.trim() !== formData.confirmPassword.trim()
+                        ? 'border-red-300'
+                        : 'border-gray-300'
+                    }`}
+                    placeholder={isEditing ? "Re-enter password to confirm (leave blank if not changing)" : "Re-enter password to confirm"}
+                    required={!!formData.password.trim()}
                   />
+                  {formData.password && formData.confirmPassword && formData.password.trim() !== formData.confirmPassword.trim() && (
+                    <p className="text-sm text-red-600 mt-1">Passwords do not match</p>
+                  )}
+                  {isEditing && !formData.password && (
+                    <p className="text-xs text-gray-500 mt-1">Leave both password fields blank to keep the current password</p>
+                  )}
                 </div>
               )}
 

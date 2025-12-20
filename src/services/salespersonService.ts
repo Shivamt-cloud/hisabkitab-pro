@@ -2,6 +2,7 @@
 
 import { SalesPerson, CategoryCommission, SalesPersonCommission, SalesPersonCategoryAssignment } from '../types/salesperson'
 import { productService, categoryService } from './productService'
+import { saleService } from './saleService'
 import { getAll, getById, put, deleteById, STORES } from '../database/db'
 
 // Sales Persons
@@ -215,8 +216,27 @@ export const salesCommissionService = {
     }
   },
 
-  getAll: async (): Promise<SalesPersonCommission[]> => {
-    return await getAll<SalesPersonCommission>(STORES.SALES_COMMISSIONS)
+  getAll: async (companyId?: number | null): Promise<SalesPersonCommission[]> => {
+    let commissions = await getAll<SalesPersonCommission>(STORES.SALES_COMMISSIONS)
+    
+    // If companyId is provided, filter by checking the sale's company_id
+    if (companyId !== undefined && companyId !== null) {
+      // Filter commissions by checking their associated sale's company_id
+      const filteredCommissions: SalesPersonCommission[] = []
+      for (const commission of commissions) {
+        const sale = await saleService.getById(commission.sale_id)
+        if (sale && sale.company_id === companyId) {
+          filteredCommissions.push(commission)
+        }
+      }
+      commissions = filteredCommissions
+    } else if (companyId === null) {
+      // If companyId is explicitly null (user has no company), return empty array for data isolation
+      commissions = []
+    }
+    // If companyId is undefined, return all (for admin users who haven't selected a company)
+    
+    return commissions
   },
 
   getBySalesPerson: async (salesPersonId: number): Promise<SalesPersonCommission[]> => {

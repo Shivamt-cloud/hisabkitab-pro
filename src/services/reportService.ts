@@ -91,8 +91,8 @@ export const reportService = {
   },
 
   // Sales by Product
-  getSalesByProduct: async (startDate?: string, endDate?: string): Promise<SalesByProductReport[]> => {
-    const allSales = await saleService.getAll(true)
+  getSalesByProduct: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<SalesByProductReport[]> => {
+    const allSales = await saleService.getAll(true, companyId)
     const filteredSales = reportService.filterSalesByDate(allSales, startDate, endDate)
     const productMap = new Map<number, SalesByProductReport>()
 
@@ -139,10 +139,10 @@ export const reportService = {
   },
 
   // Sales by Category
-  getSalesByCategory: async (startDate?: string, endDate?: string): Promise<SalesByCategoryReport[]> => {
+  getSalesByCategory: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<SalesByCategoryReport[]> => {
     const [allSales, products] = await Promise.all([
-      saleService.getAll(true),
-      productService.getAll(false)
+      saleService.getAll(true, companyId),
+      productService.getAll(false, companyId)
     ])
     const filteredSales = reportService.filterSalesByDate(allSales, startDate, endDate)
     const categoryMap = new Map<string, SalesByCategoryReport>()
@@ -210,8 +210,8 @@ export const reportService = {
   },
 
   // Sales by Customer
-  getSalesByCustomer: async (startDate?: string, endDate?: string): Promise<SalesByCustomerReport[]> => {
-    const allSales = await saleService.getAll(true)
+  getSalesByCustomer: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<SalesByCustomerReport[]> => {
+    const allSales = await saleService.getAll(true, companyId)
     const filteredSales = reportService.filterSalesByDate(allSales, startDate, endDate)
     const customerMap = new Map<string, SalesByCustomerReport>()
 
@@ -259,8 +259,8 @@ export const reportService = {
   },
 
   // Sales by Sales Person
-  getSalesBySalesPerson: async (startDate?: string, endDate?: string): Promise<SalesBySalesPersonReport[]> => {
-    const allSales = await saleService.getAll(true)
+  getSalesBySalesPerson: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<SalesBySalesPersonReport[]> => {
+    const allSales = await saleService.getAll(true, companyId)
     const filteredSales = reportService.filterSalesByDate(allSales, startDate, endDate)
     const salesPersonMap = new Map<string, SalesBySalesPersonReport>()
 
@@ -308,10 +308,10 @@ export const reportService = {
   },
 
   // Product Performance
-  getProductPerformance: async (startDate?: string, endDate?: string): Promise<ProductPerformanceReport[]> => {
+  getProductPerformance: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<ProductPerformanceReport[]> => {
     const [allSales, products] = await Promise.all([
-      saleService.getAll(true),
-      productService.getAll(false)
+      saleService.getAll(true, companyId),
+      productService.getAll(false, companyId)
     ])
     const filteredSales = reportService.filterSalesByDate(allSales, startDate, endDate)
     const productMap = new Map<number, ProductPerformanceReport>()
@@ -386,8 +386,8 @@ export const reportService = {
   },
 
   // Profit Analysis by Period
-  getProfitAnalysis: async (groupBy: 'day' | 'week' | 'month' | 'year', startDate?: string, endDate?: string): Promise<ProfitAnalysisReport[]> => {
-    const allSales = await saleService.getAll(true)
+  getProfitAnalysis: async (groupBy: 'day' | 'week' | 'month' | 'year', startDate?: string, endDate?: string, companyId?: number | null): Promise<ProfitAnalysisReport[]> => {
+    const allSales = await saleService.getAll(true, companyId)
     const filteredSales = reportService.filterSalesByDate(allSales, startDate, endDate)
     const periodMap = new Map<string, ProfitAnalysisReport>()
 
@@ -458,8 +458,8 @@ export const reportService = {
   },
 
   // Category Profit Analysis
-  getCategoryProfit: async (startDate?: string, endDate?: string): Promise<CategoryProfitReport[]> => {
-    const categoryReports = await reportService.getSalesByCategory(startDate, endDate)
+  getCategoryProfit: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<CategoryProfitReport[]> => {
+    const categoryReports = await reportService.getSalesByCategory(startDate, endDate, companyId)
     return categoryReports.map(cat => ({
       category_id: cat.category_id,
       category_name: cat.category_name,

@@ -23,7 +23,7 @@ import {
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
 const AnalyticsDashboard = () => {
-  const { hasPermission } = useAuth()
+  const { hasPermission, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [salesTrends, setSalesTrends] = useState<any[]>([])
   const [topProducts, setTopProducts] = useState<any[]>([])
@@ -40,12 +40,15 @@ const AnalyticsDashboard = () => {
   const loadAnalytics = async () => {
     setLoading(true)
     try {
+      const companyId = getCurrentCompanyId()
+      // Pass companyId directly - services will handle null by returning empty array for data isolation
+      // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
       const [trends, products, revenue, customers, categories] = await Promise.all([
-        analyticsService.getSalesTrends(trendDays),
-        analyticsService.getTopProducts(10),
-        analyticsService.getRevenueByPeriod('monthly', 12),
-        analyticsService.getTopCustomers(10),
-        analyticsService.getCategorySales()
+        analyticsService.getSalesTrends(trendDays, companyId),
+        analyticsService.getTopProducts(10, companyId),
+        analyticsService.getRevenueByPeriod('monthly', 12, companyId),
+        analyticsService.getTopCustomers(10, companyId),
+        analyticsService.getCategorySales(companyId)
       ])
       setSalesTrends(trends)
       setTopProducts(products)

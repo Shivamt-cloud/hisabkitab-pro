@@ -16,7 +16,8 @@ export interface InvoiceData {
   discount?: number
   tax_amount: number
   grand_total: number
-  payment_method: string
+  payment_method: string // Legacy: single payment method (for backward compatibility)
+  payment_methods?: Array<{ method: string; amount: number }> // New: multiple payment methods
   payment_status: string
   sales_person?: string
   notes?: string

@@ -8,7 +8,7 @@ import { validateBarcode } from '../utils/barcodeGenerator'
 import { calculateTax, GST_RATES, getSplitGSTRates, validateHSNCode } from '../utils/taxCalculator'
 
 const ProductForm = () => {
-  const { hasPermission } = useAuth()
+  const { hasPermission, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
   const isEdit = !!id
@@ -126,7 +126,13 @@ const ProductForm = () => {
       if (isEdit && id) {
         await productService.update(parseInt(id), formData)
       } else {
-        await productService.create(formData as Omit<Product, 'id' | 'created_at' | 'updated_at' | 'category_name'>)
+        // Set company_id when creating a new product
+        const companyId = getCurrentCompanyId()
+        const productData = {
+          ...formData,
+          company_id: companyId ?? undefined,
+        } as Omit<Product, 'id' | 'created_at' | 'updated_at' | 'category_name'>
+        await productService.create(productData)
       }
       navigate('/products')
     } catch (error) {

@@ -8,6 +8,7 @@ import { productService } from '../services/productService'
 import { customerService } from '../services/customerService'
 import { notificationService } from '../services/notificationService'
 import { settingsService } from '../services/settingsService'
+import { companyService } from '../services/companyService'
 import { 
   ShoppingCart, 
   History, 
@@ -43,7 +44,7 @@ interface ReportSummary {
 type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
 
 const Dashboard = () => {
-  const { hasPermission, user, getCurrentCompanyId } = useAuth()
+  const { hasPermission, user, getCurrentCompanyId, currentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [reports, setReports] = useState<ReportSummary[]>([])
   const [currentTime, setCurrentTime] = useState(new Date())
@@ -61,19 +62,71 @@ const Dashboard = () => {
   })
   const [companyName, setCompanyName] = useState<string>('')
 
-  useEffect(() => {
-    calculateReports()
-    loadCompanyName()
-  }, [timePeriod, customStartDate, customEndDate])
-
   const loadCompanyName = async () => {
     try {
-      const companySettings = await settingsService.getCompany()
-      setCompanyName(companySettings.company_name || '')
+      // Wait for user to be loaded
+      if (!user) {
+        console.log('[Dashboard] User not loaded yet, skipping company name load')
+        return
+      }
+      
+      // Get company ID: for non-admin, use user's company_id; for admin, use currentCompanyId
+      let companyIdToUse = user.role === 'admin' ? currentCompanyId : (user.company_id || null)
+      
+      // If user doesn't have company_id but is not admin, try to find company by email pattern
+      if (!companyIdToUse && user.role !== 'admin' && user.email) {
+        console.log('[Dashboard] User has no company_id, attempting to find company by email pattern')
+        const allCompanies = await companyService.getAll(true)
+        // Try to match company by email pattern (e.g., cs01@hisabkitab.com -> CS01 company)
+        const emailPrefix = user.email.split('@')[0].toLowerCase()
+        const matchingCompany = allCompanies.find(c => {
+          const companyNameLower = c.name.toLowerCase()
+          const companyCodeLower = c.unique_code?.toLowerCase()
+          return companyNameLower === emailPrefix || companyCodeLower?.includes(emailPrefix) || emailPrefix.includes(companyNameLower)
+        })
+        if (matchingCompany) {
+          console.log('[Dashboard] Found matching company by email pattern:', matchingCompany.name, 'ID:', matchingCompany.id)
+          companyIdToUse = matchingCompany.id
+          // Optionally update the user's company_id (but don't do this automatically without user confirmation)
+        }
+      }
+      
+      console.log('[Dashboard] Loading company name for companyId:', companyIdToUse, 'user:', user.email, 'user.company_id:', user.company_id, 'currentCompanyId:', currentCompanyId)
+      
+      if (companyIdToUse) {
+        const company = await companyService.getById(companyIdToUse)
+        console.log('[Dashboard] Loaded company:', company)
+        console.log('[Dashboard] Company details - id:', company?.id, 'name:', company?.name, 'unique_code:', company?.unique_code)
+        if (company) {
+          // Use company.name (e.g., "CS01"), not unique_code (e.g., "COMP002")
+          const nameToDisplay = company.name || company.unique_code || ''
+          console.log('[Dashboard] Setting company name to:', nameToDisplay, '(from company.name field)')
+          setCompanyName(nameToDisplay)
+        } else {
+          console.log('[Dashboard] Company not found for ID:', companyIdToUse)
+          setCompanyName('')
+        }
+      } else {
+        console.log('[Dashboard] No companyId available, user role:', user.role)
+        console.log('[Dashboard] User needs to be assigned to a company. Please update the user in User Management.')
+        setCompanyName('')
+      }
     } catch (error) {
-      console.error('Error loading company name:', error)
+      console.error('[Dashboard] Error loading company name:', error)
+      setCompanyName('')
     }
   }
+
+  useEffect(() => {
+    calculateReports()
+  }, [timePeriod, customStartDate, customEndDate])
+
+  useEffect(() => {
+    if (user) {
+      loadCompanyName()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentCompanyId, user?.company_id, user]) // Reload when company or user changes
 
   // Update time every second for real-time clock
   useEffect(() => {
@@ -146,12 +199,14 @@ const Dashboard = () => {
   const calculateReports = async () => {
     // Get actual data
     const companyId = getCurrentCompanyId()
+    // Pass companyId directly - services will handle null by returning empty array for data isolation
+    // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
     const [allSales, allPurchases, allProducts, allCustomers, allSuppliers] = await Promise.all([
-      saleService.getAll(true, companyId || undefined),
-      purchaseService.getAll(undefined, companyId || undefined),
-      productService.getAll(false, companyId || undefined),
-      customerService.getAll(false, companyId || undefined),
-      supplierService.getAll(companyId || undefined)
+      saleService.getAll(true, companyId),
+      purchaseService.getAll(undefined, companyId),
+      productService.getAll(false, companyId),
+      customerService.getAll(false, companyId),
+      supplierService.getAll(companyId)
     ])
 
     // Get date range based on selected time period
@@ -184,10 +239,114 @@ const Dashboard = () => {
       return sum + saleProfit
     }, 0)
     
+    // Create a map of product_id to max min_stock_level from purchase items
+    const productMinStockMap = new Map<number, number>()
+    // Calculate actual available stock from purchase items
+    const productAvailableStockMap = new Map<number, number>()
+    // Track articles for article-based alerts
+    const articleToPurchaseItemMap = new Map<string, { product_id: number; article: string; availableQty: number; minStock: number }>()
+    
+    allPurchases.forEach(purchase => {
+      purchase.items.forEach(item => {
+        if (item.min_stock_level !== undefined && item.min_stock_level > 0) {
+          const current = productMinStockMap.get(item.product_id) || 0
+          productMinStockMap.set(item.product_id, Math.max(current, item.min_stock_level))
+        }
+        
+        // Calculate available stock from purchase items (quantity - sold_quantity)
+        const soldQty = item.sold_quantity || 0
+        const availableQty = item.quantity - soldQty
+        const currentAvailable = productAvailableStockMap.get(item.product_id) || 0
+        productAvailableStockMap.set(item.product_id, currentAvailable + availableQty)
+        
+        // Track articles for article-based alerts
+        if (item.article && item.article.trim()) {
+          const articleKey = item.article.trim().toLowerCase()
+          const existing = articleToPurchaseItemMap.get(articleKey)
+          if (existing) {
+            articleToPurchaseItemMap.set(articleKey, {
+              product_id: item.product_id,
+              article: item.article,
+              availableQty: existing.availableQty + availableQty,
+              minStock: Math.max(existing.minStock, item.min_stock_level || 0)
+            })
+          } else {
+            articleToPurchaseItemMap.set(articleKey, {
+              product_id: item.product_id,
+              article: item.article,
+              availableQty: availableQty,
+              minStock: item.min_stock_level || 0
+            })
+          }
+        }
+      })
+    })
+    
     const totalProducts = allProducts.length
     const activeProducts = allProducts.filter(p => p.status === 'active').length
-    const lowStockProducts = allProducts.filter(p => p.min_stock_level && p.stock_quantity <= p.min_stock_level && p.stock_quantity > 0).length
-    const outOfStockProducts = allProducts.filter(p => p.stock_quantity === 0).length
+    
+    // Count low stock products (using actual available stock from purchase items)
+    let lowStockCount = 0
+    const lowStockProductsList: Array<{ name: string; stock: number; min: number }> = []
+    
+    allProducts.forEach(p => {
+      const minStockLevel = p.min_stock_level || productMinStockMap.get(p.id)
+      const actualAvailableStock = productAvailableStockMap.get(p.id) ?? p.stock_quantity
+      
+      if (minStockLevel !== undefined && minStockLevel > 0 && actualAvailableStock <= minStockLevel && actualAvailableStock > 0) {
+        lowStockCount++
+        lowStockProductsList.push({ name: p.name, stock: actualAvailableStock, min: minStockLevel })
+      }
+    })
+    
+    // Also count article-based alerts
+    articleToPurchaseItemMap.forEach((itemData, articleKey) => {
+      if (itemData.minStock > 0 && itemData.availableQty <= itemData.minStock && itemData.availableQty > 0) {
+        const product = allProducts.find(p => p.id === itemData.product_id)
+        if (product) {
+          // Check if we already counted this product
+          const alreadyCounted = lowStockProductsList.some(p => p.name === product.name)
+          if (!alreadyCounted) {
+            lowStockCount++
+            lowStockProductsList.push({ 
+              name: `${product.name} [${itemData.article}]`, 
+              stock: itemData.availableQty, 
+              min: itemData.minStock 
+            })
+          }
+        }
+      }
+    })
+    
+    const lowStockProducts = lowStockCount
+    const outOfStockProducts = allProducts.filter(p => {
+      const actualAvailableStock = productAvailableStockMap.get(p.id) ?? p.stock_quantity
+      return actualAvailableStock === 0
+    }).length
+    
+    console.log('[Dashboard] Stock alerts calculation:', {
+      totalProducts,
+      activeProducts,
+      lowStockProducts,
+      outOfStockProducts,
+      lowStockProductsList,
+      productsWithMinStock: allProducts
+        .filter(p => {
+          const minStockLevel = p.min_stock_level || productMinStockMap.get(p.id)
+          return minStockLevel !== undefined && minStockLevel > 0
+        })
+        .map(p => {
+          const minStockLevel = p.min_stock_level || productMinStockMap.get(p.id)
+          const actualAvailableStock = productAvailableStockMap.get(p.id) ?? p.stock_quantity
+          return {
+            name: p.name,
+            stock: actualAvailableStock,
+            productStock: p.stock_quantity,
+            min: minStockLevel,
+            shouldAlert: actualAvailableStock <= (minStockLevel || 0) && actualAvailableStock > 0
+          }
+        })
+    })
 
     // Calculate this month's sales
     const now = new Date()
@@ -445,7 +604,7 @@ const Dashboard = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-4xl font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                {companyName ? `${companyName} - HisabKitab-Pro` : 'HisabKitab-Pro'}
+                {companyName && companyName.trim() ? `${companyName} - HisabKitab-Pro` : 'HisabKitab-Pro'}
               </h1>
               <p className="text-sm text-gray-600 mt-1 font-medium">Inventory Management System</p>
             </div>

@@ -1,15 +1,59 @@
 import { InvoiceData } from '../types/invoice'
-import { Printer, Download, X } from 'lucide-react'
+import { Printer, Download, X, Share2, Plus } from 'lucide-react'
 
 interface InvoiceProps {
   invoiceData: InvoiceData
   onClose?: () => void
+  onNewSale?: () => void
   showActions?: boolean
 }
 
-const Invoice = ({ invoiceData, onClose, showActions = true }: InvoiceProps) => {
+const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: InvoiceProps) => {
   const handlePrint = () => {
     window.print()
+  }
+
+  const handleShareWhatsApp = () => {
+    // Generate invoice summary text
+    const customerName = invoiceData.customer?.name || 'Walk-in Customer'
+    const invoiceNumber = invoiceData.invoice_number
+    const invoiceDate = new Date(invoiceData.invoice_date).toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric'
+    })
+    const grandTotal = invoiceData.grand_total.toFixed(2)
+    const companyName = invoiceData.company_info?.name || 'HisabKitab'
+    
+    // Create WhatsApp message
+    let message = `*${companyName}*\n\n`
+    message += `*Invoice #${invoiceNumber}*\n`
+    message += `Date: ${invoiceDate}\n`
+    message += `Customer: ${customerName}\n\n`
+    message += `*Items:*\n`
+    
+    invoiceData.items.forEach((item, index) => {
+      message += `${index + 1}. ${item.product_name} - Qty: ${item.quantity} - ₹${item.total.toFixed(2)}\n`
+    })
+    
+    message += `\n*Total Amount: ₹${grandTotal}*\n`
+    if (invoiceData.payment_methods && invoiceData.payment_methods.length > 0) {
+      message += `Payment Methods:\n`
+      invoiceData.payment_methods.forEach((pm: { method: string; amount: number }, idx: number) => {
+        message += `  ${idx + 1}. ${pm.method.toUpperCase()}: ₹${pm.amount.toFixed(2)}\n`
+      })
+    } else {
+      message += `Payment Method: ${invoiceData.payment_method}\n`
+    }
+    message += `Payment Status: ${invoiceData.payment_status.toUpperCase()}\n\n`
+    message += `Thank you for your business! 🙏`
+    
+    // Encode message for WhatsApp
+    const encodedMessage = encodeURIComponent(message)
+    const whatsappUrl = `https://wa.me/?text=${encodedMessage}`
+    
+    // Open WhatsApp
+    window.open(whatsappUrl, '_blank')
   }
 
   const handleDownload = () => {
@@ -146,6 +190,25 @@ const Invoice = ({ invoiceData, onClose, showActions = true }: InvoiceProps) => 
               color: #6b7280;
               text-align: center;
             }
+            .terms-section {
+              margin-top: 30px;
+              padding-top: 20px;
+              border-top: 1px solid #e5e7eb;
+              font-size: 11px;
+              color: #6b7280;
+            }
+            .terms-section h4 {
+              font-size: 12px;
+              color: #1f2937;
+              margin-bottom: 8px;
+            }
+            .terms-section ul {
+              margin: 5px 0;
+              padding-left: 20px;
+            }
+            .terms-section li {
+              margin: 3px 0;
+            }
           </style>
         </head>
         <body>
@@ -173,6 +236,22 @@ const Invoice = ({ invoiceData, onClose, showActions = true }: InvoiceProps) => 
               <X className="w-5 h-5 text-gray-600" />
             </button>
           )}
+          {onNewSale && (
+            <button
+              onClick={onNewSale}
+              className="p-2 hover:bg-blue-50 rounded transition-colors"
+              title="New Sale"
+            >
+              <Plus className="w-5 h-5 text-blue-600" />
+            </button>
+          )}
+          <button
+            onClick={handleShareWhatsApp}
+            className="p-2 hover:bg-green-50 rounded transition-colors"
+            title="Share on WhatsApp"
+          >
+            <Share2 className="w-5 h-5 text-green-600" />
+          </button>
           <button
             onClick={handlePrint}
             className="p-2 hover:bg-gray-100 rounded transition-colors"
@@ -295,12 +374,9 @@ const Invoice = ({ invoiceData, onClose, showActions = true }: InvoiceProps) => 
           </thead>
           <tbody>
             {invoiceData.items.map((item, index) => {
-              const mrpTotal = (item.mrp || item.unit_price) * item.quantity
               const itemDiscount = item.mrp && item.mrp > item.unit_price 
                 ? (item.mrp - item.unit_price) * item.quantity 
                 : 0
-              const itemSavings = mrpTotal - item.total
-              
               return (
                 <tr key={index} className="border-b border-gray-200">
                   <td className="py-3 px-4">
@@ -403,8 +479,19 @@ const Invoice = ({ invoiceData, onClose, showActions = true }: InvoiceProps) => 
         <div className="border-t border-gray-200 pt-6 mb-6">
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <span className="text-gray-600">Payment Method:</span>
-              <span className="ml-2 font-semibold text-gray-900 capitalize">{invoiceData.payment_method}</span>
+              <span className="text-gray-600">Payment Method{invoiceData.payment_methods && invoiceData.payment_methods.length > 1 ? 's' : ''}:</span>
+              {invoiceData.payment_methods && invoiceData.payment_methods.length > 0 ? (
+                <div className="mt-1 space-y-1">
+                  {invoiceData.payment_methods.map((pm: { method: string; amount: number }, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between">
+                      <span className="font-semibold text-gray-900 capitalize">{pm.method}:</span>
+                      <span className="ml-2 font-semibold text-gray-900">₹{pm.amount.toFixed(2)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span className="ml-2 font-semibold text-gray-900 capitalize">{invoiceData.payment_method}</span>
+              )}
             </div>
             <div>
               <span className="text-gray-600">Payment Status:</span>
@@ -425,12 +512,74 @@ const Invoice = ({ invoiceData, onClose, showActions = true }: InvoiceProps) => 
           </div>
         )}
 
+        {/* Terms & Conditions, Return Policy, Rules & Regulations */}
+        <div className="border-t-2 border-gray-300 pt-6 mt-8 space-y-6">
+          {/* Return Policy */}
+          <div>
+            <h4 className="text-sm font-bold text-gray-900 mb-3 uppercase">Return & Exchange Policy</h4>
+            <div className="text-xs text-gray-600 space-y-2">
+              <ul className="list-disc list-inside space-y-1 ml-2">
+                <li>Items can be returned within 7 days of purchase with original invoice.</li>
+                <li>Products must be in original condition with all tags and packaging intact.</li>
+                <li>Refund will be processed through the original payment method within 5-7 business days.</li>
+                <li>Items purchased on sale or with special discounts may have different return policies.</li>
+                <li>Customized or personalized items are not eligible for return unless defective.</li>
+                <li>Returned items will be inspected before processing the refund.</li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Terms & Conditions */}
+          <div>
+            <h4 className="text-sm font-bold text-gray-900 mb-3 uppercase">Terms & Conditions</h4>
+            <div className="text-xs text-gray-600 space-y-2">
+              <ul className="list-disc list-inside space-y-1 ml-2">
+                <li>All prices are inclusive of applicable taxes unless stated otherwise.</li>
+                <li>Payment must be made as per the payment method selected at the time of purchase.</li>
+                <li>Goods once sold will not be taken back unless covered under return policy.</li>
+                <li>Any dispute will be subject to the jurisdiction of local courts.</li>
+                <li>The company reserves the right to modify terms and conditions without prior notice.</li>
+                <li>Original invoice must be presented for any warranty claims or returns.</li>
+                <li>Warranty terms are as per manufacturer's guidelines and may vary by product.</li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Rules & Regulations */}
+          <div>
+            <h4 className="text-sm font-bold text-gray-900 mb-3 uppercase">Rules & Regulations</h4>
+            <div className="text-xs text-gray-600 space-y-2">
+              <ul className="list-disc list-inside space-y-1 ml-2">
+                <li>This invoice is a valid document for accounting and tax purposes.</li>
+                <li>Please retain this invoice for warranty and return purposes.</li>
+                <li>Any discrepancy must be reported within 24 hours of purchase.</li>
+                <li>Company is not responsible for any damage after delivery if not reported immediately.</li>
+                <li>All transactions are subject to verification and may be cancelled if found fraudulent.</li>
+                <li>Customer is responsible for providing accurate information at the time of purchase.</li>
+                <li>Company reserves the right to refuse service to anyone without prior notice.</li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Additional Information */}
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h4 className="text-sm font-bold text-gray-900 mb-2">Important Information</h4>
+            <div className="text-xs text-gray-600 space-y-1">
+              <p><strong>For Returns/Exchanges:</strong> Please contact us within 7 days of purchase with this invoice.</p>
+              <p><strong>For Warranty Claims:</strong> Please keep this invoice safe and contact us with invoice number.</p>
+              <p><strong>Customer Support:</strong> For any queries, please contact us using the details mentioned above.</p>
+            </div>
+          </div>
+        </div>
+
         {/* Footer */}
-        <div className="border-t border-gray-200 pt-6 text-center text-xs text-gray-500">
-          <p>Thank you for your business!</p>
+        <div className="border-t border-gray-200 pt-6 mt-6 text-center text-xs text-gray-500">
+          <p className="font-semibold mb-2">Thank you for your business!</p>
+          <p>We appreciate your trust in us. For any queries or support, please contact us.</p>
           {invoiceData.company_info?.website && (
-            <p className="mt-1">Visit us at: {invoiceData.company_info.website}</p>
+            <p className="mt-2">Visit us at: {invoiceData.company_info.website}</p>
           )}
+          <p className="mt-2 text-gray-400">This is a computer-generated invoice and does not require a signature.</p>
         </div>
       </div>
 
@@ -553,8 +702,62 @@ const generateInvoiceHTML = (invoiceData: InvoiceData): string => {
           `
         })()}
       </div>
+      <div class="payment-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+          <div>
+            <p style="margin: 0; color: #6b7280; font-size: 14px;">Payment Method${invoiceData.payment_methods && invoiceData.payment_methods.length > 1 ? 's' : ''}:</p>
+            ${invoiceData.payment_methods && invoiceData.payment_methods.length > 0 ? `
+              <div style="margin-top: 8px;">
+                ${invoiceData.payment_methods.map((pm: { method: string; amount: number }) => `
+                  <p style="margin: 4px 0; font-weight: 600; color: #111827;">
+                    ${pm.method.charAt(0).toUpperCase() + pm.method.slice(1)}: ₹${pm.amount.toFixed(2)}
+                  </p>
+                `).join('')}
+              </div>
+            ` : `
+              <p style="margin: 8px 0 0 0; font-weight: 600; color: #111827; text-transform: capitalize;">
+                ${invoiceData.payment_method}
+              </p>
+            `}
+          </div>
+          <div>
+            <p style="margin: 0; color: #6b7280; font-size: 14px;">Payment Status:</p>
+            <p style="margin: 8px 0 0 0; font-weight: 600; color: ${invoiceData.payment_status === 'paid' ? '#16a34a' : '#dc2626'}; text-transform: uppercase;">
+              ${invoiceData.payment_status}
+            </p>
+          </div>
+        </div>
+      </div>
+      <div class="terms-section">
+        <h4>Return & Exchange Policy</h4>
+        <ul>
+          <li>Items can be returned within 7 days of purchase with original invoice.</li>
+          <li>Products must be in original condition with all tags and packaging intact.</li>
+          <li>Refund will be processed through the original payment method within 5-7 business days.</li>
+          <li>Items purchased on sale or with special discounts may have different return policies.</li>
+          <li>Customized or personalized items are not eligible for return unless defective.</li>
+        </ul>
+        
+        <h4 style="margin-top: 20px;">Terms & Conditions</h4>
+        <ul>
+          <li>All prices are inclusive of applicable taxes unless stated otherwise.</li>
+          <li>Payment must be made as per the payment method selected at the time of purchase.</li>
+          <li>Goods once sold will not be taken back unless covered under return policy.</li>
+          <li>Any dispute will be subject to the jurisdiction of local courts.</li>
+          <li>Original invoice must be presented for any warranty claims or returns.</li>
+        </ul>
+        
+        <h4 style="margin-top: 20px;">Rules & Regulations</h4>
+        <ul>
+          <li>This invoice is a valid document for accounting and tax purposes.</li>
+          <li>Please retain this invoice for warranty and return purposes.</li>
+          <li>Any discrepancy must be reported within 24 hours of purchase.</li>
+          <li>All transactions are subject to verification and may be cancelled if found fraudulent.</li>
+        </ul>
+      </div>
       <div class="footer">
-        <p>Thank you for your business!</p>
+        <p><strong>Thank you for your business!</strong></p>
+        <p>This is a computer-generated invoice and does not require a signature.</p>
       </div>
     </div>
   `

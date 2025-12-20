@@ -15,7 +15,7 @@ import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, F
 type ReportView = 'product' | 'category' | 'customer' | 'salesperson'
 
 const SalesReports = () => {
-  const { hasPermission } = useAuth()
+  const { hasPermission, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [activeView, setActiveView] = useState<ReportView>('product')
   const [timePeriod, setTimePeriod] = useState<ReportTimePeriod>('thisMonth')
@@ -35,23 +35,26 @@ const SalesReports = () => {
   const loadReports = async () => {
     setLoading(true)
     const { startDate, endDate } = reportService.getDateRange(timePeriod, customStartDate, customEndDate)
+    const companyId = getCurrentCompanyId()
+    // Pass companyId directly - services will handle null by returning empty array for data isolation
+    // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
 
     try {
       switch (activeView) {
         case 'product':
-          const productReports = await reportService.getSalesByProduct(startDate, endDate)
+          const productReports = await reportService.getSalesByProduct(startDate, endDate, companyId)
           setProductReports(productReports)
           break
         case 'category':
-          const categoryReports = await reportService.getSalesByCategory(startDate, endDate)
+          const categoryReports = await reportService.getSalesByCategory(startDate, endDate, companyId)
           setCategoryReports(categoryReports)
           break
         case 'customer':
-          const customerReports = await reportService.getSalesByCustomer(startDate, endDate)
+          const customerReports = await reportService.getSalesByCustomer(startDate, endDate, companyId)
           setCustomerReports(customerReports)
           break
         case 'salesperson':
-          const salesPersonReports = await reportService.getSalesBySalesPerson(startDate, endDate)
+          const salesPersonReports = await reportService.getSalesBySalesPerson(startDate, endDate, companyId)
           setSalesPersonReports(salesPersonReports)
           break
       }

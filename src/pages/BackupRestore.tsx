@@ -6,7 +6,7 @@ import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Home, Download, Upload, Database, FileText, AlertCircle, CheckCircle, Info, X } from 'lucide-react'
 
 const BackupRestore = () => {
-  const { user } = useAuth()
+  const { user, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<{ success: boolean; message: string } | null>(null)
@@ -30,7 +30,10 @@ const BackupRestore = () => {
   useEffect(() => {
     const loadStats = async () => {
       try {
-        const statistics = await backupService.getStatistics()
+        const companyId = getCurrentCompanyId()
+        // Pass companyId directly - services will handle null by returning empty array for data isolation
+        // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
+        const statistics = await backupService.getStatistics(companyId)
         setStats(statistics)
       } catch (error) {
         console.error('Error loading statistics:', error)
@@ -41,7 +44,9 @@ const BackupRestore = () => {
 
   const handleExportJSON = async () => {
     try {
-      await backupService.exportToFile(user?.id)
+      const companyId = getCurrentCompanyId()
+      // Pass companyId to export only company's data
+      await backupService.exportToFile(user?.id, companyId)
     } catch (error) {
       alert('Failed to export backup file')
     }
@@ -49,7 +54,9 @@ const BackupRestore = () => {
 
   const handleExportCSV = async () => {
     try {
-      await backupService.exportSummaryToCSV()
+      const companyId = getCurrentCompanyId()
+      // Pass companyId to export only company's data
+      await backupService.exportSummaryToCSV(companyId)
     } catch (error) {
       alert('Failed to export summary')
     }
