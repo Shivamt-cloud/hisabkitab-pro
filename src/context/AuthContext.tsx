@@ -1,8 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
-import { User, UserRole, AuthContextType, RolePermissions } from '../types/auth'
+import { User, AuthContextType, RolePermissions } from '../types/auth'
 import { PermissionModule, PermissionAction } from '../types/permissions'
 import { userService } from '../services/userService'
-import { permissionService } from '../services/permissionService'
 import { auditService } from '../services/auditService'
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)

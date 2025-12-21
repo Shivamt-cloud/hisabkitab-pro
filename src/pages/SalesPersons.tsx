@@ -25,9 +25,9 @@ const SalesPersons = () => {
     loadSalesPersons()
   }, [])
 
-  const loadSalesPersons = () => {
+  const loadSalesPersons = async () => {
     setLoading(true)
-    const allSalesPersons = salesPersonService.getAll(true)
+    const allSalesPersons = await salesPersonService.getAll(true)
     setSalesPersons(allSalesPersons)
     setLoading(false)
   }

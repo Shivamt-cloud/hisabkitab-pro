@@ -23,7 +23,7 @@ import {
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
 const AnalyticsDashboard = () => {
-  const { hasPermission, getCurrentCompanyId } = useAuth()
+  const { getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [salesTrends, setSalesTrends] = useState<any[]>([])
   const [topProducts, setTopProducts] = useState<any[]>([])
@@ -138,7 +138,7 @@ const AnalyticsDashboard = () => {
                     />
                     <YAxis tickFormatter={(value) => `₹${(value / 1000).toFixed(0)}k`} />
                     <Tooltip 
-                      formatter={(value: number) => formatCurrency(value)}
+                      formatter={(value: number | undefined) => value !== undefined ? formatCurrency(value) : ''}
                       labelFormatter={(label) => formatDate(label)}
                     />
                     <Legend />
@@ -170,14 +170,14 @@ const AnalyticsDashboard = () => {
                   <ResponsiveContainer width="100%" height={350}>
                     <BarChart data={topProducts.slice(0, 8)} layout="vertical">
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" tickFormatter={(value) => `₹${(value / 1000).toFixed(0)}k`} />
+                      <XAxis type="number" tickFormatter={(value: number | undefined) => value !== undefined ? `₹${(value / 1000).toFixed(0)}k` : ''} />
                       <YAxis 
                         dataKey="productName" 
                         type="category" 
                         width={150}
                         tick={{ fontSize: 12 }}
                       />
-                      <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                      <Tooltip formatter={(value: number | undefined) => value !== undefined ? formatCurrency(value) : ''} />
                       <Legend />
                       <Bar dataKey="revenue" fill="#3b82f6" name="Revenue" />
                       <Bar dataKey="profit" fill="#10b981" name="Profit" />
@@ -198,18 +198,18 @@ const AnalyticsDashboard = () => {
                         cx="50%"
                         cy="50%"
                         labelLine={false}
-                        label={({ categoryName, percent }) => 
-                          `${categoryName}: ${(percent * 100).toFixed(0)}%`
+                        label={({ name, percent }) => 
+                          `${name}: ${percent ? (percent * 100).toFixed(0) : 0}%`
                         }
                         outerRadius={100}
                         fill="#8884d8"
                         dataKey="revenue"
                       >
-                        {categorySales.slice(0, 6).map((entry, index) => (
+                        {categorySales.slice(0, 6).map((_, index) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                      <Tooltip formatter={(value: number | undefined) => value !== undefined ? formatCurrency(value) : ''} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
@@ -226,7 +226,7 @@ const AnalyticsDashboard = () => {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="period" />
                     <YAxis tickFormatter={(value) => `₹${(value / 1000).toFixed(0)}k`} />
-                    <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                    <Tooltip formatter={(value: number | undefined) => value !== undefined ? formatCurrency(value) : ''} />
                     <Legend />
                     <Bar dataKey="revenue" fill="#3b82f6" name="Revenue" />
                     <Bar dataKey="profit" fill="#10b981" name="Profit" />

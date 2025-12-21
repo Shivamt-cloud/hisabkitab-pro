@@ -21,26 +21,29 @@ const SubCategoryForm = () => {
   const [errors, setErrors] = useState<{ [key: string]: string }>({})
 
   useEffect(() => {
+    const loadMainCategories = async () => {
+      const mainCats = await categoryService.getMainCategories()
+      setMainCategories(mainCats)
+    }
     loadMainCategories()
+    
     if (isEditing) {
-      const category = categoryService.getById(parseInt(id!))
-      if (category) {
-        setFormData({
-          name: category.name || '',
-          description: category.description || '',
-          parent_id: category.parent_id?.toString() || '',
-        })
-      } else {
-        alert('Sub-category not found')
-        navigate('/sub-categories')
+      const loadCategory = async () => {
+        const category = await categoryService.getById(parseInt(id!))
+        if (category) {
+          setFormData({
+            name: category.name || '',
+            description: category.description || '',
+            parent_id: category.parent_id?.toString() || '',
+          })
+        } else {
+          alert('Sub-category not found')
+          navigate('/sub-categories')
+        }
       }
+      loadCategory()
     }
   }, [id, isEditing, navigate])
-
-  const loadMainCategories = () => {
-    const mainCats = categoryService.getMainCategories()
-    setMainCategories(mainCats)
-  }
 
   const validate = (): boolean => {
     const newErrors: { [key: string]: string } = {}

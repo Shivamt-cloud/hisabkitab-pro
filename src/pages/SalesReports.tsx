@@ -264,7 +264,7 @@ const SalesReports = () => {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
-          {productReports.map((report, index) => (
+          {productReports.map((report) => (
             <tr key={report.product_id} className="hover:bg-gray-50 transition-colors">
               <td className="px-6 py-4 whitespace-nowrap">
                 <div className="text-sm font-medium text-gray-900">{report.product_name}</div>

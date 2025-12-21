@@ -28,23 +28,26 @@ const SupplierForm = () => {
 
   useEffect(() => {
     if (isEditing) {
-      const supplier = supplierService.getById(parseInt(id!))
-      if (supplier) {
-        setFormData({
-          name: supplier.name || '',
-          gstin: supplier.gstin || '',
-          contact_person: supplier.contact_person || '',
-          email: supplier.email || '',
-          phone: supplier.phone || '',
-          address: supplier.address || '',
-          city: supplier.city || '',
-          state: supplier.state || '',
-          pincode: supplier.pincode || '',
-        })
-      } else {
-        alert('Supplier not found')
-        navigate('/suppliers')
+      const loadSupplier = async () => {
+        const supplier = await supplierService.getById(parseInt(id!))
+        if (supplier) {
+          setFormData({
+            name: supplier.name || '',
+            gstin: supplier.gstin || '',
+            contact_person: supplier.contact_person || '',
+            email: supplier.email || '',
+            phone: supplier.phone || '',
+            address: supplier.address || '',
+            city: supplier.city || '',
+            state: supplier.state || '',
+            pincode: supplier.pincode || '',
+          })
+        } else {
+          alert('Supplier not found')
+          navigate('/suppliers')
+        }
       }
+      loadSupplier()
     }
   }, [id, isEditing, navigate])
 

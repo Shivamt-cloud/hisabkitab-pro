@@ -106,7 +106,7 @@ function generateCode128Barcode(options: BarcodeOptions): string {
  * Format: Number System (1) + Manufacturer (5) + Product (5) + Check Digit (1)
  * Widely used in North America, very scannable
  */
-function generateUPCABarcode(options: BarcodeOptions): string {
+function generateUPCABarcode(_options: BarcodeOptions): string {
   // Number system digit (0 = standard)
   const numberSystem = '0'
   

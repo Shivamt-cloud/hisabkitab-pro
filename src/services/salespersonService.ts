@@ -210,7 +210,7 @@ export const salesCommissionService = {
       // Generate ID if not present
       const commissionWithId = {
         ...commission,
-        id: commission.id || Date.now() + Math.random(),
+        id: (commission as any).id || Date.now() + Math.random(),
       }
       await put(STORES.SALES_COMMISSIONS, commissionWithId)
     }

@@ -275,7 +275,7 @@ const SystemSettings = () => {
       return
     }
     // Trim passwords to avoid whitespace issues
-    const trimmedPassword = userFormData.password.trim()
+    const trimmedPassword = (userFormData.password || '').trim()
     const trimmedConfirmPassword = (userFormData.confirmPassword || '').trim()
     
     if (trimmedPassword && trimmedPassword.length < 6) {

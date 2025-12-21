@@ -30,7 +30,7 @@ const StockAdjustmentHistory = () => {
       // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
       const [allAdjustmentsResult, adjustmentStats] = await Promise.all([
         stockAdjustmentService.getAll(companyId),
-        stockAdjustmentService.getStats(companyId)
+        stockAdjustmentService.getStats(companyId ?? undefined)
       ])
       
       let allAdjustments = allAdjustmentsResult

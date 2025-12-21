@@ -10,7 +10,7 @@ import { SalesPerson } from '../types/salesperson'
 import { Customer } from '../types/customer'
 import { X, Plus, Trash2, Search, ShoppingCart, Home, User } from 'lucide-react'
 import { SaleItem } from '../types/sale'
-import { Purchase } from '../types/purchase'
+import { Purchase, PurchaseItem } from '../types/purchase'
 
 const SaleForm = () => {
   const navigate = useNavigate()
@@ -261,8 +261,10 @@ const SaleForm = () => {
         const articleLower = article.toLowerCase()
         if (articleLower === queryLower || articleLower.includes(queryLower)) {
           articleItemMatch = true
-          if (!matchingArticleItem || (item.purchase_date && matchingArticleItem.purchase_date && 
-              new Date(item.purchase_date) > new Date(matchingArticleItem.purchase_date))) {
+          const itemWithDate = item as PurchaseItem & { purchase_date?: string }
+          const matchingWithDate = matchingArticleItem as PurchaseItem & { purchase_date?: string }
+          if (!matchingArticleItem || (itemWithDate.purchase_date && matchingWithDate.purchase_date && 
+              new Date(itemWithDate.purchase_date) > new Date(matchingWithDate.purchase_date))) {
             matchingArticleItem = item
           }
         }
@@ -313,38 +315,44 @@ const SaleForm = () => {
     }
   }, [searchQuery, availableProducts.length, filteredProducts.length, productBarcodeMap.size, productArticleMap.size])
 
-  const addProductToSale = (product: Product, searchBarcode?: string) => {
+  const addProductToSale = (product: Product, searchQuery?: string) => {
     // First, determine the article and purchase item details for this product
+    // searchQuery can be either a barcode or an article
     let purchaseItemArticle: string | undefined
     let purchaseItemId: number | undefined
     
-    // If searching by barcode, get article from purchase item
-    if (searchBarcode && barcodeToPurchaseItemMap.has(searchBarcode)) {
-      const purchaseItem = barcodeToPurchaseItemMap.get(searchBarcode)!
-      if (purchaseItem.product_id === product.id) {
-        purchaseItemArticle = purchaseItem.article
-        // Find the purchase item ID
-        const purchase = purchases.find(p => p.items.some(pi => pi.barcode === searchBarcode && pi.product_id === product.id))
-        if (purchase) {
-          const item = purchase.items.find(pi => pi.barcode === searchBarcode && pi.product_id === product.id)
-          if (item) {
-            purchaseItemId = item.id
+    if (!searchQuery) {
+      // No search query, use default product info
+    } else {
+      // Check if searchQuery is a barcode first
+      const isBarcode = barcodeToPurchaseItemMap.has(searchQuery)
+      
+      if (isBarcode) {
+        // If searching by barcode, get article from purchase item
+        const purchaseItem = barcodeToPurchaseItemMap.get(searchQuery)!
+        if (purchaseItem.product_id === product.id) {
+          purchaseItemArticle = purchaseItem.article
+          // Find the purchase item ID
+          const purchase = purchases.find(p => p.items.some(pi => pi.barcode === searchQuery && pi.product_id === product.id))
+          if (purchase) {
+            const item = purchase.items.find(pi => pi.barcode === searchQuery && pi.product_id === product.id)
+            if (item) {
+              purchaseItemId = item.id
+            }
           }
         }
-      }
-    }
-    
-    // If searching by article, get article from purchase item
-    if (!purchaseItemArticle) {
-      const articleItem = getPurchaseItemForArticle(searchBarcode || '')
-      if (articleItem && articleItem.product_id === product.id) {
-        purchaseItemArticle = articleItem.article
-        // Find the purchase item ID
-        const purchase = purchases.find(p => p.items.some(pi => pi.article === articleItem.article && pi.product_id === product.id))
-        if (purchase) {
-          const item = purchase.items.find(pi => pi.article === articleItem.article && pi.product_id === product.id)
-          if (item) {
-            purchaseItemId = item.id
+      } else {
+        // If not a barcode, try searching by article
+        const articleItem = getPurchaseItemForArticle(searchQuery)
+        if (articleItem && articleItem.product_id === product.id) {
+          purchaseItemArticle = articleItem.article
+          // Find the purchase item ID
+          const purchase = purchases.find(p => p.items.some(pi => pi.article === articleItem.article && pi.product_id === product.id))
+          if (purchase) {
+            const item = purchase.items.find(pi => pi.article === articleItem.article && pi.product_id === product.id)
+            if (item) {
+              purchaseItemId = item.id
+            }
           }
         }
       }
@@ -387,75 +395,49 @@ const SaleForm = () => {
         alert(`Only ${remainingStock} units remaining in stock${existingItem.purchase_item_article ? ` for article "${existingItem.purchase_item_article}"` : ''}`)
       }
     } else {
-      // Check if we have purchase item details for this barcode
+      // Use the purchase item details we already found above (from purchaseItemId and purchaseItemArticle)
+      // If we didn't find them, use default product values
       let mrp = product.selling_price || 0
       let unitPrice = product.selling_price || 0
       let purchasePrice = product.purchase_price || 0
       let barcode = product.barcode || ''
       let purchaseId: number | undefined
-      let purchaseItemId: number | undefined
-      let purchaseItemArticle: string | undefined
       let purchaseItemBarcode: string | undefined
       
-      // If searching by barcode, use purchase item details
-      if (searchBarcode && barcodeToPurchaseItemMap.has(searchBarcode)) {
-        const purchaseItem = barcodeToPurchaseItemMap.get(searchBarcode)!
-        if (purchaseItem.product_id === product.id) {
-          mrp = purchaseItem.mrp || purchaseItem.sale_price || product.selling_price || 0
-          unitPrice = purchaseItem.sale_price || purchaseItem.mrp || product.selling_price || 0
-          purchasePrice = purchaseItem.unit_price || product.purchase_price || 0
-          barcode = searchBarcode
-          // Find the purchase that contains this item
-          const purchase = purchases.find(p => p.items.some(pi => pi.barcode === searchBarcode && pi.product_id === product.id))
-          if (purchase) {
-            const item = purchase.items.find(pi => pi.barcode === searchBarcode && pi.product_id === product.id)
-            if (item) {
+      // If we found purchase item details above, use them
+      if (purchaseItemId && searchQuery) {
+        // Check if searchQuery is a barcode
+        const isBarcode = barcodeToPurchaseItemMap.has(searchQuery)
+        
+        if (isBarcode) {
+          const purchaseItem = barcodeToPurchaseItemMap.get(searchQuery)!
+          if (purchaseItem.product_id === product.id) {
+            mrp = purchaseItem.mrp || purchaseItem.sale_price || product.selling_price || 0
+            unitPrice = purchaseItem.sale_price || purchaseItem.mrp || product.selling_price || 0
+            purchasePrice = purchaseItem.unit_price || product.purchase_price || 0
+            barcode = searchQuery
+            purchaseItemBarcode = purchaseItem.barcode
+            // Find the purchase that contains this item
+            const purchase = purchases.find(p => p.items.some(pi => pi.barcode === searchQuery && pi.product_id === product.id))
+            if (purchase) {
               purchaseId = purchase.id
-              purchaseItemId = item.id
-              purchaseItemArticle = item.article
-              purchaseItemBarcode = item.barcode
             }
           }
-          console.log('Using purchase item details for barcode:', {
-            barcode: searchBarcode,
-            mrp,
-            unitPrice,
-            purchasePrice,
-            purchaseItem,
-            purchaseId,
-            purchaseItemId
-          })
-        }
-      }
-      
-      // If searching by article, use purchase item details
-      if (!purchaseItemId) {
-        const articleItem = getPurchaseItemForArticle(searchBarcode || '')
-        if (articleItem && articleItem.product_id === product.id) {
-          mrp = articleItem.mrp || articleItem.sale_price || product.selling_price || 0
-          unitPrice = articleItem.sale_price || articleItem.mrp || product.selling_price || 0
-          purchasePrice = articleItem.unit_price || product.purchase_price || 0
-          barcode = articleItem.barcode || product.barcode || ''
-          // Find the purchase that contains this item
-          const purchase = purchases.find(p => p.items.some(pi => pi.article === articleItem.article && pi.product_id === product.id))
-          if (purchase) {
-            const item = purchase.items.find(pi => pi.article === articleItem.article && pi.product_id === product.id)
-            if (item) {
+        } else {
+          // Not a barcode, try as article
+          const articleItem = getPurchaseItemForArticle(searchQuery)
+          if (articleItem && articleItem.product_id === product.id) {
+            mrp = articleItem.mrp || articleItem.sale_price || product.selling_price || 0
+            unitPrice = articleItem.sale_price || articleItem.mrp || product.selling_price || 0
+            purchasePrice = articleItem.unit_price || product.purchase_price || 0
+            barcode = articleItem.barcode || product.barcode || ''
+            purchaseItemBarcode = articleItem.barcode
+            // Find the purchase that contains this item
+            const purchase = purchases.find(p => p.items.some(pi => pi.article === articleItem.article && pi.product_id === product.id))
+            if (purchase) {
               purchaseId = purchase.id
-              purchaseItemId = item.id
-              purchaseItemArticle = item.article
-              purchaseItemBarcode = item.barcode
             }
           }
-          console.log('Using purchase item details for article:', {
-            article: searchBarcode,
-            mrp,
-            unitPrice,
-            purchasePrice,
-            purchaseItem: articleItem,
-            purchaseId,
-            purchaseItemId
-          })
         }
       }
       

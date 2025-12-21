@@ -300,7 +300,7 @@ const Dashboard = () => {
     })
     
     // Also count article-based alerts
-    articleToPurchaseItemMap.forEach((itemData, articleKey) => {
+    articleToPurchaseItemMap.forEach((itemData) => {
       if (itemData.minStock > 0 && itemData.availableQty <= itemData.minStock && itemData.availableQty > 0) {
         const product = allProducts.find(p => p.id === itemData.product_id)
         if (product) {
