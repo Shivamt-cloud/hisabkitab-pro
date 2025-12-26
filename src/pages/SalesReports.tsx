@@ -10,9 +10,11 @@ import {
   SalesBySalesPersonReport,
   ReportTimePeriod,
 } from '../types/reports'
-import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText } from 'lucide-react'
+import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText, Eye, ShoppingCart } from 'lucide-react'
+import { saleService } from '../services/saleService'
+import { Sale } from '../types/sale'
 
-type ReportView = 'product' | 'category' | 'customer' | 'salesperson'
+type ReportView = 'product' | 'category' | 'customer' | 'salesperson' | 'sales'
 
 const SalesReports = () => {
   const { hasPermission, getCurrentCompanyId } = useAuth()
@@ -27,10 +29,39 @@ const SalesReports = () => {
   const [categoryReports, setCategoryReports] = useState<SalesByCategoryReport[]>([])
   const [customerReports, setCustomerReports] = useState<SalesByCustomerReport[]>([])
   const [salesPersonReports, setSalesPersonReports] = useState<SalesBySalesPersonReport[]>([])
+  const [sales, setSales] = useState<Sale[]>([])
 
   useEffect(() => {
     loadReports()
   }, [timePeriod, customStartDate, customEndDate, activeView])
+
+  // Load sales data on mount and when filters change (even if not on sales tab)
+  useEffect(() => {
+    const loadSalesData = async () => {
+      const { startDate, endDate } = reportService.getDateRange(timePeriod, customStartDate, customEndDate)
+      const companyId = getCurrentCompanyId()
+      try {
+        const allSales = await saleService.getAll(true, companyId)
+        // Filter by date range
+        let filteredSales = allSales
+        if (startDate || endDate) {
+          filteredSales = allSales.filter(sale => {
+            const saleDate = new Date(sale.sale_date).getTime()
+            if (startDate && saleDate < new Date(startDate).getTime()) return false
+            if (endDate) {
+              const endDateTime = new Date(endDate).getTime() + 86400000
+              if (saleDate > endDateTime) return false
+            }
+            return true
+          })
+        }
+        setSales(filteredSales)
+      } catch (error) {
+        console.error('Error loading sales:', error)
+      }
+    }
+    loadSalesData()
+  }, [timePeriod, customStartDate, customEndDate])
 
   const loadReports = async () => {
     setLoading(true)
@@ -56,6 +87,23 @@ const SalesReports = () => {
         case 'salesperson':
           const salesPersonReports = await reportService.getSalesBySalesPerson(startDate, endDate, companyId)
           setSalesPersonReports(salesPersonReports)
+          break
+        case 'sales':
+          const allSales = await saleService.getAll(true, companyId)
+          // Filter by date range
+          let filteredSales = allSales
+          if (startDate || endDate) {
+            filteredSales = allSales.filter(sale => {
+              const saleDate = new Date(sale.sale_date).getTime()
+              if (startDate && saleDate < new Date(startDate).getTime()) return false
+              if (endDate) {
+                const endDateTime = new Date(endDate).getTime() + 86400000
+                if (saleDate > endDateTime) return false
+              }
+              return true
+            })
+          }
+          setSales(filteredSales)
           break
       }
     } catch (error) {
@@ -426,8 +474,87 @@ const SalesReports = () => {
       case 'category': return categoryReports
       case 'customer': return customerReports
       case 'salesperson': return salesPersonReports
+      case 'sales': return sales
     }
   }
+
+  const renderSalesList = () => (
+    <div className="overflow-x-auto">
+      <table className="w-full">
+        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+          <tr>
+            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date</th>
+            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Invoice</th>
+            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Customer</th>
+            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Items</th>
+            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Amount</th>
+            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Payment</th>
+            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-200">
+          {sales.map((sale) => (
+            <tr key={sale.id} className="hover:bg-gray-50 transition-colors">
+              <td className="px-6 py-4 whitespace-nowrap">
+                <div className="text-sm text-gray-900">
+                  {new Date(sale.sale_date).toLocaleDateString('en-IN', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric'
+                  })}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {new Date(sale.sale_date).toLocaleTimeString('en-IN', { 
+                    hour: '2-digit', 
+                    minute: '2-digit',
+                    hour12: true
+                  })}
+                </div>
+              </td>
+              <td className="px-6 py-4 whitespace-nowrap">
+                <div className="text-sm font-medium text-gray-900">
+                  {sale.invoice_number}
+                </div>
+              </td>
+              <td className="px-6 py-4">
+                <div className="text-sm text-gray-900">
+                  {sale.customer_name || 'Walk-in Customer'}
+                </div>
+              </td>
+              <td className="px-6 py-4 whitespace-nowrap text-right">
+                <div className="text-sm text-gray-900">
+                  {sale.items.length} item{sale.items.length !== 1 ? 's' : ''}
+                </div>
+              </td>
+              <td className="px-6 py-4 whitespace-nowrap text-right">
+                <div className="text-sm font-bold text-gray-900">
+                  ₹{sale.grand_total.toFixed(2)}
+                </div>
+              </td>
+              <td className="px-6 py-4 whitespace-nowrap">
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                  sale.payment_status === 'paid'
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-yellow-100 text-yellow-700'
+                }`}>
+                  {sale.payment_status.charAt(0).toUpperCase() + sale.payment_status.slice(1)}
+                </span>
+              </td>
+              <td className="px-6 py-4 text-right whitespace-nowrap">
+                <button
+                  onClick={() => navigate(`/invoice/${sale.id}`)}
+                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                  title="View Receipt"
+                >
+                  <Eye className="w-4 h-4" />
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 
   const currentReport = getCurrentReport()
 
@@ -586,6 +713,18 @@ const SalesReports = () => {
                   <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
                 )}
               </button>
+              <button
+                onClick={() => setActiveView('sales')}
+                className={`px-6 py-3 font-semibold text-sm transition-colors relative flex items-center gap-2 ${
+                  activeView === 'sales' ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <ShoppingCart className="w-4 h-4" />
+                All Sales ({sales.length})
+                {activeView === 'sales' && (
+                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
+                )}
+              </button>
             </div>
 
             {loading ? (
@@ -605,6 +744,7 @@ const SalesReports = () => {
                 {activeView === 'category' && renderCategoryReport()}
                 {activeView === 'customer' && renderCustomerReport()}
                 {activeView === 'salesperson' && renderSalesPersonReport()}
+                {activeView === 'sales' && renderSalesList()}
               </>
             )}
           </div>

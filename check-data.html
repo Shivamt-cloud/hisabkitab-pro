@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database Data Check</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .store {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .store h2 {
+            color: #333;
+            margin-top: 0;
+        }
+        .count {
+            font-size: 24px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        .error {
+            color: #f44336;
+        }
+        .success {
+            color: #4CAF50;
+        }
+        button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #1976D2;
+        }
+        pre {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>IndexedDB Data Check</h1>
+    <button onclick="checkData()">Check All Data</button>
+    <button onclick="clearResults()">Clear Results</button>
+    <div id="results"></div>
+
+    <script>
+        const DB_NAME = 'hisabkitab_db';
+        const DB_VERSION = 8;
+
+        const STORES = {
+            COMPANIES: 'companies',
+            PRODUCTS: 'products',
+            CATEGORIES: 'categories',
+            CUSTOMERS: 'customers',
+            SUPPLIERS: 'suppliers',
+            SALES: 'sales',
+            PURCHASES: 'purchases',
+            STOCK_ADJUSTMENTS: 'stock_adjustments',
+            USERS: 'users',
+            AUDIT_LOGS: 'audit_logs',
+            NOTIFICATIONS: 'notifications',
+            SETTINGS: 'settings',
+            PAYMENT_RECORDS: 'payment_records',
+            PAYMENT_TRANSACTIONS: 'payment_transactions',
+            SALES_PERSONS: 'sales_persons',
+            CATEGORY_COMMISSIONS: 'category_commissions',
+            SALES_COMMISSIONS: 'sales_commissions',
+            SALES_PERSON_CATEGORY_ASSIGNMENTS: 'sales_person_category_assignments',
+            USER_PERMISSIONS: 'user_permissions',
+            AUTOMATIC_BACKUPS: 'automatic_backups',
+            EXPENSES: 'expenses',
+            SUPPLIER_PAYMENTS: 'supplier_payments',
+            SUPPLIER_CHECKS: 'supplier_checks',
+        };
+
+        function openDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        function getAllFromStore(db, storeName) {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([storeName], 'readonly');
+                const store = transaction.objectStore(storeName);
+                const request = store.getAll();
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function checkData() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<p>Checking database...</p>';
+
+            try {
+                const db = await openDB();
+                console.log('Database opened successfully');
+                console.log('Database version:', db.version);
+                console.log('Object stores:', Array.from(db.objectStoreNames));
+
+                let html = '<h2>Database Status</h2>';
+                html += `<p><strong>Database Version:</strong> ${db.version}</p>`;
+                html += `<p><strong>Object Stores:</strong> ${Array.from(db.objectStoreNames).length}</p>`;
+                html += '<hr>';
+
+                let totalRecords = 0;
+
+                for (const [key, storeName] of Object.entries(STORES)) {
+                    try {
+                        const data = await getAllFromStore(db, storeName);
+                        const count = data.length;
+                        totalRecords += count;
+
+                        html += `<div class="store">`;
+                        html += `<h2>${key} (${storeName})</h2>`;
+                        html += `<p class="count">Records: ${count}</p>`;
+                        
+                        if (count > 0) {
+                            html += `<details><summary>View Sample Data (first 3 records)</summary>`;
+                            html += `<pre>${JSON.stringify(data.slice(0, 3), null, 2)}</pre>`;
+                            html += `</details>`;
+                        } else {
+                            html += `<p class="error">No data found</p>`;
+                        }
+                        html += `</div>`;
+                    } catch (error) {
+                        html += `<div class="store">`;
+                        html += `<h2>${key} (${storeName})</h2>`;
+                        html += `<p class="error">Error: ${error.message}</p>`;
+                        html += `</div>`;
+                    }
+                }
+
+                html += `<hr>`;
+                html += `<h2>Summary</h2>`;
+                html += `<p class="count">Total Records Across All Stores: ${totalRecords}</p>`;
+
+                if (totalRecords === 0) {
+                    html += `<p class="error"><strong>WARNING: No data found in database!</strong></p>`;
+                    html += `<p>This could mean:</p>`;
+                    html += `<ul>`;
+                    html += `<li>Data was never migrated from localStorage</li>`;
+                    html += `<li>Database was cleared</li>`;
+                    html += `<li>Database upgrade failed</li>`;
+                    html += `</ul>`;
+                } else {
+                    html += `<p class="success">Data appears to be present in the database.</p>`;
+                }
+
+                resultsDiv.innerHTML = html;
+                db.close();
+            } catch (error) {
+                resultsDiv.innerHTML = `<p class="error">Error opening database: ${error.message}</p>`;
+                console.error('Error:', error);
+            }
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        // Auto-check on load
+        window.onload = () => {
+            checkData();
+        };
+    </script>
+</body>
+</html>
+

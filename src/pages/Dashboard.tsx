@@ -9,6 +9,7 @@ import { customerService } from '../services/customerService'
 import { notificationService } from '../services/notificationService'
 import { settingsService } from '../services/settingsService'
 import { companyService } from '../services/companyService'
+import { supplierPaymentService } from '../services/supplierPaymentService'
 import { 
   ShoppingCart, 
   History, 
@@ -27,7 +28,10 @@ import {
   Settings,
   Database,
   Users,
-  Bell
+  Bell,
+  Clock,
+  Receipt,
+  CreditCard
 } from 'lucide-react'
 
 interface ReportSummary {
@@ -201,12 +205,13 @@ const Dashboard = () => {
     const companyId = getCurrentCompanyId()
     // Pass companyId directly - services will handle null by returning empty array for data isolation
     // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
-    const [allSales, allPurchases, allProducts, allCustomers, allSuppliers] = await Promise.all([
+    const [allSales, allPurchases, allProducts, allCustomers, allSuppliers, upcomingChecks] = await Promise.all([
       saleService.getAll(true, companyId),
       purchaseService.getAll(undefined, companyId),
       productService.getAll(false, companyId),
       customerService.getAll(false, companyId),
-      supplierService.getAll(companyId)
+      supplierService.getAll(companyId),
+      supplierPaymentService.getUpcomingChecks(companyId, 30) // Get checks due in next 30 days
     ])
 
     // Get date range based on selected time period
@@ -224,8 +229,31 @@ const Dashboard = () => {
       return true
     })
 
+    // Filter purchases by date range
+    const filteredPurchases = allPurchases.filter(purchase => {
+      if (!startDate && !endDate) return true
+      const purchaseDate = new Date(purchase.purchase_date).getTime()
+      if (startDate && purchaseDate < new Date(startDate).getTime()) return false
+      if (endDate) {
+        const endDateTime = new Date(endDate).getTime() + 86400000 // Add 24 hours to include entire end date
+        if (purchaseDate > endDateTime) return false
+      }
+      return true
+    })
+
     // Calculate totals for filtered period
     const totalSales = filteredSales.reduce((sum, s) => sum + s.grand_total, 0)
+    
+    // Calculate total purchases (handle both GST and simple purchases)
+    const totalPurchases = filteredPurchases.reduce((sum, purchase) => {
+      if (purchase.type === 'gst') {
+        // GST purchase has grand_total
+        return sum + ((purchase as any).grand_total || 0)
+      } else {
+        // Simple purchase has total_amount
+        return sum + ((purchase as any).total_amount || 0)
+      }
+    }, 0)
     
     // Calculate profit based on actual sold items with date filter (item-wise profit calculation)
     // Note: calculateProfit is async, so we'll calculate profit from filtered sales directly
@@ -375,6 +403,8 @@ const Dashboard = () => {
     // Calculate trends (current period vs previous period)
     let thisPeriod: number
     let lastPeriod: number
+    let thisPeriodPurchases: number
+    let lastPeriodPurchases: number
 
     if (timePeriod === 'thisMonth' || timePeriod === 'all') {
       // This month vs last month
@@ -385,13 +415,29 @@ const Dashboard = () => {
         const saleDate = new Date(s.sale_date)
         return saleDate >= lastMonthStart && saleDate <= lastMonthEnd
       }).reduce((sum, s) => sum + s.grand_total, 0)
+      
+      // Calculate purchase trends
+      thisPeriodPurchases = totalPurchases
+      lastPeriodPurchases = allPurchases.filter(p => {
+        const purchaseDate = new Date(p.purchase_date)
+        return purchaseDate >= lastMonthStart && purchaseDate <= lastMonthEnd
+      }).reduce((sum, purchase) => {
+        if (purchase.type === 'gst') {
+          return sum + ((purchase as any).grand_total || 0)
+        } else {
+          return sum + ((purchase as any).total_amount || 0)
+        }
+      }, 0)
     } else {
       // For other periods, compare with same period before
       thisPeriod = totalSales
       lastPeriod = 0 // Simplified for now
+      thisPeriodPurchases = totalPurchases
+      lastPeriodPurchases = 0 // Simplified for now
     }
 
     const salesTrend = lastPeriod > 0 ? ((thisPeriod - lastPeriod) / lastPeriod * 100) : 0
+    const purchasesTrend = lastPeriodPurchases > 0 ? ((thisPeriodPurchases - lastPeriodPurchases) / lastPeriodPurchases * 100) : 0
 
     // Update dashboard stats
     setDashboardStats({
@@ -415,9 +461,9 @@ const Dashboard = () => {
     },
     {
       title: 'Total Purchases',
-      value: '—',
-      change: '—',
-      trend: 'neutral',
+      value: `₹${totalPurchases.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+      change: purchasesTrend !== 0 ? (purchasesTrend >= 0 ? `+${purchasesTrend.toFixed(1)}%` : `${purchasesTrend.toFixed(1)}%`) : '—',
+      trend: purchasesTrend >= 0 ? 'up' : (purchasesTrend < 0 ? 'down' : 'neutral'),
       icon: <ShoppingBag className="w-8 h-8" />,
       bgGradient: 'from-blue-500 to-cyan-600',
       textColor: 'text-blue-700'
@@ -459,6 +505,16 @@ const Dashboard = () => {
       bgGradient: 'from-red-500 to-pink-600',
       textColor: 'text-red-700',
       onClick: () => navigate('/stock/alerts')
+    },
+    {
+      title: 'Upcoming Checks',
+      value: upcomingChecks.length.toString(),
+      change: `₹${upcomingChecks.reduce((sum, check) => sum + check.amount, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+      trend: upcomingChecks.length > 0 ? 'up' : 'neutral',
+      icon: <CreditCard className="w-8 h-8" />,
+      bgGradient: 'from-indigo-500 to-purple-600',
+      textColor: 'text-indigo-700',
+      onClick: () => navigate('/checks/upcoming')
     }
     ]
     setReports(reportsData)
@@ -561,12 +617,55 @@ const Dashboard = () => {
       hoverGradient: 'from-violet-600 to-purple-700',
       link: '/purchases/history',
       permission: 'purchases:read'
+    },
+    {
+      title: 'Upcoming Checks',
+      description: 'View and manage upcoming supplier checks',
+      icon: <CreditCard className="w-10 h-10" />,
+      gradient: 'from-indigo-500 to-purple-600',
+      hoverGradient: 'from-indigo-600 to-purple-700',
+      link: '/checks/upcoming',
+      permission: 'purchases:read'
     }
   ]
 
   // Filter purchase options based on permissions
   const purchaseOptions = useMemo(() => {
-    return allPurchaseOptions.filter(option => hasPermission(option.permission))
+    return allPurchaseOptions.filter(option => {
+      // Special handling for Sales & Category Management - check both users:read and sales_persons:read
+      if (option.link === '/sales-category-management') {
+        return hasPermission('users:read') || hasPermission('sales_persons:read')
+      }
+      return hasPermission(option.permission)
+    })
+  }, [hasPermission])
+
+  const allExpenseOptions = [
+    {
+      title: 'Daily Expenses',
+      description: 'Manage and track daily business expenses',
+      icon: <Receipt className="w-10 h-10" />,
+      gradient: 'from-red-500 to-pink-600',
+      hoverGradient: 'from-red-600 to-pink-700',
+      link: '/expenses',
+      permission: 'expenses:read'
+    },
+    {
+      title: 'Daily Report',
+      description: 'View comprehensive daily business summary',
+      icon: <FileText className="w-10 h-10" />,
+      gradient: 'from-green-500 to-emerald-600',
+      hoverGradient: 'from-green-600 to-emerald-700',
+      link: '/daily-report',
+      permission: 'expenses:read'
+    }
+  ]
+
+  // Filter expense options based on permissions
+  const expenseOptions = useMemo(() => {
+    return allExpenseOptions.filter(option => {
+      return hasPermission(option.permission)
+    })
   }, [hasPermission])
 
   // Filter reports based on permissions
@@ -737,6 +836,37 @@ const Dashboard = () => {
               </div>
             )}
 
+            {/* Expense Options */}
+            {expenseOptions.length > 0 && (
+              <div className="mt-8 pt-8 border-t border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                  <div className="w-1 h-6 bg-gradient-to-b from-red-500 to-pink-600 rounded-full"></div>
+                  Daily Expenses & Reports
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  {expenseOptions.map((option, index) => (
+                    <button
+                      key={index}
+                      onClick={() => navigate(option.link)}
+                      className={`group relative bg-gradient-to-br ${option.gradient} text-white rounded-2xl p-6 transform transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-red-500/25 text-left overflow-hidden`}
+                    >
+                      <div className={`absolute inset-0 bg-gradient-to-br ${option.hoverGradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300`}></div>
+                      <div className="relative z-10">
+                        <div className="mb-4 transform group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300">
+                          {option.icon}
+                        </div>
+                        <h3 className="text-xl font-bold mb-2">{option.title}</h3>
+                        <p className="text-white/90 text-sm leading-relaxed">{option.description}</p>
+                      </div>
+                      <div className="absolute top-4 right-4 opacity-20 group-hover:opacity-30 transition-opacity">
+                        <div className="w-20 h-20 bg-white rounded-full blur-2xl"></div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Stock Management Options */}
             {hasPermission('products:read') && (
               <div className="mt-8 pt-8 border-t border-gray-200">
@@ -784,9 +914,9 @@ const Dashboard = () => {
             )}
 
             {/* No permissions message */}
-            {salesOptions.length === 0 && purchaseOptions.length === 0 && !hasPermission('products:read') && (
+            {salesOptions.length === 0 && purchaseOptions.length === 0 && expenseOptions.length === 0 && !hasPermission('products:read') && (
               <div className="text-center py-12 text-gray-500">
-                <p className="text-lg font-medium">You don't have permission to access sales or purchase operations.</p>
+                <p className="text-lg font-medium">You don't have permission to access sales, purchase, or expense operations.</p>
               </div>
             )}
           </section>
@@ -947,6 +1077,14 @@ const Dashboard = () => {
 
             {hasPermission('reports:read') && (
               <div className="mt-8 pt-8 border-t border-gray-200/50 space-y-4">
+                <button 
+                  onClick={() => navigate('/reports/daily-activity')}
+                  className="group w-full bg-gradient-to-r from-green-600 via-emerald-600 to-teal-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-green-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                >
+                  <Clock className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                  <span>Daily Activity Report</span>
+                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                </button>
                 <button 
                   onClick={() => navigate('/reports/sales')}
                   className="group w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"

@@ -19,6 +19,7 @@ export interface SaleItem {
   purchase_item_id?: number // ID of the specific purchase item (for tracking which purchase item was sold)
   purchase_item_article?: string // Article from the purchase item
   purchase_item_barcode?: string // Barcode from the purchase item
+  purchase_item_unique_key?: string // Unique key: "P{purchase_id}-I{purchase_item_id}" - ensures each purchase item is treated separately
 }
 
 export interface Sale {
@@ -38,6 +39,9 @@ export interface Sale {
   payment_status: PaymentStatus
   payment_method: string // Legacy: single payment method (for backward compatibility)
   payment_methods?: Array<{ method: string; amount: number }> // New: multiple payment methods
+  return_amount?: number // Amount to return to customer when payment exceeds grand total
+  credit_applied?: number // Amount of customer credit applied to this sale
+  credit_added?: number // Amount of credit added to customer from returns
   notes?: string
   company_id?: number
   created_by: number

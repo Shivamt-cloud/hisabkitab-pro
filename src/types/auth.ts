@@ -34,25 +34,30 @@ export const RolePermissions: Record<UserRole, Permission[]> = {
     { resource: 'reports', actions: ['read', 'export'] },
     { resource: 'users', actions: ['create', 'read', 'update', 'delete'] },
     { resource: 'settings', actions: ['read', 'update'] },
+    { resource: 'expenses', actions: ['create', 'read', 'update', 'delete'] },
   ],
   manager: [
     { resource: 'sales', actions: ['create', 'read', 'update'] },
     { resource: 'purchases', actions: ['create', 'read', 'update'] },
     { resource: 'products', actions: ['create', 'read', 'update'] },
     { resource: 'reports', actions: ['read', 'export'] },
+    { resource: 'users', actions: ['create', 'read', 'update', 'delete'] }, // Allow managers to fully manage sales persons, commissions, and assignments
     { resource: 'settings', actions: ['read'] },
+    { resource: 'expenses', actions: ['create', 'read', 'update', 'delete'] }, // Managers can manage expenses
   ],
   staff: [
     { resource: 'sales', actions: ['create', 'read'] },
     { resource: 'purchases', actions: ['create', 'read'] },
     { resource: 'products', actions: ['read', 'update'] },
     { resource: 'reports', actions: ['read'] },
+    { resource: 'expenses', actions: ['create', 'read'] }, // Staff can create and read expenses
   ],
   viewer: [
     { resource: 'sales', actions: ['read'] },
     { resource: 'purchases', actions: ['read'] },
     { resource: 'products', actions: ['read'] },
     { resource: 'reports', actions: ['read'] },
+    { resource: 'expenses', actions: ['read'] }, // Viewers can read expenses
   ],
 }
 

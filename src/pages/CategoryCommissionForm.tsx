@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { categoryCommissionService } from '../services/salespersonService'
@@ -11,7 +11,10 @@ const CategoryCommissionForm = () => {
   const { hasPermission } = useAuth()
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
+  const [searchParams] = useSearchParams()
   const isEditing = !!id
+  const returnTo = searchParams.get('returnTo')
+  const tab = searchParams.get('tab') || 'commissions'
 
   const [formData, setFormData] = useState({
     category_id: '',
@@ -39,7 +42,11 @@ const CategoryCommissionForm = () => {
           })
         } else {
           alert('Commission configuration not found')
-          navigate('/category-commissions')
+          if (returnTo === 'management') {
+            navigate(`/sales-category-management?tab=${tab}`)
+          } else {
+            navigate('/category-commissions')
+          }
         }
       }
       loadCommission()
@@ -112,7 +119,12 @@ const CategoryCommissionForm = () => {
         alert('Commission configuration created successfully!')
       }
 
-      navigate('/category-commissions')
+      // Navigate back to management page with tab if returnTo is set, otherwise go to commissions list
+      if (returnTo === 'management') {
+        navigate(`/sales-category-management?tab=${tab}`)
+      } else {
+        navigate('/category-commissions')
+      }
     } catch (error) {
       alert('Error saving commission configuration: ' + (error as Error).message)
     }
@@ -128,7 +140,13 @@ const CategoryCommissionForm = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <button
-                  onClick={() => navigate('/category-commissions')}
+                  onClick={() => {
+                    if (returnTo === 'management') {
+                      navigate(`/sales-category-management?tab=${tab}`)
+                    } else {
+                      navigate('/category-commissions')
+                    }
+                  }}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   title="Back to Category Commissions"
                 >
@@ -266,7 +284,13 @@ const CategoryCommissionForm = () => {
             <div className="flex items-center justify-end gap-4">
               <button
                 type="button"
-                onClick={() => navigate('/category-commissions')}
+                onClick={() => {
+                  if (returnTo === 'management') {
+                    navigate(`/sales-category-management?tab=${tab}`)
+                  } else {
+                    navigate('/category-commissions')
+                  }
+                }}
                 className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors"
               >
                 Cancel

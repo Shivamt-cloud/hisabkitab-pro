@@ -12,6 +12,7 @@ export interface Customer {
   is_active: boolean
   credit_limit?: number
   outstanding_amount?: number
+  credit_balance?: number // Positive balance from returns/exchanges (credit available to use)
   company_id?: number
   created_at: string
   updated_at?: string

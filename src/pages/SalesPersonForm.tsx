@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { salesPersonService } from '../services/salespersonService'
@@ -10,7 +10,10 @@ const SalesPersonForm = () => {
   const { hasPermission } = useAuth()
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
+  const [searchParams] = useSearchParams()
   const isEditing = !!id
+  const returnTo = searchParams.get('returnTo')
+  const tab = searchParams.get('tab') || 'salespersons'
 
   const [formData, setFormData] = useState({
     name: '',
@@ -39,12 +42,20 @@ const SalesPersonForm = () => {
             })
           } else {
             alert('Sales person not found')
-            navigate('/sales-persons')
+            if (returnTo === 'management') {
+              navigate(`/sales-category-management?tab=${tab}`)
+            } else {
+              navigate('/sales-persons')
+            }
           }
         } catch (error) {
           console.error('Error loading sales person:', error)
           alert('Sales person not found')
-          navigate('/sales-persons')
+          if (returnTo === 'management') {
+            navigate(`/sales-category-management?tab=${tab}`)
+          } else {
+            navigate('/sales-persons')
+          }
         }
       }
       loadSalesPerson()
@@ -103,7 +114,12 @@ const SalesPersonForm = () => {
         alert('Sales person created successfully!')
       }
 
-      navigate('/sales-persons')
+      // Navigate back to management page with tab if returnTo is set, otherwise go to sales-persons list
+      if (returnTo === 'management') {
+        navigate(`/sales-category-management?tab=${tab}`)
+      } else {
+        navigate('/sales-persons')
+      }
     } catch (error) {
       alert('Error saving sales person: ' + (error as Error).message)
     }
@@ -117,7 +133,13 @@ const SalesPersonForm = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <button
-                  onClick={() => navigate('/sales-persons')}
+                  onClick={() => {
+                    if (returnTo === 'management') {
+                      navigate(`/sales-category-management?tab=${tab}`)
+                    } else {
+                      navigate('/sales-persons')
+                    }
+                  }}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   title="Back to Sales Persons"
                 >
@@ -239,7 +261,13 @@ const SalesPersonForm = () => {
             <div className="flex items-center justify-end gap-4">
               <button
                 type="button"
-                onClick={() => navigate('/sales-persons')}
+                onClick={() => {
+                  if (returnTo === 'management') {
+                    navigate(`/sales-category-management?tab=${tab}`)
+                  } else {
+                    navigate('/sales-persons')
+                  }
+                }}
                 className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors"
               >
                 Cancel

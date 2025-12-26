@@ -1,5 +1,6 @@
 import { Company } from '../types/company'
 import { getAll, getById, put, deleteById, STORES } from '../database/db'
+import { cloudCompanyService } from './cloudCompanyService'
 
 /**
  * Generate next available company code
@@ -40,22 +41,18 @@ async function getCompanyCode(companyId: number | undefined | null): Promise<str
 }
 
 export const companyService = {
-  // Get all companies (admin only)
+  // Get all companies (from cloud, with local fallback)
   getAll: async (includeInactive: boolean = false): Promise<Company[]> => {
-    let companies = await getAll<Company>(STORES.COMPANIES)
-    
-    if (!includeInactive) {
-      companies = companies.filter(c => c.is_active)
-    }
-    
+    // Use cloud service which handles fallback to local
+    const companies = await cloudCompanyService.getAll(includeInactive)
     return companies.sort((a, b) => 
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     )
   },
 
-  // Get company by ID
+  // Get company by ID (from cloud, with local fallback)
   getById: async (id: number): Promise<Company | null> => {
-    const company = await getById<Company>(STORES.COMPANIES, id)
+    const company = await cloudCompanyService.getById(id)
     return company || null
   },
 
@@ -71,16 +68,12 @@ export const companyService = {
     // Generate unique code
     const uniqueCode = await generateNextCompanyCode(companyData.unique_code)
 
-    const newCompany: Company = {
+    // Use cloud service which handles both cloud and local storage
+    return await cloudCompanyService.create({
       ...companyData,
       unique_code: uniqueCode,
-      id: Date.now(),
       is_active: companyData.is_active !== undefined ? companyData.is_active : true,
-      created_at: new Date().toISOString(),
-    }
-    
-    await put(STORES.COMPANIES, newCompany)
-    return newCompany
+    })
   },
 
   // Update company
@@ -105,15 +98,11 @@ export const companyService = {
       }
     }
 
-    const updated: Company = {
-      ...existing,
+    // Use cloud service which handles both cloud and local storage
+    const updated = await cloudCompanyService.update(id, {
       ...updateData,
-      id: existing.id, // Ensure ID doesn't change
       unique_code: finalUniqueCode || existing.unique_code, // Use new code if provided (migration), otherwise preserve existing
-      updated_at: new Date().toISOString(),
-    }
-    
-    await put(STORES.COMPANIES, updated)
+    })
     return updated
   },
   

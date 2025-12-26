@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fix Database</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; }
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .success {
+            background: #d4edda;
+            border: 1px solid #28a745;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .error {
+            background: #f8d7da;
+            border: 1px solid #dc3545;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover { background: #1976D2; }
+        button.danger {
+            background: #f44336;
+        }
+        button.danger:hover { background: #d32f2f; }
+        pre {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .step {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f9f9f9;
+            border-left: 4px solid #2196F3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Database Fix Tool</h1>
+        
+        <div class="warning">
+            <strong>⚠️ Warning:</strong> Your database is corrupted (version 8 but no stores). 
+            This tool will check for backups and fix the database.
+        </div>
+
+        <div id="status"></div>
+
+        <div class="step">
+            <h3>Step 1: Check localStorage for backups</h3>
+            <button onclick="checkLocalStorage()">Check localStorage</button>
+            <div id="localStorageCheck"></div>
+        </div>
+
+        <div class="step">
+            <h3>Step 2: Delete corrupted database</h3>
+            <button class="danger" onclick="deleteDatabase()">Delete Database</button>
+            <div id="deleteStatus"></div>
+        </div>
+
+        <div class="step">
+            <h3>Step 3: Recreate database</h3>
+            <button onclick="recreateDatabase()">Recreate Database</button>
+            <div id="recreateStatus"></div>
+        </div>
+
+        <div class="step">
+            <h3>Step 4: Restore from localStorage (if available)</h3>
+            <button onclick="restoreFromLocalStorage()">Restore Data</button>
+            <div id="restoreStatus"></div>
+        </div>
+    </div>
+
+    <script>
+        const DB_NAME = 'hisabkitab_db';
+        const DB_VERSION = 8;
+
+        const STORAGE_KEYS = {
+            PRODUCTS: 'hisabkitab_products',
+            CATEGORIES: 'hisabkitab_categories',
+            CUSTOMERS: 'hisabkitab_customers',
+            SUPPLIERS: 'hisabkitab_suppliers',
+            SALES: 'hisabkitab_sales',
+            PURCHASES: 'hisabkitab_purchases',
+            STOCK_ADJUSTMENTS: 'hisabkitab_stock_adjustments',
+            USERS: 'hisabkitab_users',
+            AUDIT_LOGS: 'hisabkitab_audit_logs',
+            NOTIFICATIONS: 'hisabkitab_notifications',
+            SETTINGS: 'hisabkitab_settings',
+            PAYMENT_RECORDS: 'hisabkitab_payment_records',
+            PAYMENT_TRANSACTIONS: 'hisabkitab_payment_transactions',
+            SALES_PERSONS: 'hisabkitab_sales_persons',
+            CATEGORY_COMMISSIONS: 'hisabkitab_category_commissions',
+            SALES_COMMISSIONS: 'hisabkitab_sales_commissions',
+            SALES_PERSON_CATEGORY_ASSIGNMENTS: 'hisabkitab_sales_person_category_assignments',
+            USER_PERMISSIONS: 'hisabkitab_user_permissions',
+        };
+
+        const STORES = {
+            COMPANIES: 'companies',
+            PRODUCTS: 'products',
+            CATEGORIES: 'categories',
+            CUSTOMERS: 'customers',
+            SUPPLIERS: 'suppliers',
+            SALES: 'sales',
+            PURCHASES: 'purchases',
+            STOCK_ADJUSTMENTS: 'stock_adjustments',
+            USERS: 'users',
+            AUDIT_LOGS: 'audit_logs',
+            NOTIFICATIONS: 'notifications',
+            SETTINGS: 'settings',
+            PAYMENT_RECORDS: 'payment_records',
+            PAYMENT_TRANSACTIONS: 'payment_transactions',
+            SALES_PERSONS: 'sales_persons',
+            CATEGORY_COMMISSIONS: 'category_commissions',
+            SALES_COMMISSIONS: 'sales_commissions',
+            SALES_PERSON_CATEGORY_ASSIGNMENTS: 'sales_person_category_assignments',
+            USER_PERMISSIONS: 'user_permissions',
+            AUTOMATIC_BACKUPS: 'automatic_backups',
+            EXPENSES: 'expenses',
+            SUPPLIER_PAYMENTS: 'supplier_payments',
+            SUPPLIER_CHECKS: 'supplier_checks',
+        };
+
+        function getLocalStorageData(key) {
+            try {
+                const data = localStorage.getItem(key);
+                if (!data) return [];
+                return JSON.parse(data);
+            } catch (e) {
+                return [];
+            }
+        }
+
+        function checkLocalStorage() {
+            const div = document.getElementById('localStorageCheck');
+            let html = '<h4>localStorage Backup Status:</h4><ul>';
+            let hasData = false;
+
+            for (const [key, storageKey] of Object.entries(STORAGE_KEYS)) {
+                const data = getLocalStorageData(storageKey);
+                const count = Array.isArray(data) ? data.length : 0;
+                html += `<li><strong>${key}:</strong> ${count} records</li>`;
+                if (count > 0) hasData = true;
+            }
+
+            html += '</ul>';
+
+            if (hasData) {
+                html += '<div class="success"><strong>✓ Found backups in localStorage!</strong> Data can be restored.</div>';
+            } else {
+                html += '<div class="error"><strong>✗ No backups found in localStorage.</strong> Data may be lost unless you have a cloud backup.</div>';
+            }
+
+            div.innerHTML = html;
+        }
+
+        function deleteDatabase() {
+            const div = document.getElementById('deleteStatus');
+            div.innerHTML = '<p>Deleting database...</p>';
+
+            const deleteRequest = indexedDB.deleteDatabase(DB_NAME);
+
+            deleteRequest.onsuccess = () => {
+                div.innerHTML = '<div class="success"><strong>✓ Database deleted successfully!</strong> You can now recreate it.</div>';
+            };
+
+            deleteRequest.onerror = () => {
+                div.innerHTML = '<div class="error"><strong>✗ Error deleting database:</strong> ' + deleteRequest.error + '</div>';
+            };
+
+            deleteRequest.onblocked = () => {
+                div.innerHTML = '<div class="warning">Database deletion blocked. Please close all tabs with this app open and try again.</div>';
+            };
+        }
+
+        function recreateDatabase() {
+            const div = document.getElementById('recreateStatus');
+            div.innerHTML = '<p>Recreating database...</p>';
+
+            const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+            request.onerror = () => {
+                div.innerHTML = '<div class="error"><strong>✗ Error:</strong> ' + request.error + '</div>';
+            };
+
+            request.onsuccess = () => {
+                const db = request.result;
+                div.innerHTML = '<div class="success"><strong>✓ Database recreated!</strong> Version: ' + db.version + ', Stores: ' + Array.from(db.objectStoreNames).length + '</div>';
+                db.close();
+            };
+
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                const transaction = event.target.transaction;
+
+                // Create all stores
+                const storesToCreate = [
+                    { name: STORES.COMPANIES, indexes: ['name', 'email', 'is_active'] },
+                    { name: STORES.PRODUCTS, indexes: ['company_id', 'category_id', 'sku', 'barcode', 'status'] },
+                    { name: STORES.CATEGORIES, indexes: ['company_id', 'parent_id'] },
+                    { name: STORES.CUSTOMERS, indexes: ['company_id', 'email', 'phone'] },
+                    { name: STORES.SUPPLIERS, indexes: ['company_id', 'email', 'phone'] },
+                    { name: STORES.SALES, indexes: ['company_id', 'customer_id', 'sale_date', 'invoice_number'] },
+                    { name: STORES.PURCHASES, indexes: ['company_id', 'purchase_date'] },
+                    { name: STORES.STOCK_ADJUSTMENTS, indexes: ['company_id', 'product_id', 'adjustment_date'] },
+                    { name: STORES.USERS, indexes: ['email', 'company_id'] },
+                    { name: STORES.AUDIT_LOGS, indexes: ['company_id', 'user_id', 'action_date'] },
+                    { name: STORES.NOTIFICATIONS, indexes: ['company_id', 'user_id', 'created_at'] },
+                    { name: STORES.SETTINGS, indexes: ['company_id'] },
+                    { name: STORES.PAYMENT_RECORDS, indexes: ['company_id', 'customer_id', 'supplier_id'] },
+                    { name: STORES.PAYMENT_TRANSACTIONS, indexes: ['payment_record_id'] },
+                    { name: STORES.SALES_PERSONS, indexes: ['company_id'] },
+                    { name: STORES.CATEGORY_COMMISSIONS, indexes: ['company_id', 'category_id'] },
+                    { name: STORES.SALES_COMMISSIONS, indexes: ['company_id', 'sales_person_id'] },
+                    { name: STORES.SALES_PERSON_CATEGORY_ASSIGNMENTS, indexes: ['company_id', 'sales_person_id', 'category_id'] },
+                    { name: STORES.USER_PERMISSIONS, indexes: ['company_id', 'user_id'] },
+                    { name: STORES.AUTOMATIC_BACKUPS, indexes: ['backup_date', 'created_at'] },
+                    { name: STORES.EXPENSES, indexes: ['company_id', 'expense_date', 'expense_type', 'sales_person_id'] },
+                    { name: STORES.SUPPLIER_PAYMENTS, indexes: ['company_id', 'supplier_id', 'purchase_id', 'payment_date', 'check_id'] },
+                    { name: STORES.SUPPLIER_CHECKS, indexes: ['company_id', 'supplier_id', 'purchase_id', 'check_number', 'due_date', 'status'] },
+                ];
+
+                storesToCreate.forEach(({ name, indexes }) => {
+                    if (!db.objectStoreNames.contains(name)) {
+                        const store = db.createObjectStore(name, { keyPath: 'id' });
+                        indexes.forEach(index => {
+                            store.createIndex(index, index, { unique: false });
+                        });
+                    }
+                });
+            };
+        }
+
+        async function restoreFromLocalStorage() {
+            const div = document.getElementById('restoreStatus');
+            div.innerHTML = '<p>Restoring data from localStorage...</p>';
+
+            try {
+                const db = await new Promise((resolve, reject) => {
+                    const request = indexedDB.open(DB_NAME, DB_VERSION);
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                });
+
+                let restored = 0;
+                let errors = [];
+
+                for (const [key, storageKey] of Object.entries(STORAGE_KEYS)) {
+                    try {
+                        const data = getLocalStorageData(storageKey);
+                        if (data.length > 0) {
+                            const storeName = STORES[key];
+                            if (storeName) {
+                                const transaction = db.transaction([storeName], 'readwrite');
+                                const store = transaction.objectStore(storeName);
+                                
+                                for (const item of data) {
+                                    await new Promise((resolve, reject) => {
+                                        const request = store.put(item);
+                                        request.onsuccess = () => resolve();
+                                        request.onerror = () => reject(request.error);
+                                    });
+                                }
+                                restored += data.length;
+                            }
+                        }
+                    } catch (error) {
+                        errors.push(`${key}: ${error.message}`);
+                    }
+                }
+
+                db.close();
+
+                let html = `<div class="success"><strong>✓ Restore complete!</strong><br>`;
+                html += `Restored ${restored} records.</div>`;
+                
+                if (errors.length > 0) {
+                    html += `<div class="error"><strong>Errors:</strong><ul>`;
+                    errors.forEach(e => html += `<li>${e}</li>`);
+                    html += `</ul></div>`;
+                }
+
+                div.innerHTML = html;
+            } catch (error) {
+                div.innerHTML = `<div class="error"><strong>✗ Error restoring:</strong> ${error.message}</div>`;
+            }
+        }
+
+        // Auto-check localStorage on load
+        window.onload = () => {
+            checkLocalStorage();
+        };
+    </script>
+</body>
+</html>
+

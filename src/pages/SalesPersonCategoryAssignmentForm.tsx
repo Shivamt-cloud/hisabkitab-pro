@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { salesPersonCategoryAssignmentService } from '../services/salespersonService'
@@ -12,7 +12,10 @@ const SalesPersonCategoryAssignmentForm = () => {
   const { hasPermission } = useAuth()
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
+  const [searchParams] = useSearchParams()
   const isEditing = !!id
+  const returnTo = searchParams.get('returnTo')
+  const tab = searchParams.get('tab') || 'assignments'
 
   const [formData, setFormData] = useState({
     sales_person_id: '',
@@ -40,17 +43,25 @@ const SalesPersonCategoryAssignmentForm = () => {
             })
           } else {
             alert('Assignment not found')
-            navigate('/sales-person-category-assignments')
+            if (returnTo === 'management') {
+  navigate(`/sales-category-management?tab=${tab}`)
+} else {
+  navigate('/sales-person-category-assignments')
+}
           }
         } catch (error) {
           console.error('Error loading assignment:', error)
           alert('Assignment not found')
-          navigate('/sales-person-category-assignments')
+          if (returnTo === 'management') {
+  navigate(`/sales-category-management?tab=${tab}`)
+} else {
+  navigate('/sales-person-category-assignments')
+}
         }
       }
     }
     loadFormData()
-  }, [id, isEditing, navigate])
+  }, [id, isEditing, navigate, returnTo, tab])
 
   const loadData = async () => {
     try {
@@ -133,7 +144,11 @@ const SalesPersonCategoryAssignmentForm = () => {
         alert('Assignment created successfully!')
       }
 
-      navigate('/sales-person-category-assignments')
+      if (returnTo === 'management') {
+  navigate(`/sales-category-management?tab=${tab}`)
+} else {
+  navigate('/sales-person-category-assignments')
+}
     } catch (error) {
       alert('Error saving assignment: ' + (error as Error).message)
     }
@@ -147,7 +162,13 @@ const SalesPersonCategoryAssignmentForm = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <button
-                  onClick={() => navigate('/sales-person-category-assignments')}
+                  onClick={() => {
+                    if (returnTo === 'management') {
+                      navigate(`/sales-category-management?tab=${tab}`)
+                    } else {
+                      navigate('/sales-person-category-assignments')
+                    }
+                  }}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   title="Back to Assignments"
                 >
@@ -244,7 +265,13 @@ const SalesPersonCategoryAssignmentForm = () => {
             <div className="flex items-center justify-end gap-4">
               <button
                 type="button"
-                onClick={() => navigate('/sales-person-category-assignments')}
+                onClick={() => {
+                  if (returnTo === 'management') {
+                    navigate(`/sales-category-management?tab=${tab}`)
+                  } else {
+                    navigate('/sales-person-category-assignments')
+                  }
+                }}
                 className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors"
               >
                 Cancel

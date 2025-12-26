@@ -171,4 +171,17 @@ export const customerService = {
     })
     return true
   },
+
+  updateCreditBalance: async (customerId: number, amount: number): Promise<boolean> => {
+    const customer = await customerService.getById(customerId)
+    if (!customer) return false
+
+    const currentCredit = customer.credit_balance || 0
+    const newCredit = Math.max(0, currentCredit + amount) // Ensure credit doesn't go negative
+
+    await customerService.update(customerId, {
+      credit_balance: newCredit
+    })
+    return true
+  },
 }

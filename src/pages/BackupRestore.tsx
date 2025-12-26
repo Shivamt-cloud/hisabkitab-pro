@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { backupService } from '../services/backupService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
-import { Home, Download, Upload, Database, FileText, AlertCircle, CheckCircle, Info, X } from 'lucide-react'
+import { Home, Download, Upload, Database, FileText, AlertCircle, CheckCircle, Info, X, Cloud, CloudDownload, Trash2, RefreshCw } from 'lucide-react'
+import { CloudBackupMetadata } from '../services/cloudBackupService'
 
 const BackupRestore = () => {
   const { user, getCurrentCompanyId } = useAuth()
@@ -25,7 +26,12 @@ const BackupRestore = () => {
     sub_categories: 0,
     sales_person_category_assignments: 0,
     stock_adjustments: 0,
+    companies: 0,
+    users: 0,
   })
+  const [cloudBackups, setCloudBackups] = useState<CloudBackupMetadata[]>([])
+  const [loadingCloudBackups, setLoadingCloudBackups] = useState(false)
+  const [restoringFromCloud, setRestoringFromCloud] = useState(false)
 
   useEffect(() => {
     const loadStats = async () => {
@@ -40,7 +46,92 @@ const BackupRestore = () => {
       }
     }
     loadStats()
+    loadCloudBackups()
   }, [])
+
+  const loadCloudBackups = async () => {
+    setLoadingCloudBackups(true)
+    try {
+      const companyId = getCurrentCompanyId()
+      const result = await backupService.listCloudBackups(companyId)
+      if (result.success && result.backups) {
+        setCloudBackups(result.backups)
+      }
+    } catch (error) {
+      console.error('Error loading cloud backups:', error)
+    } finally {
+      setLoadingCloudBackups(false)
+    }
+  }
+
+  const handleRestoreFromCloud = async (backup: CloudBackupMetadata) => {
+    if (!window.confirm(`Are you sure you want to restore from backup dated ${backup.backup_date} at ${backup.backup_time}? This will merge data with existing records.`)) {
+      return
+    }
+
+    setRestoringFromCloud(true)
+    try {
+      const companyId = getCurrentCompanyId()
+      // Reconstruct file path
+      const filePath = `${backup.backup_date}/${backup.file_name}`
+      
+      const result = await backupService.restoreFromCloud(filePath, companyId, user?.id, {
+        importCompanies: true,
+        importUsers: true,
+        importProducts: true,
+        importSales: true,
+        importPurchases: true,
+        importSuppliers: true,
+        importCustomers: true,
+        importSalesPersons: true,
+        importSettings: true,
+        importStockAdjustments: true,
+        merge: true,
+      })
+
+      if (result.success) {
+        alert(`✅ Successfully restored ${result.imported} records from cloud backup!`)
+        // Reload stats
+        const statistics = await backupService.getStatistics(companyId)
+        setStats(statistics)
+      } else {
+        alert(`❌ Failed to restore: ${result.message}`)
+      }
+    } catch (error: any) {
+      alert(`❌ Error restoring from cloud: ${error.message || 'Unknown error'}`)
+    } finally {
+      setRestoringFromCloud(false)
+    }
+  }
+
+  const handleDeleteCloudBackup = async (backup: CloudBackupMetadata) => {
+    if (!window.confirm(`Are you sure you want to delete backup from ${backup.backup_date} at ${backup.backup_time}?`)) {
+      return
+    }
+
+    try {
+      const companyId = getCurrentCompanyId()
+      const filePath = `${backup.backup_date}/${backup.file_name}`
+      const result = await backupService.deleteCloudBackup(filePath, companyId)
+      
+      if (result.success) {
+        alert('✅ Backup deleted successfully')
+        loadCloudBackups() // Reload list
+      } else {
+        alert(`❌ Failed to delete: ${result.error}`)
+      }
+    } catch (error: any) {
+      alert(`❌ Error deleting backup: ${error.message || 'Unknown error'}`)
+    }
+  }
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
+  }
 
   const handleExportJSON = async () => {
     try {
@@ -59,6 +150,33 @@ const BackupRestore = () => {
       await backupService.exportSummaryToCSV(companyId)
     } catch (error) {
       alert('Failed to export summary')
+    }
+  }
+
+  const handleCreateCloudBackup = async () => {
+    try {
+      const companyId = getCurrentCompanyId()
+      console.log('🔄 Creating cloud backup...', { userId: user?.id, companyId })
+      
+      const result = await backupService.createAutomaticBackup(user?.id, companyId)
+      
+      console.log('📦 Backup result:', result)
+      
+      if (result.success) {
+        alert(`✅ Backup created and uploaded to cloud successfully!\n\nFile: ${result.fileName}\nCloud Uploaded: ${result.cloudUploaded ? 'Yes' : 'No'}`)
+        // Reload cloud backups list
+        loadCloudBackups()
+        // Reload stats
+        const statistics = await backupService.getStatistics(companyId)
+        setStats(statistics)
+      } else {
+        const errorMsg = result.message || 'Unknown error'
+        console.error('❌ Backup failed:', errorMsg)
+        alert(`❌ Failed to create backup: ${errorMsg}\n\nCheck browser console (F12) for more details.`)
+      }
+    } catch (error: any) {
+      console.error('❌ Exception creating backup:', error)
+      alert(`❌ Error creating backup: ${error?.message || error?.toString() || 'Unknown error'}\n\nCheck browser console (F12) for more details.`)
     }
   }
 
@@ -217,7 +335,19 @@ const BackupRestore = () => {
               Export all your inventory data as a backup file. You can use this file to restore your data later.
             </p>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <button
+                onClick={handleCreateCloudBackup}
+                className="group bg-gradient-to-br from-purple-500 to-pink-600 text-white rounded-xl p-6 hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-105 flex flex-col items-center gap-4"
+              >
+                <Cloud className="w-12 h-12 group-hover:scale-110 transition-transform" />
+                <div className="text-center">
+                  <h3 className="text-xl font-bold mb-2">Create Cloud Backup</h3>
+                  <p className="text-sm opacity-90">Create and upload backup to cloud</p>
+                  <p className="text-xs opacity-75 mt-2">Automatically uploaded to Supabase Storage</p>
+                </div>
+              </button>
+
               <button
                 onClick={handleExportJSON}
                 className="group bg-gradient-to-br from-green-500 to-emerald-600 text-white rounded-xl p-6 hover:shadow-2xl hover:shadow-green-500/25 transition-all duration-300 transform hover:scale-105 flex flex-col items-center gap-4"
@@ -349,6 +479,101 @@ const BackupRestore = () => {
             </div>
           </div>
 
+          {/* Cloud Backups Section */}
+          <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+                  <Cloud className="w-6 h-6 text-blue-600" />
+                  Cloud Backups
+                </h2>
+                <p className="text-gray-600">Restore from automatic cloud backups (12 PM & 6 PM)</p>
+              </div>
+              <button
+                onClick={loadCloudBackups}
+                disabled={loadingCloudBackups}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <RefreshCw className={`w-4 h-4 ${loadingCloudBackups ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+            </div>
+
+            {loadingCloudBackups ? (
+              <div className="text-center py-8 text-gray-500">
+                <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                Loading cloud backups...
+              </div>
+            ) : cloudBackups.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <Cloud className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                <p className="text-lg font-medium mb-1">No cloud backups found</p>
+                <p className="text-sm">Automatic backups are scheduled at 12 PM and 6 PM</p>
+                <p className="text-sm mt-2">Backups are kept for 3 days (rolling retention)</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {cloudBackups.map((backup) => (
+                      <tr key={backup.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                          {new Date(backup.backup_date).toLocaleDateString('en-IN', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                          })}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
+                          {backup.backup_time}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
+                          {formatFileSize(backup.size_bytes)}
+                          {backup.compressed && (
+                            <span className="ml-1 text-xs text-gray-500">(compressed)</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm">
+                          <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            Available
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => handleRestoreFromCloud(backup)}
+                              disabled={restoringFromCloud}
+                              className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 text-xs"
+                            >
+                              <CloudDownload className="w-3 h-3" />
+                              Restore
+                            </button>
+                            <button
+                              onClick={() => handleDeleteCloudBackup(backup)}
+                              className="px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-1 text-xs"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
           {/* Information Section */}
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
             <div className="flex items-start gap-3">
@@ -356,11 +581,12 @@ const BackupRestore = () => {
               <div className="text-sm text-blue-800">
                 <p className="font-semibold mb-2">Backup & Restore Information</p>
                 <ul className="list-disc list-inside space-y-1 ml-2">
-                  <li>Full backup includes all products, sales, purchases, customers, suppliers, and settings</li>
-                  <li>Backup files are in JSON format and can be opened in any text editor</li>
-                  <li>Regular backups are recommended to prevent data loss</li>
+                  <li>Full backup includes all products, sales, purchases, customers, suppliers, companies, users, and settings</li>
+                  <li>Backup files are in JSON format (compressed with gzip) and can be opened in any text editor</li>
+                  <li><strong>Automatic backups:</strong> Created at 12:00 PM and 6:00 PM daily, stored in cloud</li>
+                  <li><strong>Retention:</strong> Backups kept for 3 days (rolling window - oldest deleted when 4th day arrives)</li>
                   <li>Import functionality will merge data with existing records (duplicates by ID are skipped)</li>
-                  <li>Import order: Categories → Products → Suppliers/Customers → Purchases → Settings</li>
+                  <li>Import order: Companies → Users → Categories → Products → Suppliers/Customers → Purchases → Settings</li>
                   <li><strong>Required Format:</strong> JSON file exported from this system. File must have version, export_date, and data object with all record types</li>
                 </ul>
               </div>

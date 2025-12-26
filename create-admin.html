@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Admin User</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; }
+        .success {
+            background: #d4edda;
+            border: 1px solid #28a745;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .error {
+            background: #f8d7da;
+            border: 1px solid #dc3545;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover { background: #1976D2; }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        pre {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Create Admin User</h1>
+        
+        <div class="info">
+            <strong>Admin Credentials:</strong><br>
+            Email: <code>hisabkitabpro@hisabkitab.com</code><br>
+            Password: <code>Shiv845496!@#</code>
+        </div>
+
+        <div id="status"></div>
+
+        <button onclick="fixAndCreateAdmin()" id="createBtn">Fix Database & Create Admin User</button>
+        <button onclick="checkAdmin()" id="checkBtn">Check Admin User</button>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        const DB_NAME = 'hisabkitab_db';
+        const DB_VERSION = 8;
+
+        const STORES = {
+            COMPANIES: 'companies',
+            PRODUCTS: 'products',
+            CATEGORIES: 'categories',
+            CUSTOMERS: 'customers',
+            SUPPLIERS: 'suppliers',
+            SALES: 'sales',
+            PURCHASES: 'purchases',
+            STOCK_ADJUSTMENTS: 'stock_adjustments',
+            USERS: 'users',
+            AUDIT_LOGS: 'audit_logs',
+            NOTIFICATIONS: 'notifications',
+            SETTINGS: 'settings',
+            PAYMENT_RECORDS: 'payment_records',
+            PAYMENT_TRANSACTIONS: 'payment_transactions',
+            SALES_PERSONS: 'sales_persons',
+            CATEGORY_COMMISSIONS: 'category_commissions',
+            SALES_COMMISSIONS: 'sales_commissions',
+            SALES_PERSON_CATEGORY_ASSIGNMENTS: 'sales_person_category_assignments',
+            USER_PERMISSIONS: 'user_permissions',
+            AUTOMATIC_BACKUPS: 'automatic_backups',
+            EXPENSES: 'expenses',
+            SUPPLIER_PAYMENTS: 'supplier_payments',
+            SUPPLIER_CHECKS: 'supplier_checks',
+        };
+
+        const ADMIN_EMAIL = 'hisabkitabpro@hisabkitab.com';
+        const ADMIN_PASSWORD = 'Shiv845496!@#';
+
+        function updateStatus(message, isError = false) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = `<div class="${isError ? 'error' : 'info'}">${message}</div>`;
+        }
+
+        function updateResult(message, isError = false) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = `<div class="${isError ? 'error' : 'success'}">${message}</div>`;
+        }
+
+        function createDatabase() {
+            return new Promise((resolve, reject) => {
+                // First, delete the corrupted database
+                const deleteRequest = indexedDB.deleteDatabase(DB_NAME);
+                
+                deleteRequest.onsuccess = () => {
+                    console.log('Old database deleted');
+                    
+                    // Now create new database
+                    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+                    request.onerror = () => reject(request.error);
+
+                    request.onsuccess = () => {
+                        const db = request.result;
+                        console.log('Database created successfully');
+                        resolve(db);
+                    };
+
+                    request.onupgradeneeded = (event) => {
+                        const db = event.target.result;
+                        const transaction = event.target.transaction;
+
+                        // Create all stores
+                        const storesToCreate = [
+                            { name: STORES.COMPANIES, indexes: ['name', 'email', 'is_active'] },
+                            { name: STORES.PRODUCTS, indexes: ['company_id', 'category_id', 'sku', 'barcode', 'status'] },
+                            { name: STORES.CATEGORIES, indexes: ['company_id', 'parent_id'] },
+                            { name: STORES.CUSTOMERS, indexes: ['company_id', 'email', 'phone'] },
+                            { name: STORES.SUPPLIERS, indexes: ['company_id', 'email', 'phone'] },
+                            { name: STORES.SALES, indexes: ['company_id', 'customer_id', 'sale_date', 'invoice_number'] },
+                            { name: STORES.PURCHASES, indexes: ['company_id', 'purchase_date'] },
+                            { name: STORES.STOCK_ADJUSTMENTS, indexes: ['company_id', 'product_id', 'adjustment_date'] },
+                            { name: STORES.USERS, indexes: ['email', 'company_id'] },
+                            { name: STORES.AUDIT_LOGS, indexes: ['company_id', 'user_id', 'action_date'] },
+                            { name: STORES.NOTIFICATIONS, indexes: ['company_id', 'user_id', 'created_at'] },
+                            { name: STORES.SETTINGS, indexes: ['company_id'] },
+                            { name: STORES.PAYMENT_RECORDS, indexes: ['company_id', 'customer_id', 'supplier_id'] },
+                            { name: STORES.PAYMENT_TRANSACTIONS, indexes: ['payment_record_id'] },
+                            { name: STORES.SALES_PERSONS, indexes: ['company_id'] },
+                            { name: STORES.CATEGORY_COMMISSIONS, indexes: ['company_id', 'category_id'] },
+                            { name: STORES.SALES_COMMISSIONS, indexes: ['company_id', 'sales_person_id'] },
+                            { name: STORES.SALES_PERSON_CATEGORY_ASSIGNMENTS, indexes: ['company_id', 'sales_person_id', 'category_id'] },
+                            { name: STORES.USER_PERMISSIONS, indexes: ['company_id', 'user_id'] },
+                            { name: STORES.AUTOMATIC_BACKUPS, indexes: ['backup_date', 'created_at'] },
+                            { name: STORES.EXPENSES, indexes: ['company_id', 'expense_date', 'expense_type', 'sales_person_id'] },
+                            { name: STORES.SUPPLIER_PAYMENTS, indexes: ['company_id', 'supplier_id', 'purchase_id', 'payment_date', 'check_id'] },
+                            { name: STORES.SUPPLIER_CHECKS, indexes: ['company_id', 'supplier_id', 'purchase_id', 'check_number', 'due_date', 'status'] },
+                        ];
+
+                        storesToCreate.forEach(({ name, indexes }) => {
+                            if (!db.objectStoreNames.contains(name)) {
+                                const store = db.createObjectStore(name, { keyPath: 'id' });
+                                indexes.forEach(index => {
+                                    try {
+                                        store.createIndex(index, index, { unique: false });
+                                    } catch (e) {
+                                        console.warn(`Index ${index} might already exist for ${name}`);
+                                    }
+                                });
+                            }
+                        });
+                    };
+                };
+
+                deleteRequest.onerror = () => {
+                    // If delete fails, try to open and upgrade
+                    const request = indexedDB.open(DB_NAME, DB_VERSION);
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                };
+
+                deleteRequest.onblocked = () => {
+                    reject(new Error('Database deletion blocked. Please close all tabs and try again.'));
+                };
+            });
+        }
+
+        function createAdminUser(db) {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([STORES.USERS], 'readwrite');
+                const store = transaction.objectStore(STORES.USERS);
+
+                // Check if admin already exists
+                const getAllRequest = store.getAll();
+                getAllRequest.onsuccess = () => {
+                    const users = getAllRequest.result;
+                    const existingAdmin = users.find(u => 
+                        u.email && u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()
+                    );
+
+                    const adminUser = {
+                        id: '1',
+                        name: 'HisabKitab Pro Admin',
+                        email: ADMIN_EMAIL,
+                        password: ADMIN_PASSWORD,
+                        role: 'admin',
+                        company_id: undefined,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                    };
+
+                    if (existingAdmin) {
+                        // Update existing admin
+                        adminUser.id = existingAdmin.id;
+                        const updateRequest = store.put(adminUser);
+                        updateRequest.onsuccess = () => {
+                            console.log('Admin user updated');
+                            resolve(adminUser);
+                        };
+                        updateRequest.onerror = () => reject(updateRequest.error);
+                    } else {
+                        // Create new admin
+                        const addRequest = store.add(adminUser);
+                        addRequest.onsuccess = () => {
+                            console.log('Admin user created');
+                            resolve(adminUser);
+                        };
+                        addRequest.onerror = () => reject(addRequest.error);
+                    }
+                };
+
+                getAllRequest.onerror = () => reject(getAllRequest.error);
+            });
+        }
+
+        async function fixAndCreateAdmin() {
+            const btn = document.getElementById('createBtn');
+            btn.disabled = true;
+            updateStatus('Starting database fix and admin creation...');
+
+            try {
+                // Step 1: Create database
+                updateStatus('Step 1: Creating database with all stores...');
+                const db = await createDatabase();
+                updateStatus('✓ Database created successfully');
+
+                // Step 2: Create admin user
+                updateStatus('Step 2: Creating admin user...');
+                const adminUser = await createAdminUser(db);
+                updateStatus('✓ Admin user created');
+
+                db.close();
+
+                updateResult(`
+                    <strong>✓ Success!</strong><br><br>
+                    Database has been fixed and admin user created:<br><br>
+                    <strong>Email:</strong> ${adminUser.email}<br>
+                    <strong>Password:</strong> ${ADMIN_PASSWORD}<br>
+                    <strong>Role:</strong> ${adminUser.role}<br><br>
+                    You can now log in to the application!
+                `, false);
+
+            } catch (error) {
+                updateResult(`<strong>✗ Error:</strong> ${error.message}`, true);
+                updateStatus(`Error: ${error.message}`, true);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function checkAdmin() {
+            const btn = document.getElementById('checkBtn');
+            btn.disabled = true;
+
+            try {
+                const db = await new Promise((resolve, reject) => {
+                    const request = indexedDB.open(DB_NAME, DB_VERSION);
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                });
+
+                const transaction = db.transaction([STORES.USERS], 'readonly');
+                const store = transaction.objectStore(STORES.USERS);
+                const getAllRequest = store.getAll();
+
+                getAllRequest.onsuccess = () => {
+                    const users = getAllRequest.result;
+                    const admin = users.find(u => 
+                        u.email && u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()
+                    );
+
+                    if (admin) {
+                        updateResult(`
+                            <strong>✓ Admin User Found!</strong><br><br>
+                            <strong>ID:</strong> ${admin.id}<br>
+                            <strong>Name:</strong> ${admin.name}<br>
+                            <strong>Email:</strong> ${admin.email}<br>
+                            <strong>Role:</strong> ${admin.role}<br>
+                            <strong>Password Set:</strong> ${admin.password ? 'Yes' : 'No'}<br>
+                            <strong>Total Users:</strong> ${users.length}
+                        `, false);
+                    } else {
+                        updateResult(`<strong>✗ Admin user not found.</strong> Please run "Fix Database & Create Admin User" first.`, true);
+                    }
+
+                    db.close();
+                };
+
+                getAllRequest.onerror = () => {
+                    updateResult(`<strong>✗ Error:</strong> ${getAllRequest.error}`, true);
+                };
+
+            } catch (error) {
+                updateResult(`<strong>✗ Error:</strong> ${error.message}`, true);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Auto-check on load
+        window.onload = () => {
+            checkAdmin();
+        };
+    </script>
+</body>
+</html>
+

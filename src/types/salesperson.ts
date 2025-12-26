@@ -29,6 +29,7 @@ export interface SalesPersonCategoryAssignment {
   sales_person_name?: string
   category_id: number // Sub-category ID
   category_name?: string
+  parent_category_name?: string // Parent category name for display
   is_active: boolean
   created_at: string
   updated_at?: string

@@ -1,0 +1,281 @@
+{
+  "version": "1.0.0",
+  "export_date": "2025-01-15T10:30:00.000Z",
+  "export_by": "admin@company.com",
+  "data": {
+    "companies": [
+      {
+        "id": 1,
+        "name": "My Company",
+        "unique_code": "COMP001",
+        "email": "contact@company.com",
+        "phone": "+91-1234567890",
+        "address": "123 Main Street",
+        "city": "Mumbai",
+        "state": "Maharashtra",
+        "pincode": "400001",
+        "country": "India",
+        "gstin": "27AAAAA0000A1Z5",
+        "pan": "AAAAA0000A",
+        "website": "https://company.com",
+        "valid_from": "2025-01-01",
+        "valid_to": "2025-12-31",
+        "is_active": true,
+        "created_at": "2025-01-15T10:30:00.000Z",
+        "updated_at": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "users": [
+      {
+        "id": "user_001",
+        "name": "Admin User",
+        "email": "admin@company.com",
+        "password": "admin123",
+        "role": "admin",
+        "company_id": 1,
+        "user_code": "USR001",
+        "created_at": "2025-01-15T10:30:00.000Z",
+        "updated_at": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "categories": [
+      {
+        "id": 1,
+        "name": "Electronics",
+        "description": "Electronic products",
+        "parent_id": null,
+        "is_subcategory": false,
+        "company_id": 1,
+        "created_at": "2025-01-15T10:30:00.000Z",
+        "updated_at": "2025-01-15T10:30:00.000Z"
+      },
+      {
+        "id": 2,
+        "name": "Mobile Phones",
+        "description": "Mobile phones and accessories",
+        "parent_id": 1,
+        "is_subcategory": true,
+        "company_id": 1,
+        "created_at": "2025-01-15T10:30:00.000Z",
+        "updated_at": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "products": [
+      {
+        "id": 1,
+        "name": "Samsung Galaxy S21",
+        "sku": "SAM-GAL-S21",
+        "barcode": "1234567890123",
+        "category_id": 2,
+        "description": "Latest Samsung smartphone",
+        "unit": "pcs",
+        "purchase_price": 50000,
+        "selling_price": 55000,
+        "stock_quantity": 10,
+        "min_stock_level": 5,
+        "hsn_code": "8517",
+        "gst_rate": 18,
+        "tax_type": "exclusive",
+        "cgst_rate": 9,
+        "sgst_rate": 9,
+        "igst_rate": 18,
+        "is_active": true,
+        "status": "active",
+        "barcode_status": "active",
+        "company_id": 1,
+        "created_at": "2025-01-15T10:30:00.000Z",
+        "updated_at": "2025-01-15T10:30:00.000Z"
+      },
+      {
+        "id": 2,
+        "name": "iPhone 13",
+        "sku": "APP-IPH-13",
+        "barcode": "9876543210987",
+        "category_id": 2,
+        "description": "Apple iPhone 13",
+        "unit": "pcs",
+        "purchase_price": 60000,
+        "selling_price": 65000,
+        "stock_quantity": 5,
+        "min_stock_level": 3,
+        "hsn_code": "8517",
+        "gst_rate": 18,
+        "tax_type": "exclusive",
+        "is_active": true,
+        "status": "active",
+        "barcode_status": "active",
+        "company_id": 1,
+        "created_at": "2025-01-15T10:30:00.000Z",
+        "updated_at": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "customers": [
+      {
+        "id": 1,
+        "name": "ABC Traders",
+        "email": "contact@abctraders.com",
+        "phone": "+91-9876543210",
+        "gstin": "27AAAAA0000A1Z5",
+        "address": "456 Business Street",
+        "city": "Delhi",
+        "state": "Delhi",
+        "pincode": "110001",
+        "contact_person": "Mr. XYZ",
+        "credit_limit": 100000,
+        "is_active": true,
+        "company_id": 1,
+        "created_at": "2025-01-15T10:30:00.000Z",
+        "updated_at": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "suppliers": [
+      {
+        "id": 1,
+        "name": "XYZ Suppliers",
+        "email": "contact@xyzsuppliers.com",
+        "phone": "+91-9876543210",
+        "gstin": "27AAAAA0000A1Z5",
+        "address": "789 Supplier Street",
+        "city": "Mumbai",
+        "state": "Maharashtra",
+        "pincode": "400001",
+        "contact_person": "Mr. ABC",
+        "is_registered": true,
+        "company_id": 1,
+        "created_at": "2025-01-15T10:30:00.000Z",
+        "updated_at": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "sales": [
+      {
+        "id": 1,
+        "invoice_number": "INV-2025-0001",
+        "customer_id": 1,
+        "customer_name": "ABC Traders",
+        "sales_person_id": null,
+        "sales_person_name": null,
+        "sale_date": "2025-01-15T10:30:00.000Z",
+        "items": [
+          {
+            "product_id": 1,
+            "product_name": "Samsung Galaxy S21",
+            "barcode": "1234567890123",
+            "quantity": 2,
+            "unit_price": 55000,
+            "purchase_price": 50000,
+            "sale_type": "sale",
+            "mrp": 60000,
+            "discount": 5000,
+            "discount_percentage": 8.33,
+            "total": 110000
+          }
+        ],
+        "subtotal": 110000,
+        "tax_amount": 19800,
+        "grand_total": 129800,
+        "payment_status": "paid",
+        "payment_method": "cash",
+        "payment_methods": [
+          {
+            "method": "cash",
+            "amount": 129800
+          }
+        ],
+        "company_id": 1,
+        "created_by": 1,
+        "archived": false,
+        "created_at": "2025-01-15T10:30:00.000Z",
+        "updated_at": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "purchases": [
+      {
+        "id": 1,
+        "type": "gst",
+        "supplier_id": 1,
+        "supplier_name": "XYZ Suppliers",
+        "invoice_number": "PUR-2025-0001",
+        "purchase_date": "2025-01-10T10:30:00.000Z",
+        "items": [
+          {
+            "product_id": 1,
+            "product_name": "Samsung Galaxy S21",
+            "quantity": 10,
+            "unit_price": 50000,
+            "purchase_price": 50000,
+            "hsn_code": "8517",
+            "gst_rate": 18,
+            "cgst_rate": 9,
+            "sgst_rate": 9,
+            "igst_rate": 18,
+            "tax_amount": 90000,
+            "total": 590000,
+            "article": "ART001",
+            "barcode": "1234567890123"
+          }
+        ],
+        "subtotal": 500000,
+        "total_tax": 90000,
+        "grand_total": 590000,
+        "payment_status": "pending",
+        "payment_method": "cash",
+        "notes": "Bulk purchase",
+        "company_id": 1,
+        "created_by": 1,
+        "created_at": "2025-01-10T10:30:00.000Z",
+        "updated_at": "2025-01-10T10:30:00.000Z"
+      }
+    ],
+    "sales_persons": [],
+    "category_commissions": [],
+    "sub_categories": [],
+    "sales_person_category_assignments": [],
+    "stock_adjustments": [],
+    "settings": {
+      "company": {
+        "company_name": "My Company",
+        "company_address": "123 Main Street",
+        "company_city": "Mumbai",
+        "company_state": "Maharashtra",
+        "company_pincode": "400001",
+        "company_country": "India",
+        "company_phone": "+91-1234567890",
+        "company_email": "contact@company.com",
+        "company_website": "https://company.com",
+        "company_gstin": "27AAAAA0000A1Z5",
+        "company_pan": "AAAAA0000A"
+      },
+      "invoice": {
+        "invoice_prefix": "INV",
+        "invoice_number_format": "INV-{YYYY}-{NNNN}",
+        "invoice_footer_text": "Thank you for your business!",
+        "invoice_terms_and_conditions": "",
+        "show_tax_breakdown": true,
+        "show_payment_instructions": false,
+        "payment_instructions_text": "",
+        "invoice_template": "standard"
+      },
+      "tax": {
+        "default_gst_rate": 18,
+        "default_tax_type": "exclusive",
+        "enable_cgst_sgst": false,
+        "default_cgst_rate": 9,
+        "default_sgst_rate": 9,
+        "default_igst_rate": 18,
+        "tax_exempt_categories": []
+      },
+      "general": {
+        "currency_symbol": "₹",
+        "currency_code": "INR",
+        "date_format": "DD-MMM-YYYY",
+        "time_format": "12h",
+        "default_unit": "pcs",
+        "low_stock_threshold_percentage": 20,
+        "auto_archive_products_after_sale": true,
+        "enable_barcode_generation": true,
+        "default_barcode_format": "EAN13"
+      }
+    }
+  }
+}
+

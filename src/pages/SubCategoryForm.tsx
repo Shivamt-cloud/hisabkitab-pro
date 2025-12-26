@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { categoryService, Category } from '../services/productService'
@@ -9,7 +9,10 @@ const SubCategoryForm = () => {
   const { hasPermission } = useAuth()
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
+  const [searchParams] = useSearchParams()
   const isEditing = !!id
+  const returnTo = searchParams.get('returnTo')
+  const tab = searchParams.get('tab') || 'categories'
 
   const [formData, setFormData] = useState({
     name: '',
@@ -38,7 +41,11 @@ const SubCategoryForm = () => {
           })
         } else {
           alert('Sub-category not found')
-          navigate('/sub-categories')
+          if (returnTo === 'management') {
+  navigate(`/sales-category-management?tab=${tab}`)
+} else {
+  navigate('/sub-categories')
+}
         }
       }
       loadCategory()
@@ -91,7 +98,12 @@ const SubCategoryForm = () => {
         alert('Sub-category created successfully!')
       }
 
-      navigate('/sub-categories')
+      // Navigate back to management page with tab if returnTo is set, otherwise go to sub-categories list
+      if (returnTo === 'management') {
+        navigate(`/sales-category-management?tab=${tab}`)
+      } else {
+        navigate('/sub-categories')
+      }
     } catch (error) {
       alert('Error saving sub-category: ' + (error as Error).message)
     }
@@ -105,7 +117,13 @@ const SubCategoryForm = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <button
-                  onClick={() => navigate('/sub-categories')}
+                  onClick={() => {
+                    if (returnTo === 'management') {
+                      navigate(`/sales-category-management?tab=${tab}`)
+                    } else {
+                      navigate('/sub-categories')
+                    }
+                  }}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   title="Back to Sub-Categories"
                 >
@@ -194,7 +212,13 @@ const SubCategoryForm = () => {
             <div className="flex items-center justify-end gap-4">
               <button
                 type="button"
-                onClick={() => navigate('/sub-categories')}
+                onClick={() => {
+                  if (returnTo === 'management') {
+                    navigate(`/sales-category-management?tab=${tab}`)
+                  } else {
+                    navigate('/sub-categories')
+                  }
+                }}
                 className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors"
               >
                 Cancel

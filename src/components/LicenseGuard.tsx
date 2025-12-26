@@ -19,21 +19,51 @@ export function LicenseGuard({ children }: LicenseGuardProps) {
   useEffect(() => {
     const verifyLicense = async () => {
       setIsChecking(true)
-      const status = await checkLicenseValidity()
-      setLicenseStatus(status)
-      setIsChecking(false)
+      try {
+        // Wait a bit for database to initialize
+        await new Promise(resolve => setTimeout(resolve, 500))
+        
+        // Add timeout to prevent hanging
+        const timeoutPromise = new Promise<LicenseStatus>((_, reject) => 
+          setTimeout(() => reject(new Error('License check timeout')), 3000)
+        )
+        
+        const status = await Promise.race([
+          checkLicenseValidity(),
+          timeoutPromise
+        ])
+        
+        setLicenseStatus(status)
+        setIsChecking(false)
 
-      // If license is expired and user is not on login page, show blocked screen
-      if (status.isExpired && location.pathname !== '/login') {
-        // Blocked screen will be shown below
+        // If license is expired and user is not on login page, show blocked screen
+        if (status.isExpired && location.pathname !== '/login') {
+          // Blocked screen will be shown below
+        }
+      } catch (error) {
+        console.error('Error verifying license:', error)
+        // On error, allow access (fail open) and set a default valid status
+        setLicenseStatus({
+          isValid: true,
+          isExpired: false,
+          daysRemaining: Infinity,
+          validFrom: null,
+          validTo: null,
+          message: 'License verification unavailable',
+        })
+        setIsChecking(false)
       }
     }
 
-    verifyLicense()
+    // Delay initial check slightly to allow database to initialize
+    const timeoutId = setTimeout(verifyLicense, 1000)
     
     // Re-check license every hour
     const interval = setInterval(verifyLicense, 60 * 60 * 1000)
-    return () => clearInterval(interval)
+    return () => {
+      clearTimeout(timeoutId)
+      clearInterval(interval)
+    }
   }, [location.pathname])
 
   if (isChecking) {

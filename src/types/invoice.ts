@@ -18,6 +18,9 @@ export interface InvoiceData {
   grand_total: number
   payment_method: string // Legacy: single payment method (for backward compatibility)
   payment_methods?: Array<{ method: string; amount: number }> // New: multiple payment methods
+  return_amount?: number // Amount returned to customer when payment exceeds grand total
+  credit_applied?: number // Amount of customer credit applied to this sale
+  credit_balance?: number // Customer's current credit balance after this transaction
   payment_status: string
   sales_person?: string
   notes?: string

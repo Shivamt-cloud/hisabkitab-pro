@@ -1,5 +1,6 @@
 import { User, UserRole } from '../types/auth'
 import { getAll, getById, put, deleteById, getByIndex, STORES } from '../database/db'
+import { cloudUserService } from './cloudUserService'
 
 // Initialize users with default admin user
 async function initializeUsers(): Promise<void> {
@@ -43,24 +44,24 @@ export interface UserWithPassword extends User {
 }
 
 export const userService = {
-  // Get all users
+  // Get all users (from cloud, with local fallback)
   getAll: async (): Promise<UserWithPassword[]> => {
     await initializeUsers()
-    return await getAll<UserWithPassword>(STORES.USERS)
+    // Use cloud service which handles fallback to local
+    return await cloudUserService.getAll()
   },
 
-  // Get user by ID
+  // Get user by ID (from cloud, with local fallback)
   getById: async (id: string): Promise<UserWithPassword | undefined> => {
-    return await getById<UserWithPassword>(STORES.USERS, id)
+    return await cloudUserService.getById(id)
   },
 
-  // Get user by email
+  // Get user by email (from cloud, with local fallback)
   getByEmail: async (email: string): Promise<UserWithPassword | undefined> => {
-    const users = await userService.getAll()
-    return users.find(u => u.email.toLowerCase() === email.toLowerCase())
+    return await cloudUserService.getByEmail(email)
   },
 
-  // Create new user
+  // Create new user (saves to cloud and local)
   create: async (userData: Omit<UserWithPassword, 'id'>): Promise<UserWithPassword> => {
     const users = await userService.getAll()
     
@@ -76,18 +77,16 @@ export const userService = {
       displayName = await formatUsernameWithCompanyCode(userData.name, userData.company_id)
     }
 
-    const newUser: UserWithPassword = {
+    // Use cloud service which handles both cloud and local storage
+    return await cloudUserService.create({
       ...userData,
-      id: Date.now().toString(),
       name: displayName, // Store formatted name with company code
-    }
-    await put(STORES.USERS, newUser)
-    return newUser
+    })
   },
 
-  // Update user
+  // Update user (updates cloud and local)
   update: async (id: string, userData: Partial<Omit<UserWithPassword, 'id'>>): Promise<UserWithPassword | null> => {
-    const existing = await getById<UserWithPassword>(STORES.USERS, id)
+    const existing = await userService.getById(id)
     if (!existing) return null
 
     // Check if email is being changed and if it conflicts with another user
@@ -98,22 +97,13 @@ export const userService = {
       }
     }
 
-    const updated: UserWithPassword = {
-      ...existing,
-      ...userData,
-    }
-    await put(STORES.USERS, updated)
-    return updated
+    // Use cloud service which handles both cloud and local storage
+    return await cloudUserService.update(id, userData)
   },
 
-  // Delete user
+  // Delete user (deletes from cloud and local)
   delete: async (id: string): Promise<boolean> => {
-    try {
-      await deleteById(STORES.USERS, id)
-      return true
-    } catch (error) {
-      return false
-    }
+    return await cloudUserService.delete(id)
   },
 
   // Change password

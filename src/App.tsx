@@ -12,6 +12,9 @@ import SalesHistory from './pages/SalesHistory'
 import SaleForm from './pages/SaleForm'
 import Suppliers from './pages/Suppliers'
 import SupplierForm from './pages/SupplierForm'
+import SupplierAccount from './pages/SupplierAccount'
+import SupplierPaymentForm from './pages/SupplierPaymentForm'
+import SupplierCheckForm from './pages/SupplierCheckForm'
 import SalesPersons from './pages/SalesPersons'
 import SalesPersonForm from './pages/SalesPersonForm'
 import CategoryCommissions from './pages/CategoryCommissions'
@@ -36,6 +39,11 @@ import AuditLogs from './pages/AuditLogs'
 import AnalyticsDashboard from './pages/AnalyticsDashboard'
 import Notifications from './pages/Notifications'
 import IndexedDBInspector from './pages/IndexedDBInspector'
+import DailyActivity from './pages/DailyActivity'
+import Expenses from './pages/Expenses'
+import ExpenseForm from './pages/ExpenseForm'
+import DailyReport from './pages/DailyReport'
+import UpcomingChecks from './pages/UpcomingChecks'
 import { DatabaseProvider } from './components/DatabaseProvider'
 import { LicenseGuard } from './components/LicenseGuard'
 import { LicenseExpiredBanner } from './components/LicenseExpiredBanner'
@@ -177,6 +185,46 @@ function App() {
             element={
               <ProtectedRoute requiredPermission="purchases:update">
                 <SupplierForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/suppliers/:id/account"
+            element={
+              <ProtectedRoute requiredPermission="purchases:read">
+                <SupplierAccount />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/suppliers/:supplierId/payment/new"
+            element={
+              <ProtectedRoute requiredPermission="purchases:create">
+                <SupplierPaymentForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/suppliers/:supplierId/payment/:id/edit"
+            element={
+              <ProtectedRoute requiredPermission="purchases:update">
+                <SupplierPaymentForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/suppliers/:supplierId/check/new"
+            element={
+              <ProtectedRoute requiredPermission="purchases:create">
+                <SupplierCheckForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/suppliers/:supplierId/check/:id/edit"
+            element={
+              <ProtectedRoute requiredPermission="purchases:update">
+                <SupplierCheckForm />
               </ProtectedRoute>
             }
           />
@@ -405,10 +453,58 @@ function App() {
             }
           />
           <Route
+            path="/reports/daily-activity"
+            element={
+              <ProtectedRoute requiredPermission="reports:read">
+                <DailyActivity />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/notifications"
             element={
               <ProtectedRoute>
                 <Notifications />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/expenses"
+            element={
+              <ProtectedRoute requiredPermission="expenses:read">
+                <Expenses />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/expenses/new"
+            element={
+              <ProtectedRoute requiredPermission="expenses:create">
+                <ExpenseForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/expenses/:id/edit"
+            element={
+              <ProtectedRoute requiredPermission="expenses:update">
+                <ExpenseForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/daily-report"
+            element={
+              <ProtectedRoute requiredPermission="expenses:read">
+                <DailyReport />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/checks/upcoming"
+            element={
+              <ProtectedRoute requiredPermission="purchases:read">
+                <UpcomingChecks />
               </ProtectedRoute>
             }
           />

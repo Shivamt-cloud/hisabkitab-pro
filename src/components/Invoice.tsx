@@ -42,6 +42,9 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
       invoiceData.payment_methods.forEach((pm: { method: string; amount: number }, idx: number) => {
         message += `  ${idx + 1}. ${pm.method.toUpperCase()}: ₹${pm.amount.toFixed(2)}\n`
       })
+      if (invoiceData.return_amount && invoiceData.return_amount > 0) {
+        message += `  Return: ₹${invoiceData.return_amount.toFixed(2)}\n`
+      }
     } else {
       message += `Payment Method: ${invoiceData.payment_method}\n`
     }
@@ -289,7 +292,10 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
             )}
             <div className="mt-2 space-y-1">
               {invoiceData.company_info?.phone && (
-                <p className="text-gray-600 text-sm">Phone: {invoiceData.company_info.phone}</p>
+                <p className="text-gray-600 text-sm flex items-center gap-2">
+                  <span>Phone: {invoiceData.company_info.phone}</span>
+                  <span className="text-green-600 font-semibold" title="Available on WhatsApp">📱</span>
+                </p>
               )}
               {invoiceData.company_info?.email && (
                 <p className="text-gray-600 text-sm">Email: {invoiceData.company_info.email}</p>
@@ -364,7 +370,6 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
           <thead>
             <tr className="bg-gray-50">
               <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase">Item</th>
-              <th className="text-center py-3 px-4 text-xs font-semibold text-gray-600 uppercase">HSN</th>
               <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase">Qty</th>
               <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase">MRP</th>
               <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase">Rate</th>
@@ -386,9 +391,6 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
                         <p className="text-xs text-gray-500">GST @ {item.gst_rate}%</p>
                       )}
                     </div>
-                  </td>
-                  <td className="py-3 px-4 text-center text-gray-600 text-sm">
-                    {item.hsn_code || '—'}
                   </td>
                   <td className="py-3 px-4 text-right text-gray-900">
                     {item.quantity} {item.unit || 'pcs'}
@@ -488,6 +490,18 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
                       <span className="ml-2 font-semibold text-gray-900">₹{pm.amount.toFixed(2)}</span>
                     </div>
                   ))}
+                  {invoiceData.credit_applied && invoiceData.credit_applied > 0 && (
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
+                      <span className="font-semibold text-green-700">Credit Applied:</span>
+                      <span className="ml-2 font-semibold text-green-600">-₹{invoiceData.credit_applied.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {invoiceData.return_amount && invoiceData.return_amount > 0 && (
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
+                      <span className="font-semibold text-green-700">Return:</span>
+                      <span className="ml-2 font-semibold text-green-600">₹{invoiceData.return_amount.toFixed(2)}</span>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <span className="ml-2 font-semibold text-gray-900 capitalize">{invoiceData.payment_method}</span>
@@ -500,6 +514,17 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
               }`}>
                 {invoiceData.payment_status.toUpperCase()}
               </span>
+              {invoiceData.credit_balance !== undefined && invoiceData.credit_balance >= 0 && (
+                <div className="mt-3 pt-3 border-t border-gray-200">
+                  <span className="text-gray-600">Available Credit Balance:</span>
+                  <div className={`mt-1 font-semibold text-lg ${
+                    invoiceData.credit_balance > 0 ? 'text-green-600' : 'text-gray-600'
+                  }`}>
+                    ₹{invoiceData.credit_balance.toFixed(2)}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">Credit can be used on future purchases</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -614,7 +639,10 @@ const generateInvoiceHTML = (invoiceData: InvoiceData): string => {
         <div class="company-info">
           <h1>${invoiceData.company_info?.name || 'HisabKitab'}</h1>
           ${invoiceData.company_info?.address ? `<p>${invoiceData.company_info.address}</p>` : ''}
-          ${invoiceData.company_info?.phone ? `<p>Phone: ${invoiceData.company_info.phone}</p>` : ''}
+          ${(invoiceData.company_info?.city || invoiceData.company_info?.state || invoiceData.company_info?.pincode) ? `
+            <p>${[invoiceData.company_info.city, invoiceData.company_info.state, invoiceData.company_info.pincode].filter(Boolean).join(', ')}</p>
+          ` : ''}
+          ${invoiceData.company_info?.phone ? `<p>Phone: ${invoiceData.company_info.phone} <span style="color: #16a34a; font-weight: 600;" title="Available on WhatsApp">📱</span></p>` : ''}
           ${invoiceData.company_info?.email ? `<p>Email: ${invoiceData.company_info.email}</p>` : ''}
           ${invoiceData.company_info?.gstin ? `<p>GSTIN: ${invoiceData.company_info.gstin}</p>` : ''}
         </div>
@@ -647,7 +675,6 @@ const generateInvoiceHTML = (invoiceData: InvoiceData): string => {
         <thead>
           <tr>
             <th>Item</th>
-            <th>HSN</th>
             <th class="text-right">Qty</th>
             <th class="text-right">Rate</th>
             <th class="text-right">Amount</th>
@@ -657,7 +684,6 @@ const generateInvoiceHTML = (invoiceData: InvoiceData): string => {
           ${invoiceData.items.map(item => `
             <tr>
               <td>${item.product_name}</td>
-              <td>${item.hsn_code || '—'}</td>
               <td class="text-right">${item.quantity} ${item.unit || 'pcs'}</td>
               <td class="text-right">₹${item.unit_price.toFixed(2)}</td>
               <td class="text-right">₹${item.total.toFixed(2)}</td>
@@ -713,6 +739,16 @@ const generateInvoiceHTML = (invoiceData: InvoiceData): string => {
                     ${pm.method.charAt(0).toUpperCase() + pm.method.slice(1)}: ₹${pm.amount.toFixed(2)}
                   </p>
                 `).join('')}
+                ${invoiceData.credit_applied && invoiceData.credit_applied > 0 ? `
+                  <p style="margin: 8px 0 4px 0; padding-top: 8px; border-top: 1px solid #e5e7eb; font-weight: 600; color: #16a34a;">
+                    Credit Applied: -₹${invoiceData.credit_applied.toFixed(2)}
+                  </p>
+                ` : ''}
+                ${invoiceData.return_amount && invoiceData.return_amount > 0 ? `
+                  <p style="margin: 8px 0 4px 0; padding-top: 8px; border-top: 1px solid #e5e7eb; font-weight: 600; color: #16a34a;">
+                    Return: ₹${invoiceData.return_amount.toFixed(2)}
+                  </p>
+                ` : ''}
               </div>
             ` : `
               <p style="margin: 8px 0 0 0; font-weight: 600; color: #111827; text-transform: capitalize;">
@@ -725,6 +761,15 @@ const generateInvoiceHTML = (invoiceData: InvoiceData): string => {
             <p style="margin: 8px 0 0 0; font-weight: 600; color: ${invoiceData.payment_status === 'paid' ? '#16a34a' : '#dc2626'}; text-transform: uppercase;">
               ${invoiceData.payment_status}
             </p>
+            ${invoiceData.credit_balance !== undefined && invoiceData.credit_balance >= 0 ? `
+              <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
+                <p style="margin: 0; color: #6b7280; font-size: 14px;">Available Credit Balance:</p>
+                <p style="margin: 4px 0 0 0; font-weight: 600; font-size: 18px; color: ${invoiceData.credit_balance > 0 ? '#16a34a' : '#6b7280'};">
+                  ₹${invoiceData.credit_balance.toFixed(2)}
+                </p>
+                <p style="margin: 4px 0 0 0; font-size: 11px; color: #9ca3af;">Credit can be used on future purchases</p>
+              </div>
+            ` : ''}
           </div>
         </div>
       </div>

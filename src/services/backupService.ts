@@ -5,14 +5,21 @@ import { customerService } from './customerService'
 import { salesPersonService, categoryCommissionService, salesPersonCategoryAssignmentService } from './salespersonService'
 import { stockAdjustmentService } from './stockAdjustmentService'
 import { settingsService } from './settingsService'
+import { userService } from './userService'
+import { companyService } from './companyService'
 import { put, getAll, deleteById, getById, STORES } from '../database/db'
 import { AutomaticBackup, BackupSettings } from '../types/backup'
+import { cloudBackupService, CloudBackupMetadata } from './cloudBackupService'
 
 export interface BackupData {
   version: string
   export_date: string
   export_by?: string
   data: {
+    // Company and User data (for admin management)
+    companies: any[] // All companies (admin needs to manage all)
+    users: any[] // All users (admin needs to manage all users of all companies)
+    // Business data (company-specific)
     products: any[]
     categories: any[]
     sales: any[]
@@ -33,7 +40,11 @@ const BACKUP_VERSION = '1.0.0'
 export const backupService = {
   // Export all data
   exportAll: async (userId?: string, companyId?: number | null): Promise<BackupData> => {
+    // Always include all companies and users (for admin management from anywhere)
+    // Business data is filtered by company if companyId is provided
     const [
+      companies,
+      users,
       products,
       categories,
       sales,
@@ -46,6 +57,8 @@ export const backupService = {
       stockAdjustments,
       settings,
     ] = await Promise.all([
+      companyService.getAll(true), // All companies (admin needs to manage all)
+      userService.getAll(), // All users (admin needs to manage all users of all companies)
       productService.getAll(true, companyId), // Include archived products, filter by company
       categoryService.getAll(),
       saleService.getAll(true, companyId), // Include archived sales, filter by company
@@ -64,6 +77,8 @@ export const backupService = {
       export_date: new Date().toISOString(),
       export_by: userId,
       data: {
+        companies, // All companies included
+        users, // All users included (for admin management)
         products,
         categories,
         sales,
@@ -100,6 +115,8 @@ export const backupService = {
     const backup = await backupService.exportAll(undefined, companyId)
     const summary = [
       ['Data Type', 'Count'],
+      ['Companies', backup.data.companies?.length || 0],
+      ['Users', backup.data.users?.length || 0],
       ['Products', backup.data.products.length],
       ['Categories', backup.data.categories.length],
       ['Sales', backup.data.sales.length],
@@ -122,6 +139,8 @@ export const backupService = {
 
   // Import data from JSON
   importFromFile: async (jsonString: string, userId?: string, options: { 
+    importCompanies?: boolean
+    importUsers?: boolean
     importProducts?: boolean
     importSales?: boolean
     importPurchases?: boolean
@@ -148,7 +167,91 @@ export const backupService = {
         // For now, we'll just import and let it merge
       }
 
-      // Import Categories first (needed for products)
+      // Import Companies first (needed for users and business data)
+      if (options.importCompanies !== false && backup.data.companies) {
+        for (const company of backup.data.companies) {
+          try {
+            const existing = await companyService.getById(company.id)
+            if (!existing) {
+              await companyService.create({
+                name: company.name,
+                unique_code: company.unique_code,
+                email: company.email || '',
+                phone: company.phone || '',
+                address: company.address || '',
+                city: company.city || '',
+                state: company.state || '',
+                pincode: company.pincode || '',
+                country: company.country || 'India',
+                gstin: company.gstin || '',
+                pan: company.pan || '',
+                website: company.website || '',
+                valid_from: company.valid_from || '',
+                valid_to: company.valid_to || '',
+                is_active: company.is_active !== undefined ? company.is_active : true,
+              })
+              importedCount++
+            } else {
+              // Update existing company if needed
+              await companyService.update(company.id, {
+                name: company.name,
+                email: company.email || '',
+                phone: company.phone || '',
+                address: company.address || '',
+                city: company.city || '',
+                state: company.state || '',
+                pincode: company.pincode || '',
+                country: company.country || 'India',
+                gstin: company.gstin || '',
+                pan: company.pan || '',
+                website: company.website || '',
+                valid_from: company.valid_from || '',
+                valid_to: company.valid_to || '',
+                is_active: company.is_active !== undefined ? company.is_active : true,
+              })
+              importedCount++
+            }
+          } catch (error) {
+            console.error('Error importing company:', error)
+          }
+        }
+      }
+
+      // Import Users (needed for admin management, companies should exist first)
+      if (options.importUsers !== false && backup.data.users) {
+        for (const user of backup.data.users) {
+          try {
+            const existing = await userService.getById(user.id)
+            if (!existing) {
+              await userService.create({
+                name: user.name,
+                email: user.email,
+                password: user.password || 'temp123', // Default password, user should change
+                role: user.role || 'staff',
+                company_id: user.company_id,
+                user_code: user.user_code,
+              })
+              importedCount++
+            } else {
+              // Update existing user if needed (preserve password if not provided)
+              await userService.update(user.id, {
+                name: user.name,
+                email: user.email,
+                role: user.role || 'staff',
+                company_id: user.company_id,
+                user_code: user.user_code,
+                // Only update password if provided in backup
+                ...(user.password && { password: user.password }),
+              })
+              importedCount++
+            }
+          } catch (error) {
+            console.error('Error importing user:', error)
+          }
+        }
+      }
+
+      // Import Categories (needed for products)
       if (backup.data.categories) {
         for (const category of backup.data.categories) {
           try {
@@ -318,6 +421,8 @@ export const backupService = {
   // Get backup statistics
   getStatistics: async (companyId?: number | null) => {
     const [
+      companies,
+      users,
       products,
       categories,
       sales,
@@ -330,6 +435,8 @@ export const backupService = {
       salesPersonCategoryAssignments,
       stockAdjustments,
     ] = await Promise.all([
+      companyService.getAll(true), // All companies (for admin management)
+      userService.getAll(), // All users (for admin management)
       productService.getAll(true, companyId), // Filter by company
       categoryService.getAll(),
       saleService.getAll(true, companyId), // Filter by company
@@ -344,6 +451,8 @@ export const backupService = {
     ])
 
     return {
+      companies: companies.length,
+      users: users.length,
       products: products.length,
       categories: categories.length,
       sales: sales.length,
@@ -359,9 +468,13 @@ export const backupService = {
   },
 
   // Automatic Backup Functions
-  async createAutomaticBackup(userId?: string): Promise<{ success: boolean; backupId?: number; fileName?: string }> {
+  async createAutomaticBackup(
+    userId?: string, 
+    companyId?: number | null,
+    backupTime?: '12:00' | '18:00'
+  ): Promise<{ success: boolean; backupId?: number; fileName?: string; cloudUploaded?: boolean; message?: string }> {
     try {
-      const backup = await backupService.exportAll(userId)
+      const backup = await backupService.exportAll(userId, companyId)
       const backupDataString = JSON.stringify(backup)
       const now = new Date()
       
@@ -375,27 +488,52 @@ export const backupService = {
 
       const saved = await put(STORES.AUTOMATIC_BACKUPS, automaticBackup)
       
-      // Auto-download backup file
+      // Upload to cloud if available
+      let cloudUploaded = false
       try {
-        const blob = new Blob([backupDataString], { type: 'application/json' })
-        const url = URL.createObjectURL(blob)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = automaticBackup.file_name
-        link.click()
-        URL.revokeObjectURL(url)
-      } catch (downloadError) {
-        console.warn('Could not auto-download backup:', downloadError)
+        const { cloudBackupService } = await import('./cloudBackupService')
+        const uploadResult = await cloudBackupService.uploadBackup(
+          backup,
+          companyId ?? null,
+          backupTime || '12:00'
+        )
+        cloudUploaded = uploadResult.success
+        if (uploadResult.success) {
+          console.log('✅ Backup uploaded to cloud successfully')
+        } else {
+          console.warn('⚠️ Backup saved locally, cloud upload failed:', uploadResult.error)
+        }
+      } catch (cloudError) {
+        console.warn('⚠️ Cloud backup service not available, backup saved locally only:', cloudError)
+      }
+      
+      // Auto-download backup file (only if cloud upload failed or disabled)
+      if (!cloudUploaded) {
+        try {
+          const blob = new Blob([backupDataString], { type: 'application/json' })
+          const url = URL.createObjectURL(blob)
+          const link = document.createElement('a')
+          link.href = url
+          link.download = automaticBackup.file_name
+          link.click()
+          URL.revokeObjectURL(url)
+        } catch (downloadError) {
+          console.warn('Could not auto-download backup:', downloadError)
+        }
       }
 
       return { 
         success: true, 
         backupId: saved.id, 
-        fileName: automaticBackup.file_name 
+        fileName: automaticBackup.file_name,
+        cloudUploaded
       }
     } catch (error: any) {
       console.error('Error creating automatic backup:', error)
-      return { success: false }
+      return { 
+        success: false,
+        message: error?.message || error?.toString() || 'Unknown error creating backup'
+      }
     }
   },
 
@@ -473,6 +611,109 @@ export const backupService = {
       time_of_day: '02:00',
       keep_backups_days: 30,
       auto_download: true,
+    }
+  },
+
+  // Cloud Backup Functions
+  /**
+   * List cloud backups for a company
+   */
+  listCloudBackups: async (companyId?: number | null): Promise<{
+    success: boolean
+    backups?: CloudBackupMetadata[]
+    error?: string
+  }> => {
+    try {
+      return await cloudBackupService.listBackups(companyId ?? null)
+    } catch (error: any) {
+      console.error('Error listing cloud backups:', error)
+      return {
+        success: false,
+        error: error.message || 'Failed to list cloud backups',
+      }
+    }
+  },
+
+  /**
+   * Restore from cloud backup
+   */
+  restoreFromCloud: async (
+    filePath: string,
+    companyId?: number | null,
+    userId?: string,
+    options: {
+      importCompanies?: boolean
+      importUsers?: boolean
+      importProducts?: boolean
+      importSales?: boolean
+      importPurchases?: boolean
+      importSuppliers?: boolean
+      importCustomers?: boolean
+      importSalesPersons?: boolean
+      importSettings?: boolean
+      importStockAdjustments?: boolean
+      merge?: boolean
+    } = {}
+  ): Promise<{ success: boolean; message: string; imported: number }> => {
+    try {
+      // Download backup from cloud
+      const downloadResult = await cloudBackupService.downloadBackup(filePath, companyId ?? null)
+      
+      if (!downloadResult.success || !downloadResult.data) {
+        return {
+          success: false,
+          message: downloadResult.error || 'Failed to download backup from cloud',
+          imported: 0,
+        }
+      }
+
+      // Import the backup data
+      const jsonString = JSON.stringify(downloadResult.data)
+      return await backupService.importFromFile(jsonString, userId, options)
+    } catch (error: any) {
+      console.error('Error restoring from cloud backup:', error)
+      return {
+        success: false,
+        message: error.message || 'Failed to restore from cloud backup',
+        imported: 0,
+      }
+    }
+  },
+
+  /**
+   * Delete cloud backup
+   */
+  deleteCloudBackup: async (
+    filePath: string,
+    companyId?: number | null
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      return await cloudBackupService.deleteBackup(filePath, companyId ?? null)
+    } catch (error: any) {
+      console.error('Error deleting cloud backup:', error)
+      return {
+        success: false,
+        error: error.message || 'Failed to delete cloud backup',
+      }
+    }
+  },
+
+  /**
+   * Cleanup old cloud backups (3-day rolling retention)
+   */
+  cleanupCloudBackups: async (companyId?: number | null): Promise<{
+    success: boolean
+    deletedCount?: number
+    error?: string
+  }> => {
+    try {
+      return await cloudBackupService.cleanupOldBackups(companyId ?? null)
+    } catch (error: any) {
+      console.error('Error cleaning up cloud backups:', error)
+      return {
+        success: false,
+        error: error.message || 'Failed to cleanup cloud backups',
+      }
     }
   },
 }

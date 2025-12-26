@@ -2,7 +2,7 @@
 // Provides a simple interface to interact with IndexedDB
 
 const DB_NAME = 'hisabkitab_db'
-const DB_VERSION = 5 // Incremented to ensure company_id index is created on AUDIT_LOGS store
+const DB_VERSION = 8 // Incremented to add SUPPLIER_PAYMENTS and SUPPLIER_CHECKS stores
 
 // Object store names (tables)
 export const STORES = {
@@ -26,6 +26,9 @@ export const STORES = {
   SALES_PERSON_CATEGORY_ASSIGNMENTS: 'sales_person_category_assignments',
   USER_PERMISSIONS: 'user_permissions',
   AUTOMATIC_BACKUPS: 'automatic_backups',
+  EXPENSES: 'expenses',
+  SUPPLIER_PAYMENTS: 'supplier_payments',
+  SUPPLIER_CHECKS: 'supplier_checks',
 } as const
 
 let dbInstance: IDBDatabase | null = null
@@ -274,10 +277,104 @@ export function initDB(config: DBConfig = {}): Promise<IDBDatabase> {
         permissionsStore.createIndex('userId', 'userId', { unique: true })
       }
 
+      // Handle AUTOMATIC_BACKUPS store - create if needed, or add missing indexes
       if (!db.objectStoreNames.contains(STORES.AUTOMATIC_BACKUPS)) {
         const backupsStore = db.createObjectStore(STORES.AUTOMATIC_BACKUPS, { keyPath: 'id', autoIncrement: true })
         backupsStore.createIndex('backup_date', 'backup_date', { unique: false })
         backupsStore.createIndex('created_at', 'created_at', { unique: false })
+      } else {
+        // Store exists, check and create missing indexes
+        const backupsStore = transaction.objectStore(STORES.AUTOMATIC_BACKUPS)
+        if (!backupsStore.indexNames.contains('backup_date')) {
+          backupsStore.createIndex('backup_date', 'backup_date', { unique: false })
+        }
+        if (!backupsStore.indexNames.contains('created_at')) {
+          backupsStore.createIndex('created_at', 'created_at', { unique: false })
+        }
+      }
+
+      // Handle EXPENSES store - create if needed, or add missing indexes
+      if (!db.objectStoreNames.contains(STORES.EXPENSES)) {
+        const expensesStore = db.createObjectStore(STORES.EXPENSES, { keyPath: 'id' })
+        expensesStore.createIndex('company_id', 'company_id', { unique: false })
+        expensesStore.createIndex('expense_date', 'expense_date', { unique: false })
+        expensesStore.createIndex('expense_type', 'expense_type', { unique: false })
+        expensesStore.createIndex('sales_person_id', 'sales_person_id', { unique: false })
+      } else {
+        // Store exists, check and create missing indexes
+        const expensesStore = transaction.objectStore(STORES.EXPENSES)
+        if (!expensesStore.indexNames.contains('company_id')) {
+          expensesStore.createIndex('company_id', 'company_id', { unique: false })
+        }
+        if (!expensesStore.indexNames.contains('expense_date')) {
+          expensesStore.createIndex('expense_date', 'expense_date', { unique: false })
+        }
+        if (!expensesStore.indexNames.contains('expense_type')) {
+          expensesStore.createIndex('expense_type', 'expense_type', { unique: false })
+        }
+        if (!expensesStore.indexNames.contains('sales_person_id')) {
+          expensesStore.createIndex('sales_person_id', 'sales_person_id', { unique: false })
+        }
+      }
+
+      // Handle SUPPLIER_PAYMENTS store - create if needed, or add missing indexes
+      if (!db.objectStoreNames.contains(STORES.SUPPLIER_PAYMENTS)) {
+        const paymentsStore = db.createObjectStore(STORES.SUPPLIER_PAYMENTS, { keyPath: 'id' })
+        paymentsStore.createIndex('company_id', 'company_id', { unique: false })
+        paymentsStore.createIndex('supplier_id', 'supplier_id', { unique: false })
+        paymentsStore.createIndex('purchase_id', 'purchase_id', { unique: false })
+        paymentsStore.createIndex('payment_date', 'payment_date', { unique: false })
+        paymentsStore.createIndex('check_id', 'check_id', { unique: false })
+      } else {
+        // Store exists, check and create missing indexes
+        const paymentsStore = transaction.objectStore(STORES.SUPPLIER_PAYMENTS)
+        if (!paymentsStore.indexNames.contains('company_id')) {
+          paymentsStore.createIndex('company_id', 'company_id', { unique: false })
+        }
+        if (!paymentsStore.indexNames.contains('supplier_id')) {
+          paymentsStore.createIndex('supplier_id', 'supplier_id', { unique: false })
+        }
+        if (!paymentsStore.indexNames.contains('purchase_id')) {
+          paymentsStore.createIndex('purchase_id', 'purchase_id', { unique: false })
+        }
+        if (!paymentsStore.indexNames.contains('payment_date')) {
+          paymentsStore.createIndex('payment_date', 'payment_date', { unique: false })
+        }
+        if (!paymentsStore.indexNames.contains('check_id')) {
+          paymentsStore.createIndex('check_id', 'check_id', { unique: false })
+        }
+      }
+
+      // Handle SUPPLIER_CHECKS store - create if needed, or add missing indexes
+      if (!db.objectStoreNames.contains(STORES.SUPPLIER_CHECKS)) {
+        const checksStore = db.createObjectStore(STORES.SUPPLIER_CHECKS, { keyPath: 'id' })
+        checksStore.createIndex('company_id', 'company_id', { unique: false })
+        checksStore.createIndex('supplier_id', 'supplier_id', { unique: false })
+        checksStore.createIndex('purchase_id', 'purchase_id', { unique: false })
+        checksStore.createIndex('check_number', 'check_number', { unique: false })
+        checksStore.createIndex('due_date', 'due_date', { unique: false })
+        checksStore.createIndex('status', 'status', { unique: false })
+      } else {
+        // Store exists, check and create missing indexes
+        const checksStore = transaction.objectStore(STORES.SUPPLIER_CHECKS)
+        if (!checksStore.indexNames.contains('company_id')) {
+          checksStore.createIndex('company_id', 'company_id', { unique: false })
+        }
+        if (!checksStore.indexNames.contains('supplier_id')) {
+          checksStore.createIndex('supplier_id', 'supplier_id', { unique: false })
+        }
+        if (!checksStore.indexNames.contains('purchase_id')) {
+          checksStore.createIndex('purchase_id', 'purchase_id', { unique: false })
+        }
+        if (!checksStore.indexNames.contains('check_number')) {
+          checksStore.createIndex('check_number', 'check_number', { unique: false })
+        }
+        if (!checksStore.indexNames.contains('due_date')) {
+          checksStore.createIndex('due_date', 'due_date', { unique: false })
+        }
+        if (!checksStore.indexNames.contains('status')) {
+          checksStore.createIndex('status', 'status', { unique: false })
+        }
       }
       }) // Close upgradePromise Promise
     }

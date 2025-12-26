@@ -281,10 +281,15 @@ export const salesPersonCategoryAssignmentService = {
     assignments = assignments.map(assignment => {
       const salesPerson = salesPersons.find(sp => sp.id === assignment.sales_person_id)
       const category = categories.find(c => c.id === assignment.category_id)
+      // Find parent category if this is a sub-category
+      const parentCategory = category?.parent_id 
+        ? categories.find(c => c.id === category.parent_id)
+        : null
       return {
         ...assignment,
         sales_person_name: salesPerson?.name,
         category_name: category?.name,
+        parent_category_name: parentCategory?.name || category?.parent_name || undefined,
       }
     })
     

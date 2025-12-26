@@ -46,6 +46,7 @@ const CustomerForm = () => {
   })
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({})
+  const [creditBalance, setCreditBalance] = useState<number | undefined>(undefined)
 
   useEffect(() => {
     if (isEditing && id) {
@@ -53,21 +54,26 @@ const CustomerForm = () => {
         const customer = await customerService.getById(parseInt(id))
         if (customer) {
           setFormData({
-          name: customer.name || '',
-          email: customer.email || '',
-          phone: customer.phone || '',
-          gstin: customer.gstin || '',
-          address: customer.address || '',
-          city: customer.city || '',
-          state: customer.state || '',
-          pincode: customer.pincode || '',
-          contact_person: customer.contact_person || '',
-          credit_limit: customer.credit_limit?.toString() || '',
-          is_active: customer.is_active,
+            name: customer.name || '',
+            email: customer.email || '',
+            phone: customer.phone || '',
+            gstin: customer.gstin || '',
+            address: customer.address || '',
+            city: customer.city || '',
+            state: customer.state || '',
+            pincode: customer.pincode || '',
+            contact_person: customer.contact_person || '',
+            credit_limit: customer.credit_limit?.toString() || '',
+            is_active: customer.is_active,
           })
+          // Load credit balance
+          setCreditBalance(customer.credit_balance || 0)
         }
       }
       loadCustomer()
+    } else {
+      // Reset credit balance for new customer
+      setCreditBalance(0)
     }
   }, [isEditing, id])
 
@@ -346,7 +352,38 @@ const CustomerForm = () => {
                     min="0"
                     step="0.01"
                   />
+                  <p className="text-xs text-gray-500 mt-1">Maximum credit limit for this customer</p>
                 </div>
+
+                {/* Credit Balance Display (Read-only) */}
+                {isEditing && creditBalance !== undefined && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Available Credit Balance</label>
+                    <div className="w-full px-4 py-3 bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className={`text-2xl font-bold ${
+                            creditBalance > 0 ? 'text-green-600' : 'text-gray-600'
+                          }`}>
+                            ₹{creditBalance.toFixed(2)}
+                          </p>
+                          {creditBalance > 0 && (
+                            <p className="text-xs text-green-600 mt-1">Can be used on future purchases</p>
+                          )}
+                          {creditBalance === 0 && (
+                            <p className="text-xs text-gray-500 mt-1">No credit available</p>
+                          )}
+                        </div>
+                        <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                          creditBalance > 0 ? 'bg-green-100' : 'bg-gray-100'
+                        }`}>
+                          <span className="text-2xl">💰</span>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">Current credit balance (read-only)</p>
+                  </div>
+                )}
 
                 <div>
                   <label className="flex items-center gap-2 cursor-pointer">

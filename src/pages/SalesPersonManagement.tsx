@@ -19,15 +19,38 @@ import {
   DollarSign,
   Building2
 } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { SalesPerson, CategoryCommission, SalesPersonCategoryAssignment } from '../types/salesperson'
 
-type TabType = 'salespersons' | 'categories' | 'commissions' | 'assignments'
+type TabType = 'salespersons' | 'categories' | 'commissions' | 'assignments' | 'expenses' | 'dailyreport'
 
 const SalesPersonManagement = () => {
   const { hasPermission } = useAuth()
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState<TabType>('salespersons')
+  const [searchParams, setSearchParams] = useSearchParams()
+  
+  // Get tab from URL or default to 'salespersons'
+  const tabFromUrl = searchParams.get('tab') as TabType | null
+  const [activeTab, setActiveTab] = useState<TabType>(
+    tabFromUrl && ['salespersons', 'categories', 'commissions', 'assignments'].includes(tabFromUrl)
+      ? tabFromUrl
+      : 'salespersons'
+  )
+
+  // Update URL when tab changes
+  useEffect(() => {
+    if (activeTab !== tabFromUrl) {
+      setSearchParams({ tab: activeTab })
+    }
+  }, [activeTab, tabFromUrl, setSearchParams])
+
+  // Update active tab when URL changes
+  useEffect(() => {
+    const tab = searchParams.get('tab') as TabType | null
+    if (tab && ['salespersons', 'categories', 'commissions', 'assignments', 'expenses', 'dailyreport'].includes(tab)) {
+      setActiveTab(tab)
+    }
+  }, [searchParams])
 
   // Sales Persons
   const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([])
@@ -183,6 +206,8 @@ const SalesPersonManagement = () => {
     { id: 'categories' as TabType, label: 'Categories & Sub-Categories', icon: <FolderTree className="w-4 h-4" />, permission: 'products:read' },
     { id: 'commissions' as TabType, label: 'Category Commissions', icon: <Percent className="w-4 h-4" />, permission: 'users:read' },
     { id: 'assignments' as TabType, label: 'Category Assignments', icon: <UserCheck className="w-4 h-4" />, permission: 'users:read' },
+    { id: 'expenses' as TabType, label: 'Daily Expenses', icon: <Receipt className="w-4 h-4" />, permission: 'expenses:read' },
+    { id: 'dailyreport' as TabType, label: 'Daily Report', icon: <FileText className="w-4 h-4" />, permission: 'expenses:read' },
   ]
 
   const visibleTabs = tabs.filter(tab => hasPermission(tab.permission))
@@ -211,13 +236,36 @@ const SalesPersonManagement = () => {
         </header>
 
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {/* Breadcrumb Navigation */}
+          <div className="mb-4 flex items-center gap-2 text-sm text-gray-600">
+            <button
+              onClick={() => navigate('/')}
+              className="hover:text-blue-600 transition-colors"
+            >
+              Dashboard
+            </button>
+            <span>/</span>
+            <span className="text-gray-900 font-semibold">Sales & Category Management</span>
+            {activeTab && (
+              <>
+                <span>/</span>
+                <span className="text-gray-900 font-semibold">
+                  {tabs.find(t => t.id === activeTab)?.label || ''}
+                </span>
+              </>
+            )}
+          </div>
+
           {/* Tabs */}
           <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl mb-8 border border-white/50 overflow-hidden">
             <div className="flex border-b border-gray-200 overflow-x-auto">
               {visibleTabs.map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => {
+                    setActiveTab(tab.id)
+                    setSearchParams({ tab: tab.id })
+                  }}
                   className={`flex items-center gap-2 px-6 py-4 font-semibold transition-colors whitespace-nowrap ${
                     activeTab === tab.id
                       ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-b-2 border-blue-600'
@@ -238,7 +286,7 @@ const SalesPersonManagement = () => {
                     <h2 className="text-xl font-bold text-gray-900">Sales Persons</h2>
                     {hasPermission('users:create') && (
                       <button
-                        onClick={() => navigate('/sales-persons/new')}
+                        onClick={() => navigate('/sales-persons/new?returnTo=management&tab=salespersons')}
                         className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold py-2 px-4 rounded-xl hover:shadow-lg transition-all flex items-center gap-2"
                       >
                         <Plus className="w-4 h-4" />
@@ -281,7 +329,7 @@ const SalesPersonManagement = () => {
                             <td className="px-4 py-3 text-right">
                               <div className="flex justify-end gap-2">
                                 {hasPermission('users:update') && (
-                                  <button onClick={() => navigate(`/sales-persons/${sp.id}/edit`)} className="p-1 text-blue-600 hover:bg-blue-50 rounded">
+                                  <button onClick={() => navigate(`/sales-persons/${sp.id}/edit?returnTo=management&tab=salespersons`)} className="p-1 text-blue-600 hover:bg-blue-50 rounded">
                                     <Edit className="w-4 h-4" />
                                   </button>
                                 )}
@@ -309,14 +357,14 @@ const SalesPersonManagement = () => {
                       {hasPermission('products:create') && (
                         <>
                           <button
-                            onClick={() => navigate('/categories/new')}
+                            onClick={() => navigate('/categories/new?returnTo=management&tab=categories')}
                             className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold py-2 px-4 rounded-xl hover:shadow-lg transition-all flex items-center gap-2"
                           >
                             <Plus className="w-4 h-4" />
                             Add Main Category
                           </button>
                           <button
-                            onClick={() => navigate('/sub-categories/new')}
+                            onClick={() => navigate('/sub-categories/new?returnTo=management&tab=categories')}
                             className="bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold py-2 px-4 rounded-xl hover:shadow-lg transition-all flex items-center gap-2"
                           >
                             <Plus className="w-4 h-4" />
@@ -339,7 +387,7 @@ const SalesPersonManagement = () => {
                             </div>
                             <div className="flex gap-1">
                               {hasPermission('products:update') && (
-                                <button onClick={() => navigate(`/categories/${cat.id}/edit`)} className="p-1 text-blue-600 hover:bg-blue-50 rounded">
+                                <button onClick={() => navigate(`/categories/${cat.id}/edit?returnTo=management&tab=categories`)} className="p-1 text-blue-600 hover:bg-blue-50 rounded">
                                   <Edit className="w-4 h-4" />
                                 </button>
                               )}
@@ -387,7 +435,7 @@ const SalesPersonManagement = () => {
                             </div>
                             <div className="flex gap-1">
                               {hasPermission('products:update') && (
-                                <button onClick={() => navigate(`/sub-categories/${subcat.id}/edit`)} className="p-1 text-blue-600 hover:bg-blue-50 rounded">
+                                <button onClick={() => navigate(`/sub-categories/${subcat.id}/edit?returnTo=management&tab=categories`)} className="p-1 text-blue-600 hover:bg-blue-50 rounded">
                                   <Edit className="w-4 h-4" />
                                 </button>
                               )}
@@ -412,7 +460,7 @@ const SalesPersonManagement = () => {
                     <h2 className="text-xl font-bold text-gray-900">Category Commissions</h2>
                     {hasPermission('users:create') && (
                       <button
-                        onClick={() => navigate('/category-commissions/new')}
+                        onClick={() => navigate('/category-commissions/new?returnTo=management&tab=commissions')}
                         className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold py-2 px-4 rounded-xl hover:shadow-lg transition-all flex items-center gap-2"
                       >
                         <Plus className="w-4 h-4" />
@@ -461,7 +509,7 @@ const SalesPersonManagement = () => {
                             <td className="px-4 py-3 text-right">
                               <div className="flex justify-end gap-2">
                                 {hasPermission('users:update') && (
-                                  <button onClick={() => navigate(`/category-commissions/${comm.id}/edit`)} className="p-1 text-blue-600 hover:bg-blue-50 rounded">
+                                  <button onClick={() => navigate(`/category-commissions/${comm.id}/edit?returnTo=management&tab=commissions`)} className="p-1 text-blue-600 hover:bg-blue-50 rounded">
                                     <Edit className="w-4 h-4" />
                                   </button>
                                 )}
@@ -487,7 +535,7 @@ const SalesPersonManagement = () => {
                     <h2 className="text-xl font-bold text-gray-900">Sales Person Category Assignments</h2>
                     {hasPermission('users:create') && (
                       <button
-                        onClick={() => navigate('/sales-person-category-assignments/new')}
+                        onClick={() => navigate('/sales-person-category-assignments/new?returnTo=management&tab=assignments')}
                         className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold py-2 px-4 rounded-xl hover:shadow-lg transition-all flex items-center gap-2"
                       >
                         <Plus className="w-4 h-4" />
@@ -533,7 +581,7 @@ const SalesPersonManagement = () => {
                           <tr key={ass.id} className="hover:bg-blue-50">
                             <td className="px-4 py-3 text-sm font-semibold">{ass.sales_person_name || 'Unknown'}</td>
                             <td className="px-4 py-3 text-sm text-gray-600">{ass.category_name || 'Unknown'}</td>
-                            <td className="px-4 py-3 text-sm text-gray-500">—</td>
+                            <td className="px-4 py-3 text-sm text-gray-500">{ass.parent_category_name || '—'}</td>
                             <td className="px-4 py-3">
                               <span className="px-2 py-1 text-xs rounded bg-green-100 text-green-700">
                                 Active
@@ -542,7 +590,7 @@ const SalesPersonManagement = () => {
                             <td className="px-4 py-3 text-right">
                               <div className="flex justify-end gap-2">
                                 {hasPermission('users:update') && (
-                                  <button onClick={() => navigate(`/sales-person-category-assignments/${ass.id}/edit`)} className="p-1 text-blue-600 hover:bg-blue-50 rounded">
+                                  <button onClick={() => navigate(`/sales-person-category-assignments/${ass.id}/edit?returnTo=management&tab=assignments`)} className="p-1 text-blue-600 hover:bg-blue-50 rounded">
                                     <Edit className="w-4 h-4" />
                                   </button>
                                 )}
@@ -557,6 +605,63 @@ const SalesPersonManagement = () => {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Expenses Tab */}
+              {activeTab === 'expenses' && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xl font-bold text-gray-900">Daily Expenses</h2>
+                    {hasPermission('expenses:create') && (
+                      <button
+                        onClick={() => navigate('/expenses/new')}
+                        className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold py-2 px-4 rounded-xl hover:shadow-lg transition-all flex items-center gap-2"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Add Expense
+                      </button>
+                    )}
+                  </div>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <p className="text-sm text-blue-800">
+                      <strong>Note:</strong> Click "Add Expense" to record daily expenses like sales person payments, purchases, transport, office expenses, etc.
+                    </p>
+                  </div>
+                  <div className="text-center py-12 bg-white rounded-lg border-2 border-dashed border-gray-300">
+                    <Receipt className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600 mb-4">Manage expenses from the Expenses page</p>
+                    <button
+                      onClick={() => navigate('/expenses')}
+                      className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                      Go to Expenses
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Daily Report Tab */}
+              {activeTab === 'dailyreport' && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xl font-bold text-gray-900">Daily Report</h2>
+                  </div>
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <p className="text-sm text-green-800">
+                      <strong>Daily Report</strong> shows comprehensive business summary including sales, purchases, expenses, sales person performance, and profit/loss calculations.
+                    </p>
+                  </div>
+                  <div className="text-center py-12 bg-white rounded-lg border-2 border-dashed border-gray-300">
+                    <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600 mb-4">View detailed daily report with all metrics</p>
+                    <button
+                      onClick={() => navigate('/daily-report')}
+                      className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors"
+                    >
+                      View Daily Report
+                    </button>
                   </div>
                 </div>
               )}

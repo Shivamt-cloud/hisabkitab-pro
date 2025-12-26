@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IndexedDB Migration Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-section h2 {
+            margin-top: 0;
+            color: #333;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button.danger {
+            background: #f44336;
+        }
+        button.danger:hover {
+            background: #da190b;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+            background: #f0f0f0;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+    </style>
+</head>
+<body>
+    <h1>IndexedDB Migration Test Suite</h1>
+    
+    <div class="test-section">
+        <h2>1. Database Connection Test</h2>
+        <button onclick="testConnection()">Test Connection</button>
+        <div id="connection-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Object Stores Test</h2>
+        <button onclick="testObjectStores()">List All Stores</button>
+        <div id="stores-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. CRUD Operations Test</h2>
+        <button onclick="testCRUD()">Run CRUD Tests</button>
+        <div id="crud-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. Data Migration Test</h2>
+        <button onclick="testMigration()">Test Migration</button>
+        <div id="migration-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>5. Performance Test</h2>
+        <button onclick="testPerformance()">Test Performance</button>
+        <div id="performance-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>6. Cleanup</h2>
+        <button class="danger" onclick="clearDatabase()">Clear All Data</button>
+        <div id="cleanup-result" class="result"></div>
+    </div>
+
+    <script type="module">
+        const DB_NAME = 'hisabkitab_db';
+        const DB_VERSION = 6;
+        
+        const STORES = {
+            COMPANIES: 'companies',
+            PRODUCTS: 'products',
+            CATEGORIES: 'categories',
+            CUSTOMERS: 'customers',
+            SUPPLIERS: 'suppliers',
+            SALES: 'sales',
+            PURCHASES: 'purchases',
+            STOCK_ADJUSTMENTS: 'stock_adjustments',
+            USERS: 'users',
+            AUDIT_LOGS: 'audit_logs',
+            NOTIFICATIONS: 'notifications',
+            SETTINGS: 'settings',
+            PAYMENT_RECORDS: 'payment_records',
+            PAYMENT_TRANSACTIONS: 'payment_transactions',
+            SALES_PERSONS: 'sales_persons',
+            CATEGORY_COMMISSIONS: 'category_commissions',
+            SALES_COMMISSIONS: 'sales_commissions',
+            SALES_PERSON_CATEGORY_ASSIGNMENTS: 'sales_person_category_assignments',
+            USER_PERMISSIONS: 'user_permissions',
+            AUTOMATIC_BACKUPS: 'automatic_backups',
+        };
+
+        function log(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'error' ? 'error' : type === 'success' ? 'success' : 'info';
+            element.className = `result ${className}`;
+            element.textContent = `[${timestamp}] ${message}\n${element.textContent}`;
+        }
+
+        async function openDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+                request.onupgradeneeded = () => {
+                    // Database upgrade needed
+                };
+            });
+        }
+
+        window.testConnection = async function() {
+            try {
+                log('connection-result', 'Testing database connection...', 'info');
+                const db = await openDB();
+                log('connection-result', `✅ Database connected successfully!\nName: ${db.name}\nVersion: ${db.version}`, 'success');
+            } catch (error) {
+                log('connection-result', `❌ Connection failed: ${error.message}`, 'error');
+            }
+        };
+
+        window.testObjectStores = async function() {
+            try {
+                log('stores-result', 'Listing object stores...', 'info');
+                const db = await openDB();
+                const storeNames = Array.from(db.objectStoreNames);
+                log('stores-result', `✅ Found ${storeNames.length} object stores:\n${storeNames.join('\n')}`, 'success');
+                
+                // Check if all expected stores exist
+                const expectedStores = Object.values(STORES);
+                const missing = expectedStores.filter(s => !storeNames.includes(s));
+                if (missing.length > 0) {
+                    log('stores-result', `⚠️ Missing stores: ${missing.join(', ')}`, 'error');
+                } else {
+                    log('stores-result', '✅ All expected stores present!', 'success');
+                }
+            } catch (error) {
+                log('stores-result', `❌ Error: ${error.message}`, 'error');
+            }
+        };
+
+        window.testCRUD = async function() {
+            try {
+                log('crud-result', 'Testing CRUD operations...', 'info');
+                const db = await openDB();
+                const transaction = db.transaction([STORES.PRODUCTS], 'readwrite');
+                const store = transaction.objectStore(STORES.PRODUCTS);
+                
+                // Create
+                const testProduct = {
+                    id: Date.now(),
+                    name: 'Test Product',
+                    sku: 'TEST-001',
+                    stock_quantity: 100,
+                    created_at: new Date().toISOString(),
+                };
+                
+                await new Promise((resolve, reject) => {
+                    const request = store.add(testProduct);
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                });
+                log('crud-result', '✅ Create: Success', 'success');
+                
+                // Read
+                const readProduct = await new Promise((resolve, reject) => {
+                    const request = store.get(testProduct.id);
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                });
+                if (readProduct && readProduct.name === 'Test Product') {
+                    log('crud-result', '✅ Read: Success', 'success');
+                } else {
+                    log('crud-result', '❌ Read: Failed - Data mismatch', 'error');
+                }
+                
+                // Update
+                testProduct.name = 'Updated Test Product';
+                await new Promise((resolve, reject) => {
+                    const request = store.put(testProduct);
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                });
+                log('crud-result', '✅ Update: Success', 'success');
+                
+                // Delete
+                await new Promise((resolve, reject) => {
+                    const request = store.delete(testProduct.id);
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                });
+                log('crud-result', '✅ Delete: Success', 'success');
+                
+                log('crud-result', '✅ All CRUD operations passed!', 'success');
+            } catch (error) {
+                log('crud-result', `❌ CRUD test failed: ${error.message}`, 'error');
+            }
+        };
+
+        window.testMigration = async function() {
+            try {
+                log('migration-result', 'Testing migration status...', 'info');
+                const db = await openDB();
+                
+                // Check if migration flag exists in localStorage
+                const migrationComplete = localStorage.getItem('hisabkitab_migration_complete');
+                if (migrationComplete) {
+                    log('migration-result', `✅ Migration completed: ${migrationComplete}`, 'success');
+                } else {
+                    log('migration-result', '⚠️ Migration flag not found (may be first run)', 'info');
+                }
+                
+                // Count records in each store
+                const storeNames = Array.from(db.objectStoreNames);
+                let totalRecords = 0;
+                for (const storeName of storeNames) {
+                    const transaction = db.transaction([storeName], 'readonly');
+                    const store = transaction.objectStore(storeName);
+                    const count = await new Promise((resolve, reject) => {
+                        const request = store.count();
+                        request.onsuccess = () => resolve(request.result);
+                        request.onerror = () => reject(request.error);
+                    });
+                    totalRecords += count;
+                    if (count > 0) {
+                        log('migration-result', `${storeName}: ${count} records`, 'info');
+                    }
+                }
+                log('migration-result', `✅ Total records in database: ${totalRecords}`, 'success');
+            } catch (error) {
+                log('migration-result', `❌ Migration test failed: ${error.message}`, 'error');
+            }
+        };
+
+        window.testPerformance = async function() {
+            try {
+                log('performance-result', 'Testing performance...', 'info');
+                const db = await openDB();
+                const transaction = db.transaction([STORES.PRODUCTS], 'readwrite');
+                const store = transaction.objectStore(STORES.PRODUCTS);
+                
+                // Test write performance
+                const writeStart = performance.now();
+                const testProducts = [];
+                for (let i = 0; i < 100; i++) {
+                    testProducts.push({
+                        id: Date.now() + i,
+                        name: `Test Product ${i}`,
+                        sku: `TEST-${i}`,
+                        stock_quantity: Math.floor(Math.random() * 100),
+                        created_at: new Date().toISOString(),
+                    });
+                }
+                
+                for (const product of testProducts) {
+                    await new Promise((resolve, reject) => {
+                        const request = store.add(product);
+                        request.onsuccess = () => resolve();
+                        request.onerror = () => reject(request.error);
+                    });
+                }
+                const writeTime = performance.now() - writeStart;
+                log('performance-result', `✅ Write 100 records: ${writeTime.toFixed(2)}ms (${(writeTime/100).toFixed(2)}ms per record)`, 'success');
+                
+                // Test read performance
+                const readStart = performance.now();
+                for (const product of testProducts) {
+                    await new Promise((resolve, reject) => {
+                        const request = store.get(product.id);
+                        request.onsuccess = () => resolve();
+                        request.onerror = () => reject(request.error);
+                    });
+                }
+                const readTime = performance.now() - readStart;
+                log('performance-result', `✅ Read 100 records: ${readTime.toFixed(2)}ms (${(readTime/100).toFixed(2)}ms per record)`, 'success');
+                
+                // Cleanup test data
+                for (const product of testProducts) {
+                    await new Promise((resolve, reject) => {
+                        const request = store.delete(product.id);
+                        request.onsuccess = () => resolve();
+                        request.onerror = () => reject(request.error);
+                    });
+                }
+                
+                log('performance-result', '✅ Performance test completed!', 'success');
+            } catch (error) {
+                log('performance-result', `❌ Performance test failed: ${error.message}`, 'error');
+            }
+        };
+
+        window.clearDatabase = async function() {
+            if (!confirm('Are you sure you want to clear all IndexedDB data? This cannot be undone!')) {
+                return;
+            }
+            try {
+                log('cleanup-result', 'Clearing database...', 'info');
+                const db = await openDB();
+                const storeNames = Array.from(db.objectStoreNames);
+                
+                for (const storeName of storeNames) {
+                    const transaction = db.transaction([storeName], 'readwrite');
+                    const store = transaction.objectStore(storeName);
+                    await new Promise((resolve, reject) => {
+                        const request = store.clear();
+                        request.onsuccess = () => resolve();
+                        request.onerror = () => reject(request.error);
+                    });
+                    log('cleanup-result', `Cleared ${storeName}`, 'info');
+                }
+                
+                log('cleanup-result', '✅ Database cleared successfully!', 'success');
+            } catch (error) {
+                log('cleanup-result', `❌ Cleanup failed: ${error.message}`, 'error');
+            }
+        };
+    </script>
+</body>
+</html>
+

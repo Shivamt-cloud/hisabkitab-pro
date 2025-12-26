@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { saleService } from '../services/saleService'
 import { customerService } from '../services/customerService'
 import { productService } from '../services/productService'
+import { companyService } from '../services/companyService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import Invoice from '../components/Invoice'
 import { InvoiceData } from '../types/invoice'
@@ -33,6 +34,7 @@ const InvoiceView = () => {
 
       // Get customer information if available
       let customerInfo
+      let customerCreditBalance: number | undefined
       if (sale.customer_id) {
         const customer = await customerService.getById(sale.customer_id)
         if (customer) {
@@ -46,6 +48,8 @@ const InvoiceView = () => {
             state: customer.state,
             pincode: customer.pincode,
           }
+          // Get current credit balance (after this transaction)
+          customerCreditBalance = customer.credit_balance || 0
         }
       } else if (sale.customer_name) {
         customerInfo = {
@@ -74,10 +78,38 @@ const InvoiceView = () => {
       
       const invoiceItems = await Promise.all(invoiceItemsPromises)
 
-      // Default company info (can be customized later)
-      const companyInfo = {
-        name: 'HisabKitab',
-        // Add default company info here or load from settings
+      // Load company information from sale
+      let companyInfo
+      if (sale.company_id) {
+        const company = await companyService.getById(sale.company_id)
+        if (company) {
+          // Build full address from components
+          const addressParts = []
+          if (company.address) addressParts.push(company.address)
+          if (company.city) addressParts.push(company.city)
+          if (company.state) addressParts.push(company.state)
+          if (company.pincode) addressParts.push(company.pincode)
+          const fullAddress = addressParts.join(', ')
+          
+          companyInfo = {
+            name: company.name || 'HisabKitab',
+            address: fullAddress || company.address,
+            city: company.city,
+            state: company.state,
+            pincode: company.pincode,
+            phone: company.phone,
+            email: company.email,
+            gstin: company.gstin, // Show GST if company has it
+            website: company.website,
+          }
+        }
+      }
+      
+      // Fallback to default if no company found
+      if (!companyInfo) {
+        companyInfo = {
+          name: 'HisabKitab',
+        }
       }
 
       const invoice: InvoiceData = {
@@ -90,6 +122,10 @@ const InvoiceView = () => {
         tax_amount: sale.tax_amount,
         grand_total: sale.grand_total,
         payment_method: sale.payment_method,
+        payment_methods: sale.payment_methods, // Include multiple payment methods
+        return_amount: sale.return_amount, // Include return amount if any
+        credit_applied: sale.credit_applied, // Include credit applied if any
+        credit_balance: customerCreditBalance, // Include current credit balance
         payment_status: sale.payment_status,
         sales_person: sale.sales_person_name,
         notes: sale.notes,
@@ -144,9 +180,9 @@ const InvoiceView = () => {
           <div className="flex items-center justify-between bg-white/80 backdrop-blur-lg shadow-lg rounded-xl p-4 border border-gray-200/50">
             <div className="flex items-center gap-4">
               <button
-                onClick={() => navigate('/sales/history')}
+                onClick={() => navigate('/')}
                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors flex items-center justify-center border border-gray-200"
-                title="Back to Sales History"
+                title="Go to Dashboard"
               >
                 <Home className="w-5 h-5 text-gray-700" />
               </button>

@@ -56,11 +56,15 @@ interface SettingsRecord {
 }
 
 async function getSettingsRecord(): Promise<SettingsRecord> {
-  const record = await getById<SettingsRecord>(STORES.SETTINGS, SETTINGS_KEY)
-  if (record) {
-    return record
+  try {
+    const record = await getById<SettingsRecord>(STORES.SETTINGS, SETTINGS_KEY)
+    if (record) {
+      return record
+    }
+  } catch (error) {
+    console.error('Error getting settings record:', error)
   }
-  // Return default if not found
+  // Return default if not found or on error
   return {
     key: SETTINGS_KEY,
     settings: defaultSettings,

@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supplierService } from '../services/purchaseService'
+import { supplierPaymentService } from '../services/supplierPaymentService'
 import { Supplier } from '../types/purchase'
+import { SupplierAccountSummary } from '../types/supplierPayment'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { 
   Plus, 
@@ -10,7 +12,9 @@ import {
   Trash2, 
   Building2, 
   Filter,
-  Home
+  Home,
+  DollarSign,
+  Eye
 } from 'lucide-react'
 import { useNavigate, useLocation } from 'react-router-dom'
 
@@ -19,6 +23,7 @@ const Suppliers = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [accountSummaries, setAccountSummaries] = useState<Map<number, SupplierAccountSummary>>(new Map())
   const [searchQuery, setSearchQuery] = useState('')
   const [filterRegistered, setFilterRegistered] = useState<boolean | null>(null)
   const [loading, setLoading] = useState(true)
@@ -33,6 +38,14 @@ const Suppliers = () => {
       const companyId = getCurrentCompanyId()
       const allSuppliers = await supplierService.getAll(companyId)
       setSuppliers(allSuppliers)
+
+      // Load account summaries for all suppliers
+      const summaries = await supplierPaymentService.getAllAccountSummaries(companyId)
+      const summariesMap = new Map<number, SupplierAccountSummary>()
+      summaries.forEach(summary => {
+        summariesMap.set(summary.supplier_id, summary)
+      })
+      setAccountSummaries(summariesMap)
     } catch (error) {
       console.error('Error loading suppliers:', error)
     } finally {
@@ -212,6 +225,15 @@ const Suppliers = () => {
                         GSTIN
                       </th>
                       <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                        Total Purchases
+                      </th>
+                      <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                        Total Paid
+                      </th>
+                      <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                        Pending
+                      </th>
+                      <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
                         Actions
                       </th>
                     </tr>
@@ -263,8 +285,46 @@ const Suppliers = () => {
                             {supplier.gstin || <span className="text-gray-400">—</span>}
                           </div>
                         </td>
+                        <td className="px-6 py-4 text-right">
+                          {(() => {
+                            const summary = accountSummaries.get(supplier.id)
+                            return (
+                              <div className="text-sm font-semibold text-gray-900">
+                                ₹{summary ? summary.total_purchases.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '0.00'}
+                              </div>
+                            )
+                          })()}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          {(() => {
+                            const summary = accountSummaries.get(supplier.id)
+                            return (
+                              <div className="text-sm font-semibold text-green-600">
+                                ₹{summary ? summary.total_paid.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '0.00'}
+                              </div>
+                            )
+                          })()}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          {(() => {
+                            const summary = accountSummaries.get(supplier.id)
+                            const pending = summary ? summary.pending_amount : 0
+                            return (
+                              <div className={`text-sm font-semibold ${pending > 0 ? 'text-red-600' : 'text-gray-600'}`}>
+                                ₹{pending.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                              </div>
+                            )
+                          })()}
+                        </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                           <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => navigate(`/suppliers/${supplier.id}/account`)}
+                              className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                              title="View Account"
+                            >
+                              <Eye className="w-5 h-5" />
+                            </button>
                             {hasPermission('purchases:update') && (
                               <button
                                 onClick={() => navigate(`/suppliers/${supplier.id}/edit`)}
