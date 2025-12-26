@@ -138,8 +138,8 @@ const SupplierCheckForm = () => {
         status: formData.status,
         cleared_date: formData.cleared_date || undefined,
         notes: formData.notes || undefined,
-        company_id: companyId,
-        created_by: user.id,
+        company_id: companyId || undefined,
+        created_by: parseInt(user?.id || '1'),
         created_by_name: user.name,
       }
 

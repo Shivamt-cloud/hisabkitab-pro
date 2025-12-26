@@ -17,7 +17,9 @@ import {
   Home,
   TrendingUp,
   DollarSign,
-  Building2
+  Building2,
+  Receipt,
+  FileText
 } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { SalesPerson, CategoryCommission, SalesPersonCategoryAssignment } from '../types/salesperson'
