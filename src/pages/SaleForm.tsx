@@ -86,7 +86,7 @@ const SaleForm = () => {
               if (!actualProductId || actualProductId === 0) {
                 if (item.product_name) {
                   // Try to find product by name
-                  const foundProduct = products.find(p => p.name.toLowerCase() === item.product_name.toLowerCase())
+                  const foundProduct = products.find(p => p.name.toLowerCase() === (item.product_name || '').toLowerCase())
                   if (foundProduct) {
                     actualProductId = foundProduct.id
                     console.log(`⚠️ [DEBUG] Purchase item ${item.id} has product_id 0, found product by name "${item.product_name}": ${actualProductId}`)

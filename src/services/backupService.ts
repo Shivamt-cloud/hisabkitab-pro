@@ -1,6 +1,7 @@
 import { productService, categoryService } from './productService'
 import { saleService } from './saleService'
 import { purchaseService, supplierService } from './purchaseService'
+import { Purchase } from '../types/purchase'
 import { customerService } from './customerService'
 import { salesPersonService, categoryCommissionService, salesPersonCategoryAssignmentService } from './salespersonService'
 import { stockAdjustmentService } from './stockAdjustmentService'
@@ -608,7 +609,7 @@ export const backupService = {
                       is_active: true,
                       status: 'active',
                       barcode_status: item.barcode ? 'active' : 'inactive',
-                      company_id: companyId,
+                      company_id: companyId ?? undefined,
                     })
                     item.product_id = product.id
                     productNameMap.set(item._productNameForCreation.toLowerCase(), product)
@@ -662,7 +663,7 @@ export const backupService = {
                       pincode: '',
                       contact_person: '',
                       is_registered: !!purchase.supplier_gstin,
-                      company_id: companyId,
+                      company_id: companyId ?? undefined,
                     })
                     supplierId = newSupplier.id
                     supplierNameMap.set(purchase.supplier_name.toLowerCase(), newSupplier)
