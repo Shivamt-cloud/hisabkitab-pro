@@ -286,3 +286,5 @@ const selectedItem = availableItems[0]
 
 **The system is now fully equipped to handle purchases with or without articles!** 🎉
 
+
+

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verify Purchase History</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      margin-top: 0;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      font-size: 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 10px;
+      margin-top: 10px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    .status {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 4px;
+    }
+    .status.success {
+      background: #d4edda;
+      border: 1px solid #c3e6cb;
+      color: #155724;
+    }
+    .status.info {
+      background: #d1ecf1;
+      border: 1px solid #bee5eb;
+      color: #0c5460;
+    }
+    .status.warning {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      color: #856404;
+    }
+    #purchaseList {
+      margin-top: 20px;
+      max-height: 400px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      padding: 10px;
+      border-radius: 4px;
+      background: #f9f9f9;
+    }
+    .purchase-item {
+      padding: 8px;
+      margin: 5px 0;
+      background: white;
+      border-left: 3px solid #007bff;
+      border-radius: 3px;
+    }
+    pre {
+      background: #f4f4f4;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 Verify Purchase History</h1>
+    
+    <button onclick="checkPurchases()">Check Purchases</button>
+    <button onclick="clearAll()" style="background: #dc3545;">Clear All Purchases</button>
+    
+    <div id="status"></div>
+    <div id="purchaseList"></div>
+  </div>
+
+  <script>
+    const DB_NAME = 'hisabkitab_db';
+    const DB_VERSION = 9;
+    const STORE_NAME = 'purchases';
+
+    function showStatus(message, type = 'info') {
+      const statusDiv = document.getElementById('status');
+      statusDiv.innerHTML = message;
+      statusDiv.className = 'status ' + type;
+    }
+
+    function showPurchases(purchases) {
+      const listDiv = document.getElementById('purchaseList');
+      if (purchases.length === 0) {
+        listDiv.innerHTML = '<p><strong>No purchases found in database.</strong></p>';
+        return;
+      }
+      
+      let html = `<h3>Found ${purchases.length} purchase(s):</h3>`;
+      purchases.slice(0, 10).forEach((p, index) => {
+        html += `
+          <div class="purchase-item">
+            <strong>Purchase #${index + 1}</strong><br>
+            ID: ${p.id}<br>
+            Date: ${p.purchase_date || 'N/A'}<br>
+            Type: ${p.type || 'N/A'}<br>
+            Company ID: ${p.company_id !== undefined ? p.company_id : 'undefined'}<br>
+            Items: ${p.items ? p.items.length : 0}<br>
+            <pre>${JSON.stringify(p, null, 2).substring(0, 300)}...</pre>
+          </div>
+        `;
+      });
+      
+      if (purchases.length > 10) {
+        html += `<p><em>... and ${purchases.length - 10} more purchases</em></p>`;
+      }
+      
+      listDiv.innerHTML = html;
+    }
+
+    async function openDB() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+        request.onupgradeneeded = () => {
+          // Database is being created/upgraded
+          const db = request.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+          }
+          resolve(db);
+        };
+      });
+    }
+
+    async function checkPurchases() {
+      try {
+        showStatus('Checking database...', 'info');
+        const db = await openDB();
+        
+        const tx = db.transaction([STORE_NAME], 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        const getAllRequest = store.getAll();
+        
+        const purchases = await new Promise((resolve, reject) => {
+          getAllRequest.onsuccess = () => resolve(getAllRequest.result || []);
+          getAllRequest.onerror = () => reject(getAllRequest.error);
+        });
+        
+        console.log('All purchases:', purchases);
+        console.log('Purchase count:', purchases.length);
+        
+        if (purchases.length === 0) {
+          showStatus(`✅ <strong>Database is empty.</strong> Found 0 purchases.`, 'success');
+        } else {
+          showStatus(`📊 <strong>Found ${purchases.length} purchase(s)</strong> in the database.`, 'warning');
+        }
+        
+        showPurchases(purchases);
+        db.close();
+        
+      } catch (error) {
+        console.error('Error checking purchases:', error);
+        showStatus('❌ Error: ' + error.message, 'warning');
+      }
+    }
+
+    async function clearAll() {
+      const confirmed = confirm('⚠️ Are you absolutely sure you want to delete ALL purchase history?');
+      if (!confirmed) return;
+      
+      const finalConfirm = confirm('🔴 FINAL CONFIRMATION: This will delete ALL purchases.');
+      if (!finalConfirm) return;
+
+      try {
+        showStatus('Clearing all purchases...', 'info');
+        const db = await openDB();
+        
+        // Get all first
+        const tx1 = db.transaction([STORE_NAME], 'readonly');
+        const store1 = tx1.objectStore(STORE_NAME);
+        const getAllRequest = store1.getAll();
+        
+        const allPurchases = await new Promise((resolve, reject) => {
+          getAllRequest.onsuccess = () => resolve(getAllRequest.result || []);
+          getAllRequest.onerror = () => reject(getAllRequest.error);
+        });
+        
+        if (allPurchases.length === 0) {
+          showStatus('✅ Database is already empty.', 'success');
+          db.close();
+          return;
+        }
+        
+        // Delete all individually
+        const tx2 = db.transaction([STORE_NAME], 'readwrite');
+        const store2 = tx2.objectStore(STORE_NAME);
+        
+        const deletePromises = allPurchases.map(purchase => {
+          return new Promise((resolve, reject) => {
+            const deleteRequest = store2.delete(purchase.id);
+            deleteRequest.onsuccess = () => resolve();
+            deleteRequest.onerror = () => reject(deleteRequest.error);
+          });
+        });
+        
+        await Promise.all(deletePromises);
+        
+        await new Promise((resolve) => {
+          tx2.oncomplete = () => resolve();
+          tx2.onerror = () => resolve();
+        });
+        
+        // Clear as fallback
+        const tx3 = db.transaction([STORE_NAME], 'readwrite');
+        const store3 = tx3.objectStore(STORE_NAME);
+        const clearRequest = store3.clear();
+        
+        await new Promise((resolve, reject) => {
+          clearRequest.onsuccess = () => resolve();
+          clearRequest.onerror = () => reject(clearRequest.error);
+        });
+        
+        await new Promise((resolve) => {
+          tx3.oncomplete = () => resolve();
+          tx3.onerror = () => resolve();
+        });
+        
+        db.close();
+        showStatus(`✅ Successfully cleared ${allPurchases.length} purchase(s)!`, 'success');
+        document.getElementById('purchaseList').innerHTML = '';
+        
+        // Re-check
+        setTimeout(() => checkPurchases(), 500);
+        
+      } catch (error) {
+        console.error('Error clearing:', error);
+        showStatus('❌ Error: ' + error.message, 'warning');
+      }
+    }
+
+    // Check on page load
+    window.addEventListener('load', () => {
+      checkPurchases();
+    });
+  </script>
+</body>
+</html>
+

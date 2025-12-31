@@ -66,3 +66,5 @@ export interface SupplierAccountSummary {
   check_history: SupplierCheck[] // All check history
 }
 
+
+

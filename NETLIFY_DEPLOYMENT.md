@@ -271,3 +271,5 @@ If you encounter issues:
 Once deployed, your app will be live and accessible to users. Every time you push to GitHub, Netlify will automatically rebuild and redeploy your site!
 
 
+
+

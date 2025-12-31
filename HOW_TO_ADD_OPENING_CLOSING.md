@@ -88,3 +88,5 @@
 - Amount is calculated automatically from denominations
 - You can add multiple opening/closing entries for different dates
 
+
+

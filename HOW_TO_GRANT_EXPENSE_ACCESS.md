@@ -127,3 +127,5 @@ Once a user has `expenses:read` permission, they can access:
 - **Editing expenses** requires `expenses:update` permission
 - **Deleting expenses** requires `expenses:delete` permission
 
+
+

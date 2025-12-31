@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { saleService } from '../services/saleService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Sale } from '../types/sale'
-import { Eye, ShoppingCart, TrendingUp, DollarSign, Archive, Home, FileSpreadsheet, FileText } from 'lucide-react'
+import { Eye, ShoppingCart, TrendingUp, DollarSign, Archive, Home, FileSpreadsheet, FileText, Trash2 } from 'lucide-react'
 
 type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
 
@@ -23,6 +23,9 @@ const SalesHistory = () => {
     totalRevenue: 0,
     thisMonth: 0,
   })
+  const [selectedSaleIds, setSelectedSaleIds] = useState<Set<number>>(new Set())
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   useEffect(() => {
     // Only admin can access this page
@@ -71,6 +74,90 @@ const SalesHistory = () => {
     }
 
     return { startDate, endDate }
+  }
+
+  // Clear selections when sales change
+  useEffect(() => {
+    setSelectedSaleIds(new Set())
+  }, [sales.length])
+
+  // Handle select all
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedSaleIds(new Set(sales.map(s => s.id)))
+    } else {
+      setSelectedSaleIds(new Set())
+    }
+  }
+
+  // Handle individual selection
+  const handleSelectSale = (saleId: number, checked: boolean) => {
+    const newSelected = new Set(selectedSaleIds)
+    if (checked) {
+      newSelected.add(saleId)
+    } else {
+      newSelected.delete(saleId)
+    }
+    setSelectedSaleIds(newSelected)
+  }
+
+  // Handle bulk delete
+  const handleBulkDelete = () => {
+    if (selectedSaleIds.size === 0) {
+      alert('No sales selected. Please select sales to delete.')
+      return
+    }
+    setShowDeleteConfirm(true)
+  }
+
+  // Actually perform the deletion after confirmation
+  const confirmAndDelete = async () => {
+    setShowDeleteConfirm(false)
+    const count = selectedSaleIds.size
+    setIsDeleting(true)
+    
+    try {
+      const idsToDelete = Array.from(selectedSaleIds)
+      let successCount = 0
+      let failCount = 0
+
+      // Delete in batches
+      const batchSize = 10
+      for (let i = 0; i < idsToDelete.length; i += batchSize) {
+        const batch = idsToDelete.slice(i, i + batchSize)
+        
+        const batchPromises = batch.map(async (id) => {
+          try {
+            const success = await saleService.delete(id)
+            if (success) {
+              successCount++
+            } else {
+              failCount++
+            }
+          } catch (error) {
+            console.error(`Failed to delete sale ${id}:`, error)
+            failCount++
+          }
+        })
+        
+        await Promise.all(batchPromises)
+      }
+
+      // Clear selections and reload
+      setSelectedSaleIds(new Set())
+      await loadSales()
+
+      if (failCount === 0) {
+        alert(`✅ Successfully deleted ${successCount} sale${successCount !== 1 ? 's' : ''}!`)
+      } else {
+        alert(`⚠️ Deleted ${successCount} sale${successCount !== 1 ? 's' : ''}, but ${failCount} failed. Check console for details.`)
+      }
+    } catch (error) {
+      console.error('Error during bulk delete:', error)
+      alert('❌ Error deleting sales: ' + (error instanceof Error ? error.message : 'Unknown error'))
+    } finally {
+      setIsDeleting(false)
+    }
   }
 
   const loadSales = async () => {
@@ -434,6 +521,17 @@ const SalesHistory = () => {
                 <table className="w-full">
                   <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
                     <tr>
+                      {hasPermission('sales:delete') && (
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-12">
+                          <input
+                            type="checkbox"
+                            checked={sales.length > 0 && selectedSaleIds.size === sales.length}
+                            onChange={(e) => handleSelectAll(e.target.checked)}
+                            className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
+                            title="Select All"
+                          />
+                        </th>
+                      )}
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Invoice</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Customer</th>
@@ -447,7 +545,18 @@ const SalesHistory = () => {
                   </thead>
                   <tbody className="divide-y divide-gray-200">
                     {sales.map((sale) => (
-                      <tr key={sale.id} className={`hover:bg-gray-50 transition-colors ${sale.archived ? 'opacity-75' : ''}`}>
+                      <tr key={sale.id} className={`hover:bg-gray-50 transition-colors ${sale.archived ? 'opacity-75' : ''} ${selectedSaleIds.has(sale.id) ? 'bg-blue-50' : ''}`}>
+                        {hasPermission('sales:delete') && (
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <input
+                              type="checkbox"
+                              checked={selectedSaleIds.has(sale.id)}
+                              onChange={(e) => handleSelectSale(sale.id, e.target.checked)}
+                              className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </td>
+                        )}
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">
                             {new Date(sale.sale_date).toLocaleDateString('en-IN', {
@@ -557,18 +666,65 @@ const SalesHistory = () => {
                           )}
                         </td>
                         <td className="px-6 py-4 text-right whitespace-nowrap">
-                          <button
-                            onClick={() => navigate(`/invoice/${sale.id}`)}
-                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                            title="View Invoice"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            {hasPermission('sales:delete') && (
+                              <button
+                                onClick={async () => {
+                                  const confirmed = window.confirm(
+                                    `Are you sure you want to delete this sale?\n\nInvoice: ${sale.invoice_number}\nDate: ${new Date(sale.sale_date).toLocaleDateString()}\n\nThis action cannot be undone!`
+                                  )
+                                  if (confirmed) {
+                                    try {
+                                      const success = await saleService.delete(sale.id)
+                                      if (success) {
+                                        alert('Sale deleted successfully!')
+                                        await loadSales()
+                                      } else {
+                                        alert('Failed to delete sale')
+                                      }
+                                    } catch (error) {
+                                      console.error('Error deleting sale:', error)
+                                      alert('Error deleting sale: ' + (error instanceof Error ? error.message : 'Unknown error'))
+                                    }
+                                  }
+                                }}
+                                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                title="Delete Sale"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => navigate(`/invoice/${sale.id}`)}
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="View Invoice"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* Bulk Actions */}
+            {hasPermission('sales:delete') && selectedSaleIds.size > 0 && (
+              <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between mb-4">
+                <p className="text-sm text-red-900 font-medium">
+                  <span className="font-bold">{selectedSaleIds.size}</span> sale{selectedSaleIds.size !== 1 ? 's' : ''} selected
+                </p>
+                <button
+                  type="button"
+                  onClick={handleBulkDelete}
+                  disabled={isDeleting}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  {isDeleting ? 'Deleting...' : `Delete Selected (${selectedSaleIds.size})`}
+                </button>
               </div>
             )}
 
@@ -585,6 +741,52 @@ const SalesHistory = () => {
               </div>
             )}
           </div>
+
+          {/* Delete Confirmation Modal */}
+          {showDeleteConfirm && (
+            <div 
+              className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" 
+              onClick={() => setShowDeleteConfirm(false)}
+            >
+              <div 
+                className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" 
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                    <Trash2 className="w-6 h-6 text-red-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900">Delete Sales?</h3>
+                    <p className="text-sm text-gray-600">This action cannot be undone</p>
+                  </div>
+                </div>
+                
+                <p className="text-gray-700 mb-6">
+                  Are you sure you want to delete <span className="font-bold text-red-600">{selectedSaleIds.size}</span> sale{selectedSaleIds.size !== 1 ? 's' : ''}?
+                  <br /><br />
+                  This will permanently remove {selectedSaleIds.size === 1 ? 'this sale' : 'these sales'} from the database.
+                </p>
+                
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmAndDelete}
+                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-semibold"
+                  >
+                    Delete {selectedSaleIds.size} Sale{selectedSaleIds.size !== 1 ? 's' : ''}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
       </div>
     </ProtectedRoute>

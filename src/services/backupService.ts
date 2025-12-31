@@ -150,9 +150,11 @@ export const backupService = {
     importSettings?: boolean
     importStockAdjustments?: boolean
     merge?: boolean // If false, clear existing data first
+    companyId?: number | null // Optional: company ID to assign to imported records
   } = {}): Promise<{ success: boolean; message: string; imported: number }> => {
     try {
       const backup: BackupData = JSON.parse(jsonString)
+      const companyId = options.companyId
 
       // Validate backup structure
       if (!backup.version || !backup.data) {
@@ -253,18 +255,39 @@ export const backupService = {
 
       // Import Categories (needed for products)
       if (backup.data.categories) {
+        const allCategories = await categoryService.getAll()
         for (const category of backup.data.categories) {
           try {
-            const existing = await categoryService.getById(category.id)
-            if (!existing) {
-              await categoryService.create({
-                name: category.name,
-                description: category.description || '',
-                parent_id: category.parent_id,
-                is_subcategory: category.is_subcategory || false,
-              })
-              importedCount++
+            // Check by ID first
+            const existingById = await categoryService.getById(category.id)
+            if (existingById) {
+              continue // Skip if exists by ID
             }
+
+            // Check for duplicates by name (and parent_id for subcategories)
+            const duplicate = allCategories.find(c => {
+              // Match by name (case-insensitive)
+              if (c.name.toLowerCase() !== category.name.toLowerCase()) return false
+              // For subcategories, also match parent_id
+              if (category.parent_id || c.parent_id) {
+                return c.parent_id === category.parent_id
+              }
+              // For main categories, both should have no parent
+              return !c.parent_id && !category.parent_id
+            })
+
+            if (duplicate) {
+              console.log(`Skipping duplicate category: ${category.name} (already exists)`)
+              continue
+            }
+
+            await categoryService.create({
+              name: category.name,
+              description: category.description || '',
+              parent_id: category.parent_id,
+              is_subcategory: category.is_subcategory || false,
+            })
+            importedCount++
           } catch (error) {
             console.error('Error importing category:', error)
           }
@@ -275,23 +298,53 @@ export const backupService = {
       if (options.importSuppliers !== false && backup.data.suppliers) {
         for (const supplier of backup.data.suppliers) {
           try {
-            // Check if supplier already exists
-            const existing = await supplierService.getById(supplier.id)
-            if (!existing) {
-              await supplierService.create({
-                name: supplier.name,
-                email: supplier.email || '',
-                phone: supplier.phone || '',
-                gstin: supplier.gstin || '',
-                address: supplier.address || '',
-                city: supplier.city || '',
-                state: supplier.state || '',
-                pincode: supplier.pincode || '',
-                contact_person: supplier.contact_person || '',
-                is_registered: supplier.is_registered || false,
-              })
-              importedCount++
+            // Check if supplier already exists by ID
+            const existingById = await supplierService.getById(supplier.id)
+            if (existingById) {
+              continue // Skip if exists by ID
             }
+
+            // Check for duplicates by name, email, or phone
+            // Get suppliers from the same company if companyId is provided, otherwise all suppliers
+            const targetCompanyId = companyId || supplier.company_id
+            const allSuppliers = targetCompanyId 
+              ? await supplierService.getAll(targetCompanyId)
+              : await supplierService.getAll(userId ? undefined : null)
+            
+            const duplicate = allSuppliers.find(s => {
+              // For name, email, phone: check within same company
+              const sameCompany = targetCompanyId ? (s.company_id === targetCompanyId) : true
+              
+              // Match by name (case-insensitive) within same company
+              if (sameCompany && s.name.toLowerCase() === supplier.name.toLowerCase()) return true
+              // Match by email if both have email, within same company
+              if (sameCompany && s.email && supplier.email && s.email.toLowerCase() === supplier.email.toLowerCase()) return true
+              // Match by phone if both have phone, within same company
+              if (sameCompany && s.phone && supplier.phone && s.phone === supplier.phone) return true
+              // Match by GSTIN globally (GSTIN should be unique across all companies)
+              if (s.gstin && supplier.gstin && s.gstin === supplier.gstin) return true
+              return false
+            })
+
+            if (duplicate) {
+              console.log(`Skipping duplicate supplier: ${supplier.name} (already exists)`)
+              continue
+            }
+
+            await supplierService.create({
+              name: supplier.name,
+              email: supplier.email || '',
+              phone: supplier.phone || '',
+              gstin: supplier.gstin || '',
+              address: supplier.address || '',
+              city: supplier.city || '',
+              state: supplier.state || '',
+              pincode: supplier.pincode || '',
+              contact_person: supplier.contact_person || '',
+              is_registered: supplier.is_registered || false,
+              company_id: companyId || supplier.company_id, // Set company_id from options or use existing
+            })
+            importedCount++
           } catch (error) {
             console.error('Error importing supplier:', error)
           }
@@ -316,6 +369,7 @@ export const backupService = {
                 contact_person: customer.contact_person || '',
                 credit_limit: customer.credit_limit || 0,
                 is_active: customer.is_active !== undefined ? customer.is_active : true,
+                company_id: companyId || customer.company_id, // Set company_id from options or use existing
               })
               importedCount++
             }
@@ -327,30 +381,50 @@ export const backupService = {
 
       // Import Products
       if (options.importProducts !== false && backup.data.products) {
+        const allProducts = await productService.getAll(true, userId ? undefined : null)
         for (const product of backup.data.products) {
           try {
-            const existing = await productService.getById(product.id, true)
-            if (!existing) {
-              await productService.create({
-                name: product.name || 'Imported Product',
-                sku: product.sku,
-                description: product.description,
-                category_id: product.category_id,
-                unit: product.unit || 'pcs',
-                purchase_price: product.purchase_price,
-                selling_price: product.selling_price,
-                stock_quantity: product.stock_quantity || 0,
-                min_stock_level: product.min_stock_level,
-                hsn_code: product.hsn_code,
-                gst_rate: product.gst_rate || 0,
-                tax_type: product.tax_type || 'exclusive',
-                barcode: product.barcode,
-                is_active: product.is_active !== undefined ? product.is_active : (product.status === 'active'),
-                status: product.status || 'active',
-                barcode_status: product.barcode_status || (product.barcode ? 'active' : 'inactive'),
-              })
-              importedCount++
+            // Check by ID first
+            const existingById = await productService.getById(product.id, true)
+            if (existingById) {
+              continue // Skip if exists by ID
             }
+
+            // Check for duplicates by name, SKU, or barcode
+            const duplicate = allProducts.find(p => {
+              // Match by name (case-insensitive)
+              if (p.name.toLowerCase() === (product.name || '').toLowerCase()) return true
+              // Match by SKU if both have SKU
+              if (p.sku && product.sku && p.sku.toLowerCase() === product.sku.toLowerCase()) return true
+              // Match by barcode if both have barcode
+              if (p.barcode && product.barcode && p.barcode === product.barcode) return true
+              return false
+            })
+
+            if (duplicate) {
+              console.log(`Skipping duplicate product: ${product.name} (already exists)`)
+              continue
+            }
+
+            await productService.create({
+              name: product.name || 'Imported Product',
+              sku: product.sku,
+              description: product.description,
+              category_id: product.category_id,
+              unit: product.unit || 'pcs',
+              purchase_price: product.purchase_price,
+              selling_price: product.selling_price,
+              stock_quantity: product.stock_quantity || 0,
+              min_stock_level: product.min_stock_level,
+              hsn_code: product.hsn_code,
+              gst_rate: product.gst_rate || 0,
+              tax_type: product.tax_type || 'exclusive',
+              barcode: product.barcode,
+              is_active: product.is_active !== undefined ? product.is_active : (product.status === 'active'),
+              status: product.status || 'active',
+              barcode_status: product.barcode_status || (product.barcode ? 'active' : 'inactive'),
+            })
+            importedCount++
           } catch (error) {
             console.error('Error importing product:', error)
           }
@@ -359,43 +433,402 @@ export const backupService = {
 
       // Import Purchases (requires products and suppliers to exist)
       if (options.importPurchases !== false && backup.data.purchases) {
-        for (const purchase of backup.data.purchases) {
-          try {
-            const existing = await purchaseService.getById(purchase.id)
-            if (!existing) {
-              if (purchase.type === 'gst') {
-                const gstPurchase = purchase as any
-                await purchaseService.createGST({
-                  supplier_id: gstPurchase.supplier_id,
-                  invoice_number: gstPurchase.invoice_number || '',
-                  purchase_date: gstPurchase.purchase_date,
-                  items: gstPurchase.items || [],
-                  subtotal: gstPurchase.subtotal || 0,
-                  total_tax: gstPurchase.total_tax || gstPurchase.tax_amount || 0,
-                  grand_total: gstPurchase.grand_total || 0,
-                  payment_status: (gstPurchase.payment_status || 'pending') as any,
-                  notes: gstPurchase.notes,
-                  created_by: userId ? parseInt(userId) : 1,
-                } as any)
-                importedCount++
-              } else {
-                const simplePurchase = purchase as any
-                await purchaseService.createSimple({
-                  supplier_id: simplePurchase.supplier_id,
-                  invoice_number: simplePurchase.invoice_number,
-                  purchase_date: simplePurchase.purchase_date,
-                  items: simplePurchase.items || [],
-                  total_amount: simplePurchase.total_amount || 0,
-                  payment_status: (simplePurchase.payment_status || 'pending') as any,
-                  notes: simplePurchase.notes,
-                } as any)
-                importedCount++
+        // Load purchases filtered by company for duplicate checking
+        const allPurchases = await purchaseService.getAll(undefined, companyId !== undefined ? companyId : (userId ? undefined : null))
+        const allProducts = await productService.getAll(true, companyId !== undefined ? companyId : (userId ? undefined : null))
+        // Load suppliers filtered by company for proper matching
+        const allSuppliers = await supplierService.getAll(companyId !== undefined ? companyId : (userId ? undefined : null))
+        
+        // Create lookup maps for faster access
+        const purchaseIdMap = new Set(allPurchases.map(p => p.id))
+        const purchaseKeyMap = new Map<string, Purchase>()
+        allPurchases.forEach(p => {
+          const key = `${p.invoice_number}_${new Date(p.purchase_date).toISOString().split('T')[0]}_${p.supplier_id || (p as any).supplier_name || ''}`
+          purchaseKeyMap.set(key.toLowerCase(), p)
+        })
+        const productNameMap = new Map<string, any>()
+        allProducts.forEach(p => {
+          productNameMap.set(p.name.toLowerCase(), p)
+        })
+        const supplierNameMap = new Map<string, any>()
+        allSuppliers.forEach(s => {
+          supplierNameMap.set(s.name.toLowerCase(), s)
+        })
+        
+        let processedCount = 0
+        let skippedCount = 0
+        let errorCount = 0
+        
+        const totalPurchases = backup.data.purchases.length
+        console.log(`📦 Starting import of ${totalPurchases} purchases for company ${companyId}`)
+        
+        // Process in batches to show progress
+        const BATCH_SIZE = 50
+        let batchStart = 0
+        
+        while (batchStart < totalPurchases) {
+          const batch = backup.data.purchases.slice(batchStart, batchStart + BATCH_SIZE)
+          
+          for (const purchase of batch) {
+            processedCount++
+            
+            // Show progress every 50 records
+            if (processedCount % 50 === 0) {
+              console.log(`⏳ Progress: ${processedCount}/${totalPurchases} (${Math.round(processedCount/totalPurchases*100)}%)`)
+            }
+            
+            try {
+              // Check by ID first (using Set for O(1) lookup)
+              if (purchaseIdMap.has(purchase.id)) {
+                skippedCount++
+                continue // Skip if exists by ID
+              }
+
+              // Check for duplicates using Map for O(1) lookup
+              const purchaseDate = new Date(purchase.purchase_date).toISOString().split('T')[0]
+              const supplierKey = purchase.supplier_id || purchase.supplier_name || ''
+              const duplicateKey = `${purchase.invoice_number}_${purchaseDate}_${supplierKey}`.toLowerCase()
+              
+              const existingPurchase = purchaseKeyMap.get(duplicateKey)
+              if (existingPurchase) {
+                // Check if it's truly a duplicate (same company)
+                if (companyId !== undefined && companyId !== null) {
+                  const existingCompanyId = existingPurchase.company_id
+                  if (existingCompanyId !== null && existingCompanyId !== undefined && existingCompanyId !== companyId) {
+                    // Different companies, not a duplicate - continue
+                  } else {
+                    // Same company or old data - skip as duplicate
+                    skippedCount++
+                    continue
+                  }
+                } else {
+                  // No company filter - skip as duplicate
+                  skippedCount++
+                  continue
+                }
+              }
+
+              // Process purchase items: try to match products by name, barcode, or article
+              // IMPORTANT: Preserve barcode and article data for sales search functionality
+              const processedItems = (purchase.items || []).map((item: any) => {
+                // Preserve all item data including barcode and article
+                const processedItem: any = {
+                  ...item,
+                  // Preserve barcode and article - critical for sales search
+                  barcode: item.barcode || '',
+                  article: item.article || '',
+                }
+                
+                // If product_id already exists and is valid, use it
+                if (processedItem.product_id && processedItem.product_id > 0) {
+                  return processedItem
+                }
+                
+                // Strategy 1: If product_name exists, try to find product by name
+                if (item.product_name && item.product_name.trim()) {
+                  const product = productNameMap.get(item.product_name.toLowerCase())
+                  if (product) {
+                    processedItem.product_id = product.id
+                    return processedItem
+                  } else {
+                    // Product not found - will be created later using product_name
+                    processedItem.product_id = null
+                    processedItem._needsProductCreation = true
+                    processedItem._productNameForCreation = item.product_name.trim()
+                    return processedItem
+                  }
+                }
+                
+                // Strategy 2: If product_name is empty but barcode/article exists, try to match existing products
+                // First try to match by barcode (most reliable)
+                if (processedItem.barcode && processedItem.barcode.trim()) {
+                  const barcodeStr = String(processedItem.barcode).trim()
+                  const existingProductByBarcode = allProducts.find(p => 
+                    p.barcode && String(p.barcode).trim() === barcodeStr
+                  )
+                  if (existingProductByBarcode) {
+                    processedItem.product_id = existingProductByBarcode.id
+                    console.log(`✅ [Import] Matched product by barcode "${barcodeStr}": ${existingProductByBarcode.name} (ID: ${existingProductByBarcode.id})`)
+                    return processedItem
+                  }
+                }
+                
+                // Try to match by article (search in purchase items of existing products)
+                // Note: This is more complex, so we'll create product using article/barcode instead
+                
+                // Strategy 3: Create product using article (preferred) or barcode as name
+                if (processedItem.article && processedItem.article.trim()) {
+                  // Create product using article as name
+                  processedItem.product_id = null
+                  processedItem._needsProductCreation = true
+                  processedItem._productNameForCreation = String(processedItem.article).trim()
+                  processedItem._creationReason = 'article'
+                  return processedItem
+                } else if (processedItem.barcode && processedItem.barcode.trim()) {
+                  // Create product using barcode as name (fallback)
+                  processedItem.product_id = null
+                  processedItem._needsProductCreation = true
+                  processedItem._productNameForCreation = String(processedItem.barcode).trim()
+                  processedItem._creationReason = 'barcode'
+                  return processedItem
+                }
+                
+                // If nothing works, set to 0 (will be skipped)
+                console.warn(`⚠️ [Import] Purchase item has no product_id, product_name, article, or barcode - cannot create product. Item:`, item)
+                processedItem.product_id = 0
+                return processedItem
+              })
+              
+              // Create missing products in batch
+              for (const item of processedItems) {
+                if (item._needsProductCreation && item._productNameForCreation) {
+                  try {
+                    // Check if product was already created in this batch (avoid duplicates)
+                    const existingInBatch = productNameMap.get(item._productNameForCreation.toLowerCase())
+                    if (existingInBatch) {
+                      item.product_id = existingInBatch.id
+                      delete item._needsProductCreation
+                      delete item._productNameForCreation
+                      delete item._creationReason
+                      continue
+                    }
+                    
+                    const product = await productService.create({
+                      name: item._productNameForCreation,
+                      sku: item._productNameForCreation.substring(0, 20).toUpperCase().replace(/\s/g, '-'),
+                      description: item.product_name || item._productNameForCreation,
+                      unit: item.unit || 'pcs',
+                      purchase_price: item.unit_price || item.purchase_price || 0,
+                      selling_price: item.sale_price || item.mrp || item.unit_price || 0,
+                      stock_quantity: 0,
+                      hsn_code: item.hsn_code || '',
+                      gst_rate: item.gst_rate || 0,
+                      tax_type: 'exclusive',
+                      barcode: item.barcode || '',
+                      is_active: true,
+                      status: 'active',
+                      barcode_status: item.barcode ? 'active' : 'inactive',
+                      company_id: companyId,
+                    })
+                    item.product_id = product.id
+                    productNameMap.set(item._productNameForCreation.toLowerCase(), product)
+                    allProducts.push(product)
+                    console.log(`✅ [Import] Created product "${product.name}" (ID: ${product.id}) from ${item._creationReason || 'product_name'}`)
+                    delete item._needsProductCreation
+                    delete item._productNameForCreation
+                    delete item._creationReason
+                  } catch (error) {
+                    console.error(`❌ [Import] Failed to create product "${item._productNameForCreation}":`, error)
+                    item.product_id = 0
+                    delete item._needsProductCreation
+                    delete item._productNameForCreation
+                    delete item._creationReason
+                  }
+                }
+              }
+
+              // Verify supplier exists - check by company_id and name (using Map for O(1) lookup)
+              let supplierId = purchase.supplier_id
+              if (!supplierId && purchase.supplier_name) {
+                // Try to find supplier by name (using Map)
+                const supplier = supplierNameMap.get(purchase.supplier_name.toLowerCase())
+                
+                if (supplier && (!companyId || supplier.company_id === companyId || !supplier.company_id)) {
+                  supplierId = supplier.id
+                  // Update supplier with GSTIN if missing (batch updates later)
+                  if (purchase.supplier_gstin && !supplier.gstin) {
+                    try {
+                      await supplierService.update(supplier.id, {
+                        gstin: purchase.supplier_gstin,
+                        is_registered: true,
+                      })
+                      supplier.gstin = purchase.supplier_gstin
+                      supplier.is_registered = true
+                    } catch (updateError) {
+                      // Continue even if update fails
+                    }
+                  }
+                } else {
+                  // Supplier not found - create it
+                  try {
+                    const newSupplier = await supplierService.create({
+                      name: purchase.supplier_name,
+                      email: '',
+                      phone: '',
+                      gstin: purchase.supplier_gstin || '',
+                      address: '',
+                      city: '',
+                      state: '',
+                      pincode: '',
+                      contact_person: '',
+                      is_registered: !!purchase.supplier_gstin,
+                      company_id: companyId,
+                    })
+                    supplierId = newSupplier.id
+                    supplierNameMap.set(purchase.supplier_name.toLowerCase(), newSupplier)
+                    allSuppliers.push(newSupplier)
+                  } catch (supplierError: any) {
+                    errorCount++
+                    continue // Skip this purchase if supplier can't be created
+                  }
+                }
+              } else if (supplierId) {
+                // Supplier ID provided - verify it exists
+                const supplier = allSuppliers.find(s => s.id === supplierId)
+                if (!supplier) {
+                  // Try to find by name
+                  if (purchase.supplier_name) {
+                    const supplierByName = supplierNameMap.get(purchase.supplier_name.toLowerCase())
+                    if (supplierByName && (!companyId || supplierByName.company_id === companyId || !supplierByName.company_id)) {
+                      supplierId = supplierByName.id
+                    } else {
+                      errorCount++
+                      continue
+                    }
+                  } else {
+                    errorCount++
+                    continue
+                  }
+                } else if (companyId && supplier.company_id && supplier.company_id !== companyId) {
+                  errorCount++
+                  continue
+                }
+              }
+
+              if (!supplierId) {
+                errorCount++
+                continue
+              }
+
+            // Clean up processed items and ensure valid product_id
+            // Remove internal processing flags and ensure product_id is valid
+            const validItems = processedItems.map((item: any) => {
+              const cleanItem: any = { ...item }
+              // Remove internal processing flags
+              delete cleanItem._needsProductCreation
+              delete cleanItem._productNameForCreation
+              delete cleanItem._creationReason
+              // Ensure product_id is a number (should be set by now, but fallback to 0)
+              cleanItem.product_id = cleanItem.product_id || 0
+              return cleanItem
+            }).filter((item: any) => {
+              // Filter out items that still have product_id = 0 (couldn't create/find product)
+              // Log a warning for debugging
+              if (item.product_id === 0) {
+                console.warn(`⚠️ [Import] Skipping purchase item with product_id 0. Item data:`, {
+                  article: item.article,
+                  barcode: item.barcode,
+                  product_name: item.product_name,
+                  unit_price: item.unit_price
+                })
+                return false
+              }
+              return true
+            })
+            
+            // Skip purchase if no valid items remain
+            if (validItems.length === 0) {
+              console.warn(`⚠️ [Import] Skipping purchase - no valid items after processing. Purchase invoice: ${purchase.invoice_number || 'N/A'}`)
+              errorCount++
+              continue
+            }
+
+            if (purchase.type === 'gst') {
+              const gstPurchase = purchase as any
+              await purchaseService.createGST({
+                supplier_id: supplierId,
+                invoice_number: gstPurchase.invoice_number || '',
+                purchase_date: gstPurchase.purchase_date,
+                items: validItems,
+                subtotal: gstPurchase.subtotal || 0,
+                total_tax: gstPurchase.total_tax || gstPurchase.tax_amount || 0,
+                grand_total: gstPurchase.grand_total || 0,
+                payment_status: (gstPurchase.payment_status || 'pending') as any,
+                notes: gstPurchase.notes,
+                company_id: companyId, // Set company_id from options
+                created_by: userId ? parseInt(userId) : 1,
+              } as any)
+              importedCount++
+              // Only log every 10th import to reduce console spam
+              if (importedCount % 10 === 0) {
+                console.log(`✅ Imported ${importedCount} purchases so far...`)
+              }
+            } else {
+              const simplePurchase = purchase as any
+              await purchaseService.createSimple({
+                supplier_id: supplierId,
+                invoice_number: simplePurchase.invoice_number,
+                purchase_date: simplePurchase.purchase_date,
+                items: validItems,
+                total_amount: simplePurchase.total_amount || 0,
+                payment_status: (simplePurchase.payment_status || 'pending') as any,
+                notes: simplePurchase.notes,
+                company_id: companyId, // Set company_id from options
+                created_by: userId ? parseInt(userId) : 1,
+              } as any)
+              importedCount++
+              // Only log every 10th import to reduce console spam
+              if (importedCount % 10 === 0) {
+                console.log(`✅ Imported ${importedCount} purchases so far...`)
               }
             }
-          } catch (error) {
-            console.error('Error importing purchase:', error)
+          } catch (error: any) {
+            errorCount++
+            // Only log detailed errors for first few failures to avoid console spam
+            if (errorCount <= 5) {
+              console.error(`❌ Error importing purchase ${processedCount}/${backup.data.purchases.length}:`, error)
+              console.error('Purchase details:', {
+                invoice_number: purchase.invoice_number || 'N/A',
+                supplier_id: purchase.supplier_id || 'N/A',
+                supplier_name: purchase.supplier_name || 'N/A',
+                items_count: purchase.items?.length || 0,
+                company_id: companyId,
+                error_message: error.message,
+              })
+            }
+            // Continue with next purchase instead of stopping
+          }
+          }
+          
+          batchStart += BATCH_SIZE
+          
+          // Small delay between batches to prevent UI freezing
+          if (batchStart < totalPurchases) {
+            await new Promise(resolve => setTimeout(resolve, 10))
           }
         }
+        
+        console.log(`📊 Import Summary: Processed: ${processedCount}, Imported: ${importedCount}, Skipped: ${skippedCount}, Errors: ${errorCount}`)
+      }
+
+      // Import Sales (if enabled and data exists)
+      if (options.importSales !== false && backup.data.sales && backup.data.sales.length > 0) {
+        console.log(`📦 Starting import of ${backup.data.sales.length} sales for company ${companyId}`)
+        let salesImported = 0
+        let salesSkipped = 0
+        
+        for (const sale of backup.data.sales) {
+          try {
+            // Check if sale already exists
+            const existingSale = await saleService.getById(sale.id)
+            if (existingSale) {
+              salesSkipped++
+              continue
+            }
+            
+            // Import the sale with company_id
+            await saleService.create({
+              ...sale,
+              company_id: companyId,
+            } as any)
+            salesImported++
+          } catch (error: any) {
+            console.error(`Error importing sale ${sale.id}:`, error)
+          }
+        }
+        
+        console.log(`📊 Sales Import Summary: Imported: ${salesImported}, Skipped: ${salesSkipped}`)
+        importedCount += salesImported
       }
 
       // Import Settings
@@ -404,9 +837,20 @@ export const backupService = {
         importedCount++
       }
 
+      // Create detailed import message
+      let message = ''
+      if (importedCount > 0) {
+        message = `Successfully imported ${importedCount} records.`
+        if (backup.data.purchases && options.importPurchases !== false) {
+          message += ` Check browser console (F12) for detailed purchase import logs.`
+        }
+      } else {
+        message = `No records were imported. Please check browser console (F12) for errors.`
+      }
+
       return {
-        success: true,
-        message: `Successfully imported ${importedCount} records`,
+        success: importedCount > 0,
+        message: message,
         imported: importedCount,
       }
     } catch (error: any) {

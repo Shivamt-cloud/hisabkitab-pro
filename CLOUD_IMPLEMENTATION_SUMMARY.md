@@ -179,3 +179,5 @@ Once you complete the setup steps above, your app will:
 **Next:** Follow `SUPABASE_SETUP_GUIDE.md` to complete the setup! 🚀
 
 
+
+

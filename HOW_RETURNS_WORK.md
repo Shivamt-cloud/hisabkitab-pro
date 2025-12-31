@@ -257,3 +257,5 @@ interface SaleItem {
 
 **That's how returns work in HisabKitab-Pro!** 🎉
 
+
+

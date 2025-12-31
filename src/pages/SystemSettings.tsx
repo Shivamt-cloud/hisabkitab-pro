@@ -180,11 +180,12 @@ const SystemSettings = () => {
     try {
       if (user?.role === 'admin') {
         const users = await userService.getAll()
-        // Filter users by selected company if a company is selected
+        // For admin: show all users, but highlight which company they belong to
+        // Only filter if a specific company is selected AND user wants filtered view
+        // Otherwise show all users so admin can see everything
         let filteredUsers = users
-        if (selectedCompanyId) {
-          filteredUsers = users.filter(u => u.company_id === selectedCompanyId)
-        }
+        // Only filter if explicitly requested (we'll add a toggle later)
+        // For now, show all users so nothing is hidden
         setAllUsers(filteredUsers)
       } else {
         // Non-admin users only see themselves (though they shouldn't access this page)

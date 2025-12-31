@@ -5,12 +5,22 @@ import { backupService } from '../services/backupService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Home, Download, Upload, Database, FileText, AlertCircle, CheckCircle, Info, X, Cloud, CloudDownload, Trash2, RefreshCw } from 'lucide-react'
 import { CloudBackupMetadata } from '../services/cloudBackupService'
+import { convertXLSXToJSON } from '../utils/xlsxConverter'
+import { 
+  generateSamplePurchases, 
+  generateSampleProducts, 
+  generateSampleCustomers, 
+  generateSampleSuppliers, 
+  generateSampleCategories,
+  generateUniversalTemplate 
+} from '../utils/sampleExcelGenerator'
 
 const BackupRestore = () => {
   const { user, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [importing, setImporting] = useState(false)
-  const [importResult, setImportResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number; message: string } | null>(null)
+  const [importResult, setImportResult] = useState<{ success: boolean; message: string; validationWarnings?: any[] } | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [fileContent, setFileContent] = useState<string | null>(null)
   const [fileName, setFileName] = useState<string>('')
@@ -180,18 +190,80 @@ const BackupRestore = () => {
     }
   }
 
-  const handleFileSelect = () => {
+  const handleFileSelect = async () => {
     const input = document.createElement('input')
     input.type = 'file'
-    input.accept = 'application/json'
-    input.onchange = (e) => {
+    input.accept = 'application/json,.json,.xlsx,.xls'
+    input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0]
       if (file) {
         setSelectedFile(file)
         setFileName(file.name)
         setImportResult(null)
         
-        // Read file content but don't import yet
+        const fileExtension = file.name.toLowerCase().split('.').pop()
+        
+        // Handle XLSX/XLS files
+        if (fileExtension === 'xlsx' || fileExtension === 'xls') {
+          try {
+            setImporting(true)
+            const result = await convertXLSXToJSON(file)
+            
+            if (result.success && result.jsonData) {
+              // Validate JSON structure
+              const parsed = JSON.parse(result.jsonData)
+              if (!parsed.version || !parsed.data) {
+                setImportResult({
+                  success: false,
+                  message: 'Invalid converted file format. File must have version and data fields.',
+                })
+                setSelectedFile(null)
+                setFileContent(null)
+                setFileName('')
+                setImporting(false)
+                return
+              }
+              setFileContent(result.jsonData)
+              
+              // Check for validation warnings
+              const hasWarnings = result.validationWarnings && result.validationWarnings.length > 0
+              let message = result.message || `Successfully converted Excel file. Found: ${result.stats?.products || 0} products, ${result.stats?.categories || 0} categories, ${result.stats?.suppliers || 0} suppliers, ${result.stats?.customers || 0} customers, ${result.stats?.purchases || 0} purchases.`
+              
+              if (hasWarnings) {
+                message += `\n\n⚠️ WARNING: The uploaded Excel file does not match the suggested format. Some data may not import correctly.`
+              } else {
+                message += ` ⚠️ IMPORTANT: Click the "Import" button below to actually import this data into your database.`
+              }
+              
+              setImportResult({
+                success: true,
+                message: message,
+                validationWarnings: result.validationWarnings,
+              })
+            } else {
+              setImportResult({
+                success: false,
+                message: result.message || 'Failed to convert Excel file',
+              })
+              setSelectedFile(null)
+              setFileContent(null)
+              setFileName('')
+            }
+            setImporting(false)
+          } catch (error: any) {
+            setImportResult({
+              success: false,
+              message: 'Failed to convert Excel file: ' + (error.message || 'Unknown error'),
+            })
+            setSelectedFile(null)
+            setFileContent(null)
+            setFileName('')
+            setImporting(false)
+          }
+          return
+        }
+        
+        // Handle JSON files (existing logic)
         const reader = new FileReader()
         reader.onload = (event) => {
           try {
@@ -246,13 +318,41 @@ const BackupRestore = () => {
 
     setImporting(true)
     setImportResult(null)
+    setImportProgress(null)
     
     try {
+      const companyId = getCurrentCompanyId()
+      
+      // Parse file to estimate total records for progress
+      let totalRecords = 0
+      try {
+        const parsed = JSON.parse(fileContent)
+        totalRecords = (parsed.data?.purchases?.length || 0) + 
+                      (parsed.data?.products?.length || 0) + 
+                      (parsed.data?.suppliers?.length || 0) +
+                      (parsed.data?.customers?.length || 0)
+        if (totalRecords > 0) {
+          setImportProgress({ current: 0, total: totalRecords, message: 'Starting import...' })
+        }
+      } catch (e) {
+        // Ignore parsing errors
+      }
+      
       const result = await backupService.importFromFile(fileContent, user?.id, {
         importSettings: true,
         merge: true, // Merge with existing data
+        companyId: companyId, // Pass company ID to ensure purchases are linked correctly
       })
+      
       setImportResult(result)
+      setImportProgress(null)
+      
+      // Refresh statistics after import
+      if (result.success) {
+        const companyId = getCurrentCompanyId()
+        const statistics = await backupService.getStatistics(companyId)
+        setStats(statistics)
+      }
       
       // Clear file selection after successful import
       if (result.success) {
@@ -265,6 +365,7 @@ const BackupRestore = () => {
         success: false,
         message: error.message || 'Failed to import backup file',
       })
+      setImportProgress(null)
     } finally {
       setImporting(false)
     }
@@ -389,30 +490,141 @@ const BackupRestore = () => {
               </div>
             </div>
 
+            {/* Sample Excel Templates */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Info className="w-5 h-5 text-blue-600" />
+                <h3 className="text-lg font-semibold text-blue-900">Download Sample Excel Templates</h3>
+              </div>
+              <p className="text-sm text-blue-800 mb-4">
+                Download sample Excel files to understand the required format. You can use these as templates and fill in your data.
+              </p>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+                <button
+                  onClick={generateSamplePurchases}
+                  className="flex items-center gap-2 px-4 py-2 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 transition-colors text-sm font-medium text-blue-700"
+                >
+                  <Download className="w-4 h-4" />
+                  Sample Purchases
+                </button>
+                <button
+                  onClick={generateSampleProducts}
+                  className="flex items-center gap-2 px-4 py-2 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 transition-colors text-sm font-medium text-blue-700"
+                >
+                  <Download className="w-4 h-4" />
+                  Sample Products
+                </button>
+                <button
+                  onClick={generateSampleCustomers}
+                  className="flex items-center gap-2 px-4 py-2 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 transition-colors text-sm font-medium text-blue-700"
+                >
+                  <Download className="w-4 h-4" />
+                  Sample Customers
+                </button>
+                <button
+                  onClick={generateSampleSuppliers}
+                  className="flex items-center gap-2 px-4 py-2 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 transition-colors text-sm font-medium text-blue-700"
+                >
+                  <Download className="w-4 h-4" />
+                  Sample Suppliers
+                </button>
+                <button
+                  onClick={generateSampleCategories}
+                  className="flex items-center gap-2 px-4 py-2 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 transition-colors text-sm font-medium text-blue-700"
+                >
+                  <Download className="w-4 h-4" />
+                  Sample Categories
+                </button>
+                <button
+                  onClick={generateUniversalTemplate}
+                  className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-indigo-600 text-white rounded-lg hover:from-purple-600 hover:to-indigo-700 transition-colors text-sm font-bold"
+                >
+                  <Download className="w-4 h-4" />
+                  Universal Template ⭐
+                </button>
+              </div>
+              
+              <div className="bg-white rounded-lg p-3 border border-blue-200">
+                <p className="text-xs text-blue-700">
+                  <strong>💡 Tip:</strong> The <strong>Universal Template</strong> contains all data types in separate sheets. Use it as a complete reference for importing all your data at once.
+                </p>
+              </div>
+            </div>
+
 
             {importResult && (
-              <div className={`mb-6 p-4 rounded-lg flex items-start gap-3 ${
-                importResult.success 
-                  ? 'bg-green-50 border border-green-200' 
-                  : 'bg-red-50 border border-red-200'
-              }`}>
-                {importResult.success ? (
-                  <CheckCircle className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
-                ) : (
-                  <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
-                )}
-                <div className="flex-1">
-                  <p className={`font-semibold mb-1 ${
-                    importResult.success ? 'text-green-800' : 'text-red-800'
-                  }`}>
-                    {importResult.success ? 'Import Successful' : 'Import Failed'}
-                  </p>
-                  <p className={`text-sm ${
-                    importResult.success ? 'text-green-700' : 'text-red-700'
-                  }`}>
-                    {importResult.message}
-                  </p>
+              <div className="mb-6 space-y-4">
+                <div className={`p-4 rounded-lg flex items-start gap-3 ${
+                  importResult.success 
+                    ? 'bg-green-50 border border-green-200' 
+                    : 'bg-red-50 border border-red-200'
+                }`}>
+                  {importResult.success ? (
+                    <CheckCircle className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                  )}
+                  <div className="flex-1">
+                    <p className={`font-semibold mb-1 ${
+                      importResult.success ? 'text-green-800' : 'text-red-800'
+                    }`}>
+                      {importResult.success ? 'File Converted Successfully' : 'Import Failed'}
+                    </p>
+                    <p className={`text-sm whitespace-pre-line ${
+                      importResult.success ? 'text-green-700' : 'text-red-700'
+                    }`}>
+                      {importResult.message}
+                    </p>
+                  </div>
                 </div>
+
+                {/* Show validation warnings if any */}
+                {importResult.success && importResult.validationWarnings && importResult.validationWarnings.length > 0 && (
+                  <div className="bg-yellow-50 border-2 border-yellow-400 rounded-lg p-6">
+                    <div className="flex items-start gap-3 mb-4">
+                      <AlertCircle className="w-6 h-6 text-yellow-600 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1">
+                        <h3 className="text-lg font-bold text-yellow-900 mb-2">
+                          ⚠️ Format Validation Warning
+                        </h3>
+                        <p className="text-sm text-yellow-800 mb-4">
+                          The uploaded Excel file does not match the suggested format. This may cause data import issues.
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {importResult.validationWarnings.map((warning, index) => (
+                      <div key={index} className="mb-4 last:mb-0 bg-white rounded-lg p-4 border border-yellow-300">
+                        <h4 className="font-semibold text-yellow-900 mb-2">
+                          Sheet: "{warning.sheetName}"
+                        </h4>
+                        <div className="mb-3">
+                          <p className="text-sm font-medium text-yellow-800 mb-1">
+                            Missing Required Columns:
+                          </p>
+                          <ul className="list-disc list-inside text-sm text-yellow-700 space-y-1">
+                            {warning.missingColumns.map((col: string, colIndex: number) => (
+                              <li key={colIndex}>{col}</li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div className="bg-yellow-100 rounded p-3">
+                          <p className="text-sm text-yellow-900 whitespace-pre-line font-mono">
+                            {warning.explanation}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    
+                    <div className="mt-4 p-3 bg-blue-50 rounded border border-blue-200">
+                      <p className="text-sm text-blue-800">
+                        <strong>💡 What to do:</strong> Download the sample Excel template from above and match your file format. 
+                        You can still proceed with import, but some data may be missing or incorrect.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -426,7 +638,7 @@ const BackupRestore = () => {
                   <Upload className="w-12 h-12" />
                   <div className="text-center">
                     <h3 className="text-xl font-bold mb-2">Select Backup File</h3>
-                    <p className="text-sm opacity-90">Choose a backup JSON file to import</p>
+                    <p className="text-sm opacity-90">Choose a backup JSON file or Excel (XLSX) file to import</p>
                   </div>
                 </button>
               ) : (
@@ -474,6 +686,27 @@ const BackupRestore = () => {
                       Cancel
                     </button>
                   </div>
+                  
+                  {/* Progress Indicator */}
+                  {importProgress && (
+                    <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-blue-900">{importProgress.message}</span>
+                        <span className="text-sm text-blue-700">
+                          {Math.round((importProgress.current / importProgress.total) * 100)}%
+                        </span>
+                      </div>
+                      <div className="w-full bg-blue-200 rounded-full h-2.5">
+                        <div
+                          className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                          style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
+                        ></div>
+                      </div>
+                      <p className="text-xs text-blue-600 mt-2">
+                        Please wait... This may take a few minutes for large files.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

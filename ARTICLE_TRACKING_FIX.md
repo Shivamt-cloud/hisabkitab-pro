@@ -185,3 +185,5 @@ const stock = purchaseItem.quantity - (purchaseItem.sold_quantity || 0)
 
 **The fix is complete!** Refresh your browser and test. The stock should now show **8** (not 18) when you search by article "test1" for product "test3". 🎉
 
+
+

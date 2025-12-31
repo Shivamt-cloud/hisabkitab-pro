@@ -2,7 +2,7 @@
 // Provides a simple interface to interact with IndexedDB
 
 const DB_NAME = 'hisabkitab_db'
-const DB_VERSION = 8 // Incremented to add SUPPLIER_PAYMENTS and SUPPLIER_CHECKS stores
+const DB_VERSION = 9 // Incremented to add missing indexes for PURCHASES and STOCK_ADJUSTMENTS stores
 
 // Object store names (tables)
 export const STORES = {
@@ -204,16 +204,36 @@ export function initDB(config: DBConfig = {}): Promise<IDBDatabase> {
         }
       }
 
+      // Handle PURCHASES store - create if needed, or add missing indexes
       if (!db.objectStoreNames.contains(STORES.PURCHASES)) {
         const purchasesStore = db.createObjectStore(STORES.PURCHASES, { keyPath: 'id' })
         purchasesStore.createIndex('company_id', 'company_id', { unique: false })
         purchasesStore.createIndex('supplier_id', 'supplier_id', { unique: false })
         purchasesStore.createIndex('purchase_date', 'purchase_date', { unique: false })
+      } else {
+        // Store exists, check and create missing indexes
+        const purchasesStore = transaction.objectStore(STORES.PURCHASES)
+        if (!purchasesStore.indexNames.contains('company_id')) {
+          purchasesStore.createIndex('company_id', 'company_id', { unique: false })
+        }
+        if (!purchasesStore.indexNames.contains('supplier_id')) {
+          purchasesStore.createIndex('supplier_id', 'supplier_id', { unique: false })
+        }
+        if (!purchasesStore.indexNames.contains('purchase_date')) {
+          purchasesStore.createIndex('purchase_date', 'purchase_date', { unique: false })
+        }
       }
 
+      // Handle STOCK_ADJUSTMENTS store - create if needed, or add missing indexes
       if (!db.objectStoreNames.contains(STORES.STOCK_ADJUSTMENTS)) {
         const stockAdjustmentsStore = db.createObjectStore(STORES.STOCK_ADJUSTMENTS, { keyPath: 'id' })
         stockAdjustmentsStore.createIndex('company_id', 'company_id', { unique: false })
+      } else {
+        // Store exists, check and create missing indexes
+        const stockAdjustmentsStore = transaction.objectStore(STORES.STOCK_ADJUSTMENTS)
+        if (!stockAdjustmentsStore.indexNames.contains('company_id')) {
+          stockAdjustmentsStore.createIndex('company_id', 'company_id', { unique: false })
+        }
       }
 
       if (!db.objectStoreNames.contains(STORES.USERS)) {

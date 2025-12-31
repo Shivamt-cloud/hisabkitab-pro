@@ -3,6 +3,7 @@ import { User, AuthContextType, RolePermissions } from '../types/auth'
 import { PermissionModule, PermissionAction } from '../types/permissions'
 import { userService } from '../services/userService'
 import { auditService } from '../services/auditService'
+import { permissionService } from '../services/permissionService'
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
@@ -10,6 +11,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [currentCompanyId, setCurrentCompanyId] = useState<number | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [userPermissions, setUserPermissions] = useState<{ useCustomPermissions: boolean; customPermissions: any[] } | null>(null)
 
   useEffect(() => {
     // Check if user is logged in from localStorage
@@ -28,6 +30,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Admin can switch companies
           setCurrentCompanyId(parseInt(savedCompanyId))
         }
+        
+        // Load user's custom permissions
+        permissionService.getUserPermissions(parsedUser.id)
+          .then(perms => {
+            if (perms && perms.useCustomPermissions) {
+              setUserPermissions({
+                useCustomPermissions: true,
+                customPermissions: perms.customPermissions || []
+              })
+            } else {
+              setUserPermissions(null)
+            }
+          })
+          .catch(error => {
+            console.error('Error loading user permissions:', error)
+            setUserPermissions(null)
+          })
       } catch (error) {
         console.error('Error parsing saved user:', error)
         localStorage.removeItem('hisabkitab_user')
@@ -54,6 +73,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (foundUser.role !== 'admin' && foundUser.company_id) {
         setCurrentCompanyId(foundUser.company_id)
         localStorage.setItem('hisabkitab_company_id', foundUser.company_id.toString())
+      }
+      
+      // Load user's custom permissions
+      try {
+        const perms = await permissionService.getUserPermissions(foundUser.id)
+        if (perms && perms.useCustomPermissions) {
+          setUserPermissions({
+            useCustomPermissions: true,
+            customPermissions: perms.customPermissions || []
+          })
+        } else {
+          setUserPermissions(null)
+        }
+      } catch (error) {
+        console.error('Error loading user permissions:', error)
+        setUserPermissions(null)
       }
       
       // Log login (fire and forget)
@@ -99,6 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setUser(null)
     setCurrentCompanyId(null)
+    setUserPermissions(null)
     localStorage.removeItem('hisabkitab_user')
     localStorage.removeItem('hisabkitab_company_id')
   }
@@ -126,9 +162,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const hasPermission = (permission: string): boolean => {
     if (!user) return false
     
-    // Quick check using role permissions (sync version for UI)
-    // For custom permissions, use permissionService.hasPermission directly in components
     const [module, action] = permission.split(':') as [PermissionModule, PermissionAction]
+    
+    // Check custom permissions first if enabled
+    if (userPermissions && userPermissions.useCustomPermissions) {
+      const modulePerm = userPermissions.customPermissions.find(p => p.module === module)
+      if (modulePerm) {
+        return modulePerm.actions.includes(action)
+      }
+      // If module not found in custom permissions, deny access
+      return false
+    }
+    
+    // Otherwise, use role-based permissions
     const rolePerms = RolePermissions[user.role]
     const resourcePerm = rolePerms.find(p => p.resource === module)
     if (!resourcePerm) return false

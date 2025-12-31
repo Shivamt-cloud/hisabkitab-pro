@@ -118,3 +118,5 @@ The code now logs:
 
 **If still showing 18, share the console logs and I'll investigate further!**
 
+
+

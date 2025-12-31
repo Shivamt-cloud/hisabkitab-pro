@@ -118,3 +118,5 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 **After Step 3, proceed to Step 4: Restart App** (that's when you'll open the application in browser) 🚀
 
 
+
+

@@ -1,0 +1,174 @@
+{
+  "version": "1.0.0",
+  "export_date": "2025-01-15T10:30:00.000Z",
+  "export_by": "admin@company.com",
+  "data": {
+    "companies": [
+      {
+        "id": 1,
+        "name": "My Company",
+        "unique_code": "COMP001",
+        "email": "contact@company.com",
+        "phone": "+91-1234567890",
+        "address": "123 Main Street",
+        "city": "Mumbai",
+        "state": "Maharashtra",
+        "pincode": "400001",
+        "country": "India",
+        "gstin": "27AAAAA0000A1Z5",
+        "pan": "AAAAA0000A",
+        "website": "https://company.com",
+        "valid_from": "2025-01-01",
+        "valid_to": "2025-12-31",
+        "is_active": true,
+        "created_at": "2025-01-15T10:30:00.000Z",
+        "updated_at": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "users": [
+      {
+        "id": "user_001",
+        "name": "Admin User",
+        "email": "admin@company.com",
+        "password": "admin123",
+        "role": "admin",
+        "company_id": 1,
+        "user_code": "USR001",
+        "created_at": "2025-01-15T10:30:00.000Z",
+        "updated_at": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "categories": [
+      {
+        "id": 1,
+        "name": "Electronics",
+        "description": "Electronic products",
+        "parent_id": null,
+        "is_subcategory": false,
+        "company_id": 1,
+        "created_at": "2025-01-15T10:30:00.000Z",
+        "updated_at": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "products": [
+      {
+        "id": 1,
+        "name": "Sample Product",
+        "sku": "PROD-001",
+        "barcode": "",
+        "category_id": 1,
+        "description": "",
+        "unit": "pcs",
+        "purchase_price": 100,
+        "selling_price": 120,
+        "stock_quantity": 50,
+        "min_stock_level": 10,
+        "hsn_code": "",
+        "gst_rate": 18,
+        "tax_type": "exclusive",
+        "cgst_rate": null,
+        "sgst_rate": null,
+        "igst_rate": null,
+        "is_active": true,
+        "status": "active",
+        "barcode_status": "inactive",
+        "company_id": 1,
+        "created_at": "2025-01-15T10:30:00.000Z",
+        "updated_at": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "customers": [
+      {
+        "id": 1,
+        "name": "Sample Customer",
+        "email": "customer@email.com",
+        "phone": "+91-1234567890",
+        "gstin": "",
+        "address": "",
+        "city": "",
+        "state": "",
+        "pincode": "",
+        "contact_person": "",
+        "credit_limit": 0,
+        "credit_balance": 0,
+        "is_active": true,
+        "company_id": 1,
+        "created_at": "2025-01-15T10:30:00.000Z",
+        "updated_at": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "suppliers": [
+      {
+        "id": 1,
+        "name": "Sample Supplier",
+        "email": "supplier@email.com",
+        "phone": "+91-1234567890",
+        "gstin": "",
+        "address": "",
+        "city": "",
+        "state": "",
+        "pincode": "",
+        "contact_person": "",
+        "is_registered": false,
+        "company_id": 1,
+        "created_at": "2025-01-15T10:30:00.000Z",
+        "updated_at": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "sales": [],
+    "purchases": [],
+    "sales_persons": [],
+    "category_commissions": [],
+    "sub_categories": [],
+    "sales_person_category_assignments": [],
+    "stock_adjustments": [],
+    "settings": {
+      "company": {
+        "company_name": "My Company",
+        "company_address": "123 Main Street",
+        "company_city": "Mumbai",
+        "company_state": "Maharashtra",
+        "company_pincode": "400001",
+        "company_country": "India",
+        "company_phone": "+91-1234567890",
+        "company_email": "contact@company.com",
+        "company_website": "https://company.com",
+        "company_gstin": "27AAAAA0000A1Z5",
+        "company_pan": "AAAAA0000A"
+      },
+      "invoice": {
+        "invoice_prefix": "INV",
+        "invoice_number_format": "INV-{YYYY}-{NNNN}",
+        "invoice_footer_text": "Thank you for your business!",
+        "invoice_terms_and_conditions": "",
+        "show_tax_breakdown": true,
+        "show_payment_instructions": false,
+        "payment_instructions_text": "",
+        "invoice_template": "standard"
+      },
+      "tax": {
+        "default_gst_rate": 18,
+        "default_tax_type": "exclusive",
+        "enable_cgst_sgst": false,
+        "default_cgst_rate": 9,
+        "default_sgst_rate": 9,
+        "default_igst_rate": 18,
+        "tax_exempt_categories": []
+      },
+      "general": {
+        "currency_symbol": "₹",
+        "currency_code": "INR",
+        "date_format": "DD-MMM-YYYY",
+        "time_format": "12h",
+        "default_unit": "pcs",
+        "low_stock_threshold_percentage": 20,
+        "auto_archive_products_after_sale": true,
+        "enable_barcode_generation": true,
+        "default_barcode_format": "EAN13"
+      }
+    }
+  }
+}
+
+
+

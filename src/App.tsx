@@ -47,6 +47,7 @@ import UpcomingChecks from './pages/UpcomingChecks'
 import { DatabaseProvider } from './components/DatabaseProvider'
 import { LicenseGuard } from './components/LicenseGuard'
 import { LicenseExpiredBanner } from './components/LicenseExpiredBanner'
+import { UpdateBanner } from './components/UpdateBanner'
 
 // Lazy load to prevent import errors from breaking the app
 // const BackupRestore = lazy(() => import('./pages/BackupRestore'))
@@ -58,6 +59,7 @@ function App() {
         <Router>
           <LicenseGuard>
             <LicenseExpiredBanner />
+            <UpdateBanner />
             <Routes>
             <Route path="/login" element={<Login />} />
           <Route

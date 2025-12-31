@@ -1,6 +1,7 @@
 import { ReactNode } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { InstallPrompt } from './InstallPrompt'
 
 interface ProtectedRouteProps {
   children: ReactNode
@@ -74,6 +75,12 @@ export function ProtectedRoute({ children, requiredPermission, requiredRole }: P
     )
   }
 
-  return <>{children}</>
+  return (
+    <>
+      {children}
+      {/* Show install prompt only after user is logged in */}
+      <InstallPrompt />
+    </>
+  )
 }
 

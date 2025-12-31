@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
-import { LogOut, Shield, ChevronDown } from 'lucide-react'
+import { LogOut, Shield, ChevronDown, Download } from 'lucide-react'
+import { isInstallPromptAvailable, showInstallPrompt, isAppInstalled } from '../utils/pwa'
 
 export function UserMenu() {
   const { user, logout } = useAuth()
@@ -20,9 +21,69 @@ export function UserMenu() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
+  const [isAppInstalledState, setIsAppInstalledState] = useState(false)
+  const [canInstall, setCanInstall] = useState(false)
+
+  useEffect(() => {
+    setIsAppInstalledState(isAppInstalled())
+    setCanInstall(isInstallPromptAvailable())
+    
+    // Check periodically
+    const interval = setInterval(() => {
+      setIsAppInstalledState(isAppInstalled())
+      setCanInstall(isInstallPromptAvailable())
+    }, 2000)
+    
+    return () => clearInterval(interval)
+  }, [])
+
   const handleLogout = () => {
     logout()
     navigate('/login')
+  }
+
+  const handleInstallApp = async () => {
+    if (canInstall) {
+      const installed = await showInstallPrompt()
+      if (installed) {
+        setIsAppInstalledState(true)
+        setCanInstall(false)
+      }
+    } else {
+      // Show instructions
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
+      const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent) && !/Edg/.test(navigator.userAgent)
+      const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor)
+      const isEdge = /Edg/.test(navigator.userAgent)
+      
+      if (isSafari) {
+        alert(
+          '📱 Safari Installation\n\n' +
+          'To add to Dock:\n' +
+          '1. Click "File" menu → "Add to Dock"\n' +
+          'OR\n' +
+          '2. Drag the URL from address bar to Dock\n\n' +
+          'For full PWA features, use Chrome or Edge.'
+        )
+      } else if (isMac && (isChrome || isEdge)) {
+        alert(
+          '📱 Install on Mac (Chrome/Edge)\n\n' +
+          'Option 1: Look for install icon (➕) in the address bar\n' +
+          'Option 2: Go to Menu (⋮) → "Install HisabKitab-Pro"\n' +
+          'Option 3: View → "Install HisabKitab-Pro"\n\n' +
+          'The app will appear in your Applications folder!'
+        )
+      } else {
+        alert(
+          '📱 Install App\n\n' +
+          'Option 1: Look for install icon (➕) in the address bar\n' +
+          'Option 2: Go to Menu (⋮) → "Install HisabKitab-Pro"\n' +
+          'Option 3: Wait a few minutes and the install prompt will appear\n\n' +
+          'To reset install prompt, open Console (F12) and run:\n' +
+          'localStorage.removeItem("pwa-install-dismissed"); location.reload()'
+        )
+      }
+    }
   }
 
   const getRoleBadgeColor = (role: string) => {
@@ -82,7 +143,16 @@ export function UserMenu() {
             </div>
           </div>
 
-          <div className="p-2">
+          <div className="p-2 space-y-1">
+            {!isAppInstalledState && (
+              <button
+                onClick={handleInstallApp}
+                className="w-full flex items-center gap-3 px-4 py-3 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors font-medium"
+              >
+                <Download className="w-5 h-5" />
+                <span>{canInstall ? 'Install App' : 'Install App (See Instructions)'}</span>
+              </button>
+            )}
             <button
               onClick={handleLogout}
               className="w-full flex items-center gap-3 px-4 py-3 text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium"

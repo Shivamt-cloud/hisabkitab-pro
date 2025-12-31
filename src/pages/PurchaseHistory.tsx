@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { purchaseService } from '../services/purchaseService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Purchase, PurchaseType } from '../types/purchase'
-import { Plus, Eye, Edit, Filter, FileText, TrendingUp, Home, FileSpreadsheet, Search, X } from 'lucide-react'
+import { Plus, Eye, Edit, Filter, FileText, TrendingUp, Home, FileSpreadsheet, Search, X, Trash2 } from 'lucide-react'
 
 type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
 
@@ -21,6 +21,9 @@ const PurchaseHistory = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
   const [selectedSupplier, setSelectedSupplier] = useState<string>('all')
+  const [selectedPurchaseIds, setSelectedPurchaseIds] = useState<Set<number>>(new Set())
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   
   // Debounce search query to avoid excessive filtering
   useEffect(() => {
@@ -71,6 +74,120 @@ const PurchaseHistory = () => {
   useEffect(() => {
     loadPurchases()
   }, [])
+
+  // Clear selections when purchases change
+  useEffect(() => {
+    setSelectedPurchaseIds(new Set())
+  }, [purchases.length])
+
+  // Debug: Log when modal state changes
+  useEffect(() => {
+    console.log('[Bulk Delete] Modal visibility changed:', showDeleteConfirm)
+  }, [showDeleteConfirm])
+
+  // Handle select all
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedPurchaseIds(new Set(purchases.map(p => p.id)))
+    } else {
+      setSelectedPurchaseIds(new Set())
+    }
+  }
+
+  // Handle individual selection
+  const handleSelectPurchase = (purchaseId: number, checked: boolean) => {
+    const newSelected = new Set(selectedPurchaseIds)
+    if (checked) {
+      newSelected.add(purchaseId)
+    } else {
+      newSelected.delete(purchaseId)
+    }
+    setSelectedPurchaseIds(newSelected)
+  }
+
+  // Handle bulk delete
+  const handleBulkDelete = async () => {
+    console.log('[Bulk Delete] Function called', { selectedCount: selectedPurchaseIds.size })
+    
+    if (selectedPurchaseIds.size === 0) {
+      console.warn('[Bulk Delete] No purchases selected for deletion')
+      alert('No purchases selected. Please select purchases to delete.')
+      return
+    }
+    
+    const count = selectedPurchaseIds.size
+    console.log(`[Bulk Delete] Starting deletion of ${count} purchases`)
+    console.log('[Bulk Delete] Selected IDs:', Array.from(selectedPurchaseIds))
+    
+    // Show custom confirmation modal
+    console.log('[Bulk Delete] Setting showDeleteConfirm to true')
+    setShowDeleteConfirm(true)
+    console.log('[Bulk Delete] Modal state updated, should be visible now')
+  }
+
+  // Actually perform the deletion after confirmation
+  const confirmAndDelete = async () => {
+    setShowDeleteConfirm(false)
+    const count = selectedPurchaseIds.size
+    console.log('[Bulk Delete] User confirmed deletion, proceeding...')
+    setIsDeleting(true)
+    
+    try {
+      const idsToDelete = Array.from(selectedPurchaseIds)
+      console.log('[Bulk Delete] IDs to delete:', idsToDelete)
+      let successCount = 0
+      let failCount = 0
+      const errors: Array<{ id: number; error: any }> = []
+
+      // Delete in batches to avoid overwhelming the database
+      const batchSize = 10
+      for (let i = 0; i < idsToDelete.length; i += batchSize) {
+        const batch = idsToDelete.slice(i, i + batchSize)
+        console.log(`[Bulk Delete] Processing batch ${Math.floor(i / batchSize) + 1}: ${batch.length} purchases`)
+        
+        const batchPromises = batch.map(async (id) => {
+          try {
+            console.log(`[Bulk Delete] Attempting to delete purchase ${id}`)
+            await purchaseService.delete(id) // Now throws on error
+            console.log(`[Bulk Delete] ✅ Successfully deleted purchase ${id}`)
+            successCount++
+          } catch (error) {
+            console.error(`[Bulk Delete] ❌ Exception deleting purchase ${id}:`, error)
+            failCount++
+            errors.push({ id, error: error instanceof Error ? error.message : String(error) })
+          }
+        })
+        
+        await Promise.all(batchPromises)
+        console.log(`[Bulk Delete] Batch ${Math.floor(i / batchSize) + 1} completed. Success: ${successCount}, Failed: ${failCount}`)
+      }
+
+      console.log(`[Bulk Delete] All batches completed. Total - Success: ${successCount}, Failed: ${failCount}`)
+      console.log('[Bulk Delete] Errors:', errors)
+
+      // Clear selections
+      setSelectedPurchaseIds(new Set())
+      
+      // Reload purchases
+      console.log('[Bulk Delete] Reloading purchases...')
+      await loadPurchases()
+      console.log('[Bulk Delete] Purchases reloaded')
+
+      if (failCount === 0) {
+        alert(`✅ Successfully deleted ${successCount} purchase${successCount !== 1 ? 's' : ''}!`)
+      } else {
+        const errorDetails = errors.slice(0, 5).map(e => `Purchase ${e.id}: ${e.error}`).join('\n')
+        const moreErrors = errors.length > 5 ? `\n... and ${errors.length - 5} more errors` : ''
+        alert(`⚠️ Deleted ${successCount} purchase${successCount !== 1 ? 's' : ''}, but ${failCount} failed.\n\nFirst few errors:\n${errorDetails}${moreErrors}\n\nCheck browser console (F12) for full details.`)
+      }
+    } catch (error) {
+      console.error('[Bulk Delete] ❌ Fatal error during bulk delete:', error)
+      alert('❌ Error deleting purchases: ' + (error instanceof Error ? error.message : 'Unknown error') + '\n\nCheck browser console (F12) for details.')
+    } finally {
+      setIsDeleting(false)
+      console.log('[Bulk Delete] Deletion process completed')
+    }
+  }
 
   const getDateRange = (): { startDate?: string; endDate?: string } => {
     const now = new Date()
@@ -613,16 +730,44 @@ const PurchaseHistory = () => {
             )}
           </div>
 
-          {/* Results Count */}
-          {(searchQuery || selectedSupplier !== 'all' || filterType !== 'all' || timePeriod !== 'all') && (
-            <div className="mb-4 px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-sm text-blue-900">
-                Showing <span className="font-bold">{purchases.length}</span> of <span className="font-bold">{allPurchases.length}</span> purchases
-                {searchQuery && <span> matching "{searchQuery}"</span>}
-                {selectedSupplier !== 'all' && <span> from {selectedSupplier}</span>}
-              </p>
-            </div>
-          )}
+          {/* Results Count and Bulk Actions */}
+          <div className="mb-4 space-y-2">
+            {(searchQuery || selectedSupplier !== 'all' || filterType !== 'all' || timePeriod !== 'all') && (
+              <div className="px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-900">
+                  Showing <span className="font-bold">{purchases.length}</span> of <span className="font-bold">{allPurchases.length}</span> purchases
+                  {searchQuery && <span> matching "{searchQuery}"</span>}
+                  {selectedSupplier !== 'all' && <span> from {selectedSupplier}</span>}
+                </p>
+              </div>
+            )}
+            
+            {/* Bulk Delete Button - Only show if admin and items are selected */}
+            {hasPermission('purchases:delete') && selectedPurchaseIds.size > 0 && (
+              <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
+                <p className="text-sm text-red-900 font-medium">
+                  <span className="font-bold">{selectedPurchaseIds.size}</span> purchase{selectedPurchaseIds.size !== 1 ? 's' : ''} selected
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    console.log('[Bulk Delete Button] Clicked!', {
+                      selectedCount: selectedPurchaseIds.size,
+                      selectedIds: Array.from(selectedPurchaseIds),
+                      isDeleting,
+                      hasPermission: hasPermission('purchases:delete')
+                    })
+                    handleBulkDelete()
+                  }}
+                  disabled={isDeleting}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  {isDeleting ? 'Deleting...' : `Delete Selected (${selectedPurchaseIds.size})`}
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Purchases Table */}
           <div className="bg-white/70 backdrop-blur-xl rounded-xl shadow-xl border border-white/50 overflow-hidden">
@@ -675,6 +820,17 @@ const PurchaseHistory = () => {
                 <table className="w-full">
                   <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
                     <tr>
+                      {hasPermission('purchases:delete') && (
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-12">
+                          <input
+                            type="checkbox"
+                            checked={purchases.length > 0 && selectedPurchaseIds.size === purchases.length}
+                            onChange={(e) => handleSelectAll(e.target.checked)}
+                            className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
+                            title="Select All"
+                          />
+                        </th>
+                      )}
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Type</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Invoice</th>
@@ -691,7 +847,18 @@ const PurchaseHistory = () => {
                   </thead>
                   <tbody className="divide-y divide-gray-200">
                     {purchases.map((purchase) => (
-                      <tr key={purchase.id} className="hover:bg-gray-50 transition-colors">
+                      <tr key={purchase.id} className={`hover:bg-gray-50 transition-colors ${selectedPurchaseIds.has(purchase.id) ? 'bg-blue-50' : ''}`}>
+                        {hasPermission('purchases:delete') && (
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <input
+                              type="checkbox"
+                              checked={selectedPurchaseIds.has(purchase.id)}
+                              onChange={(e) => handleSelectPurchase(purchase.id, e.target.checked)}
+                              className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </td>
+                        )}
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">
                             {new Date(purchase.purchase_date).toLocaleDateString('en-IN', {
@@ -916,6 +1083,36 @@ const PurchaseHistory = () => {
                                 <Edit className="w-4 h-4" />
                               </button>
                             )}
+                            {hasPermission('purchases:delete') && (
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation()
+                                  const confirmed = window.confirm(
+                                    `Are you sure you want to delete this purchase?\n\nInvoice: ${(purchase as any).invoice_number || purchase.id}\nDate: ${new Date(purchase.purchase_date).toLocaleDateString()}\n\nThis action cannot be undone!`
+                                  )
+                                  if (confirmed) {
+                                    try {
+                                      await purchaseService.delete(purchase.id) // Now throws on error
+                                      alert('Purchase deleted successfully!')
+                                      await loadPurchases()
+                                      // Remove from selection if it was selected
+                                      if (selectedPurchaseIds.has(purchase.id)) {
+                                        const newSelected = new Set(selectedPurchaseIds)
+                                        newSelected.delete(purchase.id)
+                                        setSelectedPurchaseIds(newSelected)
+                                      }
+                                    } catch (error) {
+                                      console.error('Error deleting purchase:', error)
+                                      alert('Error deleting purchase: ' + (error instanceof Error ? error.message : 'Unknown error'))
+                                    }
+                                  }
+                                }}
+                                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                title="Delete Purchase"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                             <button
                               onClick={() => navigate(`/purchases/${purchase.id}`)}
                               className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -932,6 +1129,61 @@ const PurchaseHistory = () => {
               </div>
             )}
           </div>
+
+          {/* Delete Confirmation Modal */}
+          {showDeleteConfirm && (
+            <div 
+              className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" 
+              onClick={() => {
+                console.log('[Bulk Delete] Modal backdrop clicked, closing')
+                setShowDeleteConfirm(false)
+              }}
+            >
+              <div 
+                className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" 
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                    <Trash2 className="w-6 h-6 text-red-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900">Delete Purchases?</h3>
+                    <p className="text-sm text-gray-600">This action cannot be undone</p>
+                  </div>
+                </div>
+                
+                <p className="text-gray-700 mb-6">
+                  Are you sure you want to delete <span className="font-bold text-red-600">{selectedPurchaseIds.size}</span> purchase{selectedPurchaseIds.size !== 1 ? 's' : ''}?
+                  <br /><br />
+                  This will permanently remove {selectedPurchaseIds.size === 1 ? 'this purchase' : 'these purchases'} from the database.
+                </p>
+                
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      console.log('[Bulk Delete] User cancelled in modal')
+                      setShowDeleteConfirm(false)
+                    }}
+                    className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      console.log('[Bulk Delete] User confirmed in modal')
+                      confirmAndDelete()
+                    }}
+                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-semibold"
+                  >
+                    Delete {selectedPurchaseIds.size} Purchase{selectedPurchaseIds.size !== 1 ? 's' : ''}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
       </div>
     </ProtectedRoute>

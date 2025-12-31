@@ -11,12 +11,11 @@ export const supplierService = {
     // Always load all suppliers first to avoid index issues
     const allSuppliers = await getAll<Supplier>(STORES.SUPPLIERS)
     
-    // If companyId is provided, filter STRICTLY by company_id (no backward compatibility - data isolation is critical)
-    // Also explicitly exclude records with null/undefined company_id to prevent data leakage
+    // If companyId is provided, include records with matching company_id OR null/undefined (old data)
     if (companyId !== undefined && companyId !== null) {
       return allSuppliers.filter(s => {
-        // Only include records that have the exact matching company_id
-        return s.company_id === companyId
+        // Include records with matching company_id OR old data without company_id
+        return s.company_id === companyId || s.company_id === null || s.company_id === undefined
       })
     } else if (companyId === null) {
       // If companyId is explicitly null (user has no company), return empty array for data isolation
@@ -76,18 +75,20 @@ export const purchaseService = {
     console.log('[PurchaseService] Total purchases before filter:', purchases.length)
     console.log('[PurchaseService] Purchase company_ids sample:', purchases.slice(0, 5).map(p => ({ id: p.id, company_id: p.company_id, type: typeof p.company_id })))
     
-    // If companyId is provided, filter STRICTLY by company_id (no backward compatibility - data isolation is critical)
-    // Also explicitly exclude records with null/undefined company_id to prevent data leakage
+    // If companyId is provided, include records with matching company_id OR null/undefined (old data)
+    // This ensures old data without company_id is still visible
     if (companyId !== undefined && companyId !== null) {
       const beforeFilter = purchases.length
+      const oldDataCount = purchases.filter(p => p.company_id === null || p.company_id === undefined).length
       purchases = purchases.filter(p => {
-        // Only include records that have the exact matching company_id
-        // Explicitly exclude records with null or undefined company_id
-        const matches = p.company_id === companyId && p.company_id !== null && p.company_id !== undefined
+        // Include records with matching company_id OR old data without company_id
+        const matches = p.company_id === companyId || p.company_id === null || p.company_id === undefined
         return matches
       })
       console.log('[PurchaseService] Filtered purchases:', purchases.length, 'from', beforeFilter, 'for companyId:', companyId)
-      console.log('[PurchaseService] Filtered purchase company_ids:', purchases.map(p => ({ id: p.id, company_id: p.company_id })))
+      if (oldDataCount > 0) {
+        console.warn(`[PurchaseService] ⚠️ Found ${oldDataCount} old records without company_id - these are included for backward compatibility`)
+      }
     } else if (companyId === null) {
       // If companyId is explicitly null (user has no company), return empty array for data isolation
       console.log('[PurchaseService] companyId is null, returning empty array')
@@ -264,10 +265,20 @@ export const purchaseService = {
 
   delete: async (id: number): Promise<boolean> => {
     try {
+      console.log(`[PurchaseService] Attempting to delete purchase ${id}`)
       await deleteById(STORES.PURCHASES, id)
+      console.log(`[PurchaseService] ✅ Successfully deleted purchase ${id}`)
       return true
-    } catch (error) {
-      return false
+    } catch (error: any) {
+      console.error(`[PurchaseService] ❌ Error deleting purchase ${id}:`, error)
+      console.error(`[PurchaseService] Error details:`, {
+        name: error?.name,
+        message: error?.message,
+        code: error?.code,
+        stack: error?.stack
+      })
+      // Throw error for better error handling in calling code
+      throw error
     }
   },
 

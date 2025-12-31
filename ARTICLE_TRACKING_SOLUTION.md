@@ -144,3 +144,5 @@ The system already has the right structure. We just need to fix the matching log
 - Same article can be used for same product in different purchases
 - Each purchase item is tracked separately
 
+
+
