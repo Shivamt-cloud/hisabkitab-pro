@@ -10,6 +10,7 @@ import { notificationService } from '../services/notificationService'
 import { settingsService } from '../services/settingsService'
 import { companyService } from '../services/companyService'
 import { supplierPaymentService } from '../services/supplierPaymentService'
+import { getTierPricing } from '../utils/tierPricing'
 import { 
   ShoppingCart, 
   History, 
@@ -31,7 +32,11 @@ import {
   Bell,
   Clock,
   Receipt,
-  CreditCard
+  CreditCard,
+  Calendar,
+  AlertCircle,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react'
 
 interface ReportSummary {
@@ -65,6 +70,13 @@ const Dashboard = () => {
     thisWeekSales: 0,
   })
   const [companyName, setCompanyName] = useState<string>('')
+  const [subscriptionInfo, setSubscriptionInfo] = useState<{
+    tier?: string
+    startDate?: string
+    endDate?: string
+    status?: 'active' | 'expired' | 'cancelled'
+  } | null>(null)
+  const [showSubscriptionDetails, setShowSubscriptionDetails] = useState(false)
 
   const loadCompanyName = async () => {
     try {
@@ -97,6 +109,16 @@ const Dashboard = () => {
       
       console.log('[Dashboard] Loading company name for companyId:', companyIdToUse, 'user:', user.email, 'user.company_id:', user.company_id, 'currentCompanyId:', currentCompanyId)
       
+      // For admin user (hisabkitabpro@hisabkitab.com), always set unlimited subscription
+      if (user.role === 'admin' && user.email === 'hisabkitabpro@hisabkitab.com') {
+        setSubscriptionInfo({
+          tier: 'premium',
+          startDate: undefined,
+          endDate: undefined,
+          status: 'active',
+        })
+      }
+      
       if (companyIdToUse) {
         const company = await companyService.getById(companyIdToUse)
         console.log('[Dashboard] Loaded company:', company)
@@ -106,18 +128,51 @@ const Dashboard = () => {
           const nameToDisplay = company.name || company.unique_code || ''
           console.log('[Dashboard] Setting company name to:', nameToDisplay, '(from company.name field)')
           setCompanyName(nameToDisplay)
+          
+          // Load subscription info
+          // For admin users, always set unlimited subscription
+          if (user.role === 'admin' && user.email === 'hisabkitabpro@hisabkitab.com') {
+            setSubscriptionInfo({
+              tier: 'premium',
+              startDate: undefined,
+              endDate: undefined,
+              status: 'active',
+            })
+          } else if (company.subscription_tier || company.subscription_start_date || company.subscription_end_date) {
+            setSubscriptionInfo({
+              tier: company.subscription_tier,
+              startDate: company.subscription_start_date,
+              endDate: company.subscription_end_date,
+              status: company.subscription_status,
+            })
+          } else {
+            setSubscriptionInfo(null)
+          }
         } else {
           console.log('[Dashboard] Company not found for ID:', companyIdToUse)
           setCompanyName('')
+          setSubscriptionInfo(null)
         }
       } else {
-        console.log('[Dashboard] No companyId available, user role:', user.role)
-        console.log('[Dashboard] User needs to be assigned to a company. Please update the user in User Management.')
-        setCompanyName('')
+        // For admin users, show unlimited subscription
+        if (user.role === 'admin') {
+          setSubscriptionInfo({
+            tier: 'premium',
+            startDate: undefined,
+            endDate: undefined,
+            status: 'active',
+          })
+        } else {
+          console.log('[Dashboard] No companyId available, user role:', user.role)
+          console.log('[Dashboard] User needs to be assigned to a company. Please update the user in User Management.')
+          setCompanyName('')
+          setSubscriptionInfo(null)
+        }
       }
     } catch (error) {
       console.error('[Dashboard] Error loading company name:', error)
       setCompanyName('')
+      setSubscriptionInfo(null)
     }
   }
 
@@ -695,6 +750,23 @@ const Dashboard = () => {
     }
   }
 
+  // Calculate days remaining for subscription
+  const subscriptionDaysRemaining = useMemo(() => {
+    if (!subscriptionInfo?.endDate) return null
+    
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const endDate = new Date(subscriptionInfo.endDate)
+    endDate.setHours(0, 0, 0, 0)
+    const diffTime = endDate.getTime() - today.getTime()
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    
+    return diffDays
+  }, [subscriptionInfo?.endDate, currentTime])
+
+  // Check if subscription is expiring soon (within 30 days)
+  const isSubscriptionExpiringSoon = subscriptionDaysRemaining !== null && subscriptionDaysRemaining <= 30 && subscriptionDaysRemaining > 0
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       {/* Header */}
@@ -748,11 +820,105 @@ const Dashboard = () => {
                   </span>
                 )}
               </button>
-              <UserMenu />
+              <div className="flex flex-col items-end gap-2">
+                <UserMenu />
+                {subscriptionInfo && (
+                  <div className="w-full max-w-xs">
+                    <button
+                      onClick={() => setShowSubscriptionDetails(!showSubscriptionDetails)}
+                      className="w-full flex items-center justify-between bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-lg px-4 py-2 hover:from-blue-700 hover:to-indigo-800 transition-all shadow-md"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4" />
+                        <span className="text-sm font-semibold">
+                          {subscriptionInfo.tier ? (subscriptionInfo.tier === 'premium' ? 'Premium Plan' : subscriptionInfo.tier === 'standard' ? 'Standard Plan' : 'Basic Plan') : 'Subscription'}
+                        </span>
+                      </div>
+                      {showSubscriptionDetails ? (
+                        <ChevronUp className="w-4 h-4" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4" />
+                      )}
+                    </button>
+                    {showSubscriptionDetails && (
+                      <div className="mt-2 bg-white rounded-lg shadow-xl p-4 border border-gray-200">
+                        <div className="space-y-3">
+                          <div>
+                            <p className="text-gray-500 text-xs mb-1">Plan</p>
+                            <p className="text-gray-900 font-semibold">
+                              {subscriptionInfo.tier ? (subscriptionInfo.tier === 'premium' ? '♾️ Premium Plan - Unlimited' : subscriptionInfo.tier === 'standard' ? '📱📱📱 Standard Plan' : '📱 Basic Plan') : 'N/A'}
+                            </p>
+                          </div>
+                          {subscriptionInfo.startDate && (
+                            <div>
+                              <p className="text-gray-500 text-xs mb-1">Start Date</p>
+                              <p className="text-gray-900 text-sm">
+                                {new Date(subscriptionInfo.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                              </p>
+                            </div>
+                          )}
+                          {subscriptionInfo.endDate && (
+                            <div>
+                              <p className="text-gray-500 text-xs mb-1">End Date</p>
+                              <p className="text-gray-900 text-sm">
+                                {new Date(subscriptionInfo.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                              </p>
+                            </div>
+                          )}
+                          {subscriptionInfo.endDate && subscriptionDaysRemaining !== null && (
+                            <div>
+                              <p className="text-gray-500 text-xs mb-1">Days Remaining</p>
+                              <p className="text-gray-900 font-bold text-lg">
+                                {subscriptionDaysRemaining > 0 ? (
+                                  <span>{subscriptionDaysRemaining} day{subscriptionDaysRemaining !== 1 ? 's' : ''}</span>
+                                ) : subscriptionDaysRemaining === 0 ? (
+                                  <span className="text-red-600">Expires Today</span>
+                                ) : (
+                                  <span className="text-red-600">Expired {Math.abs(subscriptionDaysRemaining)} day{Math.abs(subscriptionDaysRemaining) !== 1 ? 's' : ''} ago</span>
+                                )}
+                              </p>
+                            </div>
+                          )}
+                          {subscriptionInfo.tier === 'premium' && !subscriptionInfo.endDate && (
+                            <div>
+                              <p className="text-gray-500 text-xs mb-1">Status</p>
+                              <p className="text-gray-900 font-semibold">Unlimited Access</p>
+                            </div>
+                          )}
+                          {subscriptionInfo.status && subscriptionInfo.tier !== 'premium' && (
+                            <div>
+                              <p className="text-gray-500 text-xs mb-1">Status</p>
+                              <p className="text-gray-900 font-semibold capitalize">{subscriptionInfo.status}</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </header>
+
+      {/* Subscription Expiry Alert */}
+      {isSubscriptionExpiringSoon && subscriptionInfo?.endDate && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="bg-gradient-to-r from-orange-500 to-red-500 rounded-xl shadow-lg p-4 border border-orange-300">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-6 h-6 text-white flex-shrink-0" />
+              <div className="flex-1">
+                <h3 className="text-white font-bold text-lg">Subscription Expiring Soon!</h3>
+                <p className="text-white/90 text-sm mt-1">
+                  Your subscription will expire in <span className="font-bold">{subscriptionDaysRemaining} day{subscriptionDaysRemaining !== 1 ? 's' : ''}</span> on {new Date(subscriptionInfo.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}.
+                  Please renew your subscription to continue using all features.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">

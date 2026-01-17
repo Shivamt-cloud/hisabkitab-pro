@@ -13,6 +13,7 @@ import {
 import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText, Eye, ShoppingCart } from 'lucide-react'
 import { saleService } from '../services/saleService'
 import { Sale } from '../types/sale'
+import { exportToExcel, exportDataToPDF } from '../utils/exportUtils'
 
 type ReportView = 'product' | 'category' | 'customer' | 'salesperson' | 'sales'
 
@@ -116,6 +117,7 @@ const SalesReports = () => {
   const exportToExcel = () => {
     const headers: string[] = []
     const rows: any[][] = []
+    let sheetName = 'Sales Report'
 
     switch (activeView) {
       case 'product':
@@ -124,14 +126,15 @@ const SalesReports = () => {
           rows.push([
             r.product_name,
             r.total_quantity,
-            r.total_revenue.toFixed(2),
-            r.total_cost.toFixed(2),
-            r.total_profit.toFixed(2),
-            r.profit_margin.toFixed(2),
-            r.average_price.toFixed(2),
+            parseFloat(r.total_revenue.toFixed(2)),
+            parseFloat(r.total_cost.toFixed(2)),
+            parseFloat(r.total_profit.toFixed(2)),
+            parseFloat(r.profit_margin.toFixed(2)),
+            parseFloat(r.average_price.toFixed(2)),
             r.sale_count,
           ])
         })
+        sheetName = 'Sales by Product'
         break
       case 'category':
         headers.push('Category', 'Quantity', 'Revenue', 'Cost', 'Profit', 'Margin %', 'Products', 'Sales Count')
@@ -139,14 +142,15 @@ const SalesReports = () => {
           rows.push([
             r.category_name,
             r.total_quantity,
-            r.total_revenue.toFixed(2),
-            r.total_cost.toFixed(2),
-            r.total_profit.toFixed(2),
-            r.profit_margin.toFixed(2),
+            parseFloat(r.total_revenue.toFixed(2)),
+            parseFloat(r.total_cost.toFixed(2)),
+            parseFloat(r.total_profit.toFixed(2)),
+            parseFloat(r.profit_margin.toFixed(2)),
             r.product_count,
             r.sale_count,
           ])
         })
+        sheetName = 'Sales by Category'
         break
       case 'customer':
         headers.push('Customer', 'Quantity', 'Revenue', 'Cost', 'Profit', 'Margin %', 'Orders', 'Avg Order Value')
@@ -154,14 +158,15 @@ const SalesReports = () => {
           rows.push([
             r.customer_name,
             r.total_quantity,
-            r.total_revenue.toFixed(2),
-            r.total_cost.toFixed(2),
-            r.total_profit.toFixed(2),
-            r.profit_margin.toFixed(2),
+            parseFloat(r.total_revenue.toFixed(2)),
+            parseFloat(r.total_cost.toFixed(2)),
+            parseFloat(r.total_profit.toFixed(2)),
+            parseFloat(r.profit_margin.toFixed(2)),
             r.sale_count,
-            r.average_order_value.toFixed(2),
+            parseFloat(r.average_order_value.toFixed(2)),
           ])
         })
+        sheetName = 'Sales by Customer'
         break
       case 'salesperson':
         headers.push('Sales Person', 'Quantity', 'Revenue', 'Cost', 'Profit', 'Margin %', 'Commission', 'Sales Count')
@@ -169,46 +174,46 @@ const SalesReports = () => {
           rows.push([
             r.sales_person_name,
             r.total_quantity,
-            r.total_revenue.toFixed(2),
-            r.total_cost.toFixed(2),
-            r.total_profit.toFixed(2),
-            r.profit_margin.toFixed(2),
-            r.commission_amount.toFixed(2),
+            parseFloat(r.total_revenue.toFixed(2)),
+            parseFloat(r.total_cost.toFixed(2)),
+            parseFloat(r.total_profit.toFixed(2)),
+            parseFloat(r.profit_margin.toFixed(2)),
+            parseFloat(r.commission_amount.toFixed(2)),
             r.sale_count,
           ])
         })
+        sheetName = 'Sales by Sales Person'
+        break
+      case 'sales':
+        headers.push('Date', 'Invoice', 'Customer', 'Items', 'Amount', 'Payment Status', 'Payment Method')
+        sales.forEach(s => {
+          rows.push([
+            new Date(s.sale_date).toLocaleDateString('en-IN'),
+            s.invoice_number,
+            s.customer_name || 'Walk-in Customer',
+            s.items.length,
+            parseFloat(s.grand_total.toFixed(2)),
+            s.payment_status,
+            s.payment_method || '',
+          ])
+        })
+        sheetName = 'All Sales'
         break
     }
 
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
-    ].join('\n')
-
-    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    const url = URL.createObjectURL(blob)
-    link.setAttribute('href', url)
-    link.setAttribute('download', `sales_report_${activeView}_${timePeriod}_${new Date().toISOString().split('T')[0]}.csv`)
-    link.style.visibility = 'hidden'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+    const filename = `sales_report_${activeView}_${timePeriod}_${new Date().toISOString().split('T')[0]}`
+    exportToExcel(rows, headers, filename, sheetName)
   }
 
   const exportToPDF = () => {
-    const printWindow = window.open('', '_blank')
-    if (!printWindow) return
-
-    const title = `Sales Report - ${activeView.charAt(0).toUpperCase() + activeView.slice(1)}`
-    const period = timePeriod === 'all' ? 'All Time' : timePeriod
     const headers: string[] = []
     const rows: any[][] = []
+    let title = 'Sales Report'
 
     switch (activeView) {
       case 'product':
         headers.push('Product', 'Quantity', 'Revenue', 'Profit', 'Margin %')
-        productReports.slice(0, 50).forEach(r => {
+        productReports.forEach(r => {
           rows.push([
             r.product_name,
             r.total_quantity,
@@ -217,6 +222,7 @@ const SalesReports = () => {
             `${r.profit_margin.toFixed(2)}%`,
           ])
         })
+        title = 'Sales Report - By Product'
         break
       case 'category':
         headers.push('Category', 'Quantity', 'Revenue', 'Profit', 'Margin %')
@@ -229,10 +235,11 @@ const SalesReports = () => {
             `${r.profit_margin.toFixed(2)}%`,
           ])
         })
+        title = 'Sales Report - By Category'
         break
       case 'customer':
         headers.push('Customer', 'Quantity', 'Revenue', 'Profit', 'Orders')
-        customerReports.slice(0, 50).forEach(r => {
+        customerReports.forEach(r => {
           rows.push([
             r.customer_name,
             r.total_quantity,
@@ -241,6 +248,7 @@ const SalesReports = () => {
             r.sale_count,
           ])
         })
+        title = 'Sales Report - By Customer'
         break
       case 'salesperson':
         headers.push('Sales Person', 'Quantity', 'Revenue', 'Profit', 'Commission')
@@ -253,47 +261,29 @@ const SalesReports = () => {
             `₹${r.commission_amount.toFixed(2)}`,
           ])
         })
+        title = 'Sales Report - By Sales Person'
+        break
+      case 'sales':
+        headers.push('Date', 'Invoice', 'Customer', 'Items', 'Amount', 'Payment Status')
+        sales.forEach(s => {
+          rows.push([
+            new Date(s.sale_date).toLocaleDateString('en-IN'),
+            s.invoice_number,
+            s.customer_name || 'Walk-in Customer',
+            s.items.length,
+            `₹${s.grand_total.toFixed(2)}`,
+            s.payment_status,
+          ])
+        })
+        title = 'Sales Report - All Sales'
         break
     }
 
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>${title}</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            h1 { color: #333; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-            th { background-color: #4f46e5; color: white; }
-            tr:nth-child(even) { background-color: #f2f2f2; }
-            .header { margin-bottom: 20px; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>${title}</h1>
-            <p>Period: ${period}</p>
-            <p>Total Records: ${rows.length}</p>
-            <p>Generated: ${new Date().toLocaleString('en-IN')}</p>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                ${headers.map(h => `<th>${h}</th>`).join('')}
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map(row => `<tr>${row.map(cell => `<td>${cell}</td>`).join('')}</tr>`).join('')}
-            </tbody>
-          </table>
-        </body>
-      </html>
-    `
-    printWindow.document.write(htmlContent)
-    printWindow.document.close()
-    printWindow.print()
+    const period = timePeriod === 'all' ? 'All Time' : timePeriod
+    const fullTitle = `${title} (${period})`
+    const filename = `sales_report_${activeView}_${timePeriod}_${new Date().toISOString().split('T')[0]}`
+    
+    exportDataToPDF(rows, headers, filename, fullTitle)
   }
 
   const renderProductReport = () => (

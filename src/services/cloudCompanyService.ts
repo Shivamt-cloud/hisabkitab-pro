@@ -158,6 +158,11 @@ export const cloudCompanyService = {
             valid_from: companyData.valid_from || null,
             valid_to: companyData.valid_to || null,
             is_active: companyData.is_active !== undefined ? companyData.is_active : true,
+            subscription_tier: companyData.subscription_tier || 'basic',
+            max_users: companyData.max_users || 3,
+            subscription_start_date: companyData.subscription_start_date || null,
+            subscription_end_date: companyData.subscription_end_date || null,
+            subscription_status: companyData.subscription_status || 'active',
           }])
           .select()
           .single()
@@ -283,6 +288,7 @@ export const cloudCompanyService = {
     return true
   },
 }
+
 
 
 

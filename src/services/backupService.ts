@@ -353,13 +353,20 @@ export const backupService = {
       }
 
       // Import Customers
-      if (options.importCustomers !== false && backup.data.customers) {
+      console.log(`📦 [Import] Customer import check. Options.importCustomers: ${options.importCustomers}, Backup has customers: ${!!backup.data.customers}, Count: ${backup.data.customers?.length || 0}`)
+      if (options.importCustomers !== false && backup.data.customers && backup.data.customers.length > 0) {
+        console.log(`📦 Starting import of ${backup.data.customers.length} customers for company ${companyId}`)
+        let customersImported = 0
+        let customersSkipped = 0
+        let customersErrors = 0
+        
         for (const customer of backup.data.customers) {
           try {
             const existing = await customerService.getById(customer.id)
             if (!existing) {
+              // Preserve all customer fields from the backup
               await customerService.create({
-                name: customer.name,
+                name: customer.name || '',
                 email: customer.email || '',
                 phone: customer.phone || '',
                 gstin: customer.gstin || '',
@@ -367,22 +374,54 @@ export const backupService = {
                 city: customer.city || '',
                 state: customer.state || '',
                 pincode: customer.pincode || '',
+                country: customer.country || '',
                 contact_person: customer.contact_person || '',
-                credit_limit: customer.credit_limit || 0,
+                credit_limit: customer.credit_limit !== undefined ? customer.credit_limit : 0,
                 is_active: customer.is_active !== undefined ? customer.is_active : true,
                 company_id: companyId || customer.company_id, // Set company_id from options or use existing
               })
+              customersImported++
               importedCount++
+            } else {
+              customersSkipped++
+              // Update existing customer with full information if needed
+              try {
+                await customerService.update(customer.id, {
+                  name: customer.name || existing.name,
+                  email: customer.email || existing.email,
+                  phone: customer.phone || existing.phone,
+                  gstin: customer.gstin || existing.gstin,
+                  address: customer.address || existing.address,
+                  city: customer.city || existing.city,
+                  state: customer.state || existing.state,
+                  pincode: customer.pincode || existing.pincode,
+                  country: customer.country || (existing as any).country || '',
+                  contact_person: customer.contact_person || existing.contact_person,
+                  credit_limit: customer.credit_limit !== undefined ? customer.credit_limit : existing.credit_limit,
+                  is_active: customer.is_active !== undefined ? customer.is_active : existing.is_active,
+                })
+                importedCount++
+              } catch (updateError) {
+                console.error(`Error updating customer ${customer.id}:`, updateError)
+              }
             }
-          } catch (error) {
-            console.error('Error importing customer:', error)
+          } catch (error: any) {
+            customersErrors++
+            console.error(`Error importing customer ${customer.name || customer.id}:`, {
+              error: error.message || error,
+              customer_data: customer,
+            })
           }
         }
+        
+        console.log(`📊 Customers Import Summary: Imported: ${customersImported}, Updated: ${customersSkipped}, Errors: ${customersErrors}`)
       }
 
       // Import Products
       if (options.importProducts !== false && backup.data.products) {
-        const allProducts = await productService.getAll(true, userId ? undefined : null)
+        // Get products filtered by company for duplicate checking
+        const targetCompanyId = companyId !== undefined ? companyId : (userId ? undefined : null)
+        const allProducts = await productService.getAll(true, targetCompanyId)
         for (const product of backup.data.products) {
           try {
             // Check by ID first
@@ -391,9 +430,9 @@ export const backupService = {
               continue // Skip if exists by ID
             }
 
-            // Check for duplicates by name, SKU, or barcode
+            // Check for duplicates by name, SKU, or barcode within the same company
             const duplicate = allProducts.find(p => {
-              // Match by name (case-insensitive)
+              // Match by name (case-insensitive) within same company
               if (p.name.toLowerCase() === (product.name || '').toLowerCase()) return true
               // Match by SKU if both have SKU
               if (p.sku && product.sku && p.sku.toLowerCase() === product.sku.toLowerCase()) return true
@@ -424,6 +463,7 @@ export const backupService = {
               is_active: product.is_active !== undefined ? product.is_active : (product.status === 'active'),
               status: product.status || 'active',
               barcode_status: product.barcode_status || (product.barcode ? 'active' : 'inactive'),
+              company_id: companyId || product.company_id, // Set company_id from options or use existing
             })
             importedCount++
           } catch (error) {
@@ -433,12 +473,19 @@ export const backupService = {
       }
 
       // Import Purchases (requires products and suppliers to exist)
-      if (options.importPurchases !== false && backup.data.purchases) {
+      console.log(`📦 [Import] Purchase import check. Options.importPurchases: ${options.importPurchases}, Backup has purchases: ${!!backup.data.purchases}, Count: ${backup.data.purchases?.length || 0}`)
+      if (options.importPurchases !== false && backup.data.purchases && Array.isArray(backup.data.purchases) && backup.data.purchases.length > 0) {
+        console.log(`📦 [Import] Starting purchase import. Total purchases in file: ${backup.data.purchases.length}`)
+        console.log(`📦 [Import] Company ID: ${companyId}, User ID: ${userId}`)
+        console.log(`📦 [Import] Options:`, { importPurchases: options.importPurchases })
+        
         // Load purchases filtered by company for duplicate checking
         const allPurchases = await purchaseService.getAll(undefined, companyId !== undefined ? companyId : (userId ? undefined : null))
         const allProducts = await productService.getAll(true, companyId !== undefined ? companyId : (userId ? undefined : null))
         // Load suppliers filtered by company for proper matching
         const allSuppliers = await supplierService.getAll(companyId !== undefined ? companyId : (userId ? undefined : null))
+        
+        console.log(`📦 [Import] Existing data: ${allPurchases.length} purchases, ${allProducts.length} products, ${allSuppliers.length} suppliers`)
         
         // Create lookup maps for faster access
         const purchaseIdMap = new Set(allPurchases.map(p => p.id))
@@ -459,6 +506,10 @@ export const backupService = {
         let processedCount = 0
         let skippedCount = 0
         let errorCount = 0
+        let purchaseImportedCount = 0 // Separate counter for purchases
+        let itemsWithBarcodes = 0
+        let itemsWithArticles = 0
+        let itemsWithoutBarcodes = 0
         
         const totalPurchases = backup.data.purchases.length
         console.log(`📦 Starting import of ${totalPurchases} purchases for company ${companyId}`)
@@ -513,11 +564,32 @@ export const backupService = {
               // IMPORTANT: Preserve barcode and article data for sales search functionality
               const processedItems = (purchase.items || []).map((item: any) => {
                 // Preserve all item data including barcode and article
+                // CRITICAL: Convert barcode/article to strings (Excel might provide numbers)
+                let barcodeValue = item.barcode
+                if (barcodeValue !== null && barcodeValue !== undefined) {
+                  barcodeValue = String(barcodeValue).trim()
+                  if (barcodeValue === '' || barcodeValue === 'null' || barcodeValue === 'undefined') {
+                    barcodeValue = undefined
+                  }
+                } else {
+                  barcodeValue = undefined
+                }
+                
+                let articleValue = item.article
+                if (articleValue !== null && articleValue !== undefined) {
+                  articleValue = String(articleValue).trim()
+                  if (articleValue === '' || articleValue === 'null' || articleValue === 'undefined') {
+                    articleValue = undefined
+                  }
+                } else {
+                  articleValue = undefined
+                }
+                
                 const processedItem: any = {
                   ...item,
                   // Preserve barcode and article - critical for sales search
-                  barcode: item.barcode || '',
-                  article: item.article || '',
+                  barcode: barcodeValue,
+                  article: articleValue,
                 }
                 
                 // If product_id already exists and is valid, use it
@@ -594,6 +666,9 @@ export const backupService = {
                       continue
                     }
                     
+                    // Ensure barcode is properly formatted (string, not number)
+                    const productBarcode = item.barcode && String(item.barcode).trim() ? String(item.barcode).trim() : ''
+                    
                     const product = await productService.create({
                       name: item._productNameForCreation,
                       sku: item._productNameForCreation.substring(0, 20).toUpperCase().replace(/\s/g, '-'),
@@ -605,12 +680,17 @@ export const backupService = {
                       hsn_code: item.hsn_code || '',
                       gst_rate: item.gst_rate || 0,
                       tax_type: 'exclusive',
-                      barcode: item.barcode || '',
+                      barcode: productBarcode,
                       is_active: true,
                       status: 'active',
-                      barcode_status: item.barcode ? 'active' : 'inactive',
+                      barcode_status: productBarcode ? 'active' : 'inactive',
                       company_id: companyId ?? undefined,
                     })
+                    
+                    // Log barcode assignment for debugging
+                    if (productBarcode) {
+                      console.log(`✅ [Import] Created product "${product.name}" with barcode "${productBarcode}"`)
+                    }
                     item.product_id = product.id
                     productNameMap.set(item._productNameForCreation.toLowerCase(), product)
                     allProducts.push(product)
@@ -703,7 +783,10 @@ export const backupService = {
 
             // Clean up processed items and ensure valid product_id
             // Remove internal processing flags and ensure product_id is valid
-            const validItems = processedItems.map((item: any) => {
+            // CRITICAL: Preserve barcode and article fields for sales functionality
+            // ALWAYS assign sequential IDs (SR No) to items: 1, 2, 3, ...
+            // This ensures consistent sequential numbering regardless of Excel SrNo column
+            const validItems = processedItems.map((item: any, index: number) => {
               const cleanItem: any = { ...item }
               // Remove internal processing flags
               delete cleanItem._needsProductCreation
@@ -711,6 +794,40 @@ export const backupService = {
               delete cleanItem._creationReason
               // Ensure product_id is a number (should be set by now, but fallback to 0)
               cleanItem.product_id = cleanItem.product_id || 0
+              // ALWAYS assign sequential ID (SR No) starting from 1
+              // System ignores any SrNo from Excel sheet and uses its own logic
+              cleanItem.id = index + 1
+              
+              // CRITICAL: Ensure barcode and article are properly preserved as strings
+              // Convert numbers to strings (Excel might read barcodes as numbers)
+              if (cleanItem.barcode !== null && cleanItem.barcode !== undefined) {
+                const barcodeStr = String(cleanItem.barcode).trim()
+                cleanItem.barcode = barcodeStr || undefined // Use undefined for empty strings
+              } else {
+                cleanItem.barcode = undefined
+              }
+              
+              if (cleanItem.article !== null && cleanItem.article !== undefined) {
+                const articleStr = String(cleanItem.article).trim()
+                cleanItem.article = articleStr || undefined // Use undefined for empty strings
+              } else {
+                cleanItem.article = undefined
+              }
+              
+              // Log barcode preservation for debugging and count statistics
+              if (cleanItem.barcode) {
+                itemsWithBarcodes++
+                if (processedCount % 100 === 0) { // Only log every 100th item to reduce spam
+                  console.log(`✅ [Import] Preserving barcode "${cleanItem.barcode}" for product_id ${cleanItem.product_id}, article: ${cleanItem.article || 'N/A'}`)
+                }
+              } else {
+                itemsWithoutBarcodes++
+              }
+              
+              if (cleanItem.article) {
+                itemsWithArticles++
+              }
+              
               return cleanItem
             }).filter((item: any) => {
               // Filter out items that still have product_id = 0 (couldn't create/find product)
@@ -736,41 +853,65 @@ export const backupService = {
 
             if (purchase.type === 'gst') {
               const gstPurchase = purchase as any
-              await purchaseService.createGST({
-                supplier_id: supplierId,
-                invoice_number: gstPurchase.invoice_number || '',
-                purchase_date: gstPurchase.purchase_date,
-                items: validItems,
-                subtotal: gstPurchase.subtotal || 0,
-                total_tax: gstPurchase.total_tax || gstPurchase.tax_amount || 0,
-                grand_total: gstPurchase.grand_total || 0,
-                payment_status: (gstPurchase.payment_status || 'pending') as any,
-                notes: gstPurchase.notes,
-                company_id: companyId, // Set company_id from options
-                created_by: userId ? parseInt(userId) : 1,
-              } as any)
-              importedCount++
-              // Only log every 10th import to reduce console spam
-              if (importedCount % 10 === 0) {
-                console.log(`✅ Imported ${importedCount} purchases so far...`)
+              try {
+                const createdPurchase = await purchaseService.createGST({
+                  supplier_id: supplierId,
+                  invoice_number: gstPurchase.invoice_number || '',
+                  purchase_date: gstPurchase.purchase_date,
+                  items: validItems,
+                  subtotal: gstPurchase.subtotal || 0,
+                  total_tax: gstPurchase.total_tax || gstPurchase.tax_amount || 0,
+                  grand_total: gstPurchase.grand_total || 0,
+                  payment_status: (gstPurchase.payment_status || 'pending') as any,
+                  notes: gstPurchase.notes,
+                  company_id: companyId, // Set company_id from options
+                  created_by: userId ? parseInt(userId) : 1,
+                } as any)
+                purchaseImportedCount++
+                importedCount++
+                // Only log every 10th import to reduce console spam
+                if (purchaseImportedCount % 10 === 0) {
+                  console.log(`✅ Imported ${purchaseImportedCount} purchases so far... (Invoice: ${gstPurchase.invoice_number || 'N/A'})`)
+                }
+              } catch (createError: any) {
+                console.error(`❌ Failed to create GST purchase:`, {
+                  invoice: gstPurchase.invoice_number || 'N/A',
+                  supplier_id: supplierId,
+                  items_count: validItems.length,
+                  error: createError.message || createError,
+                })
+                errorCount++
+                continue
               }
             } else {
               const simplePurchase = purchase as any
-              await purchaseService.createSimple({
-                supplier_id: supplierId,
-                invoice_number: simplePurchase.invoice_number,
-                purchase_date: simplePurchase.purchase_date,
-                items: validItems,
-                total_amount: simplePurchase.total_amount || 0,
-                payment_status: (simplePurchase.payment_status || 'pending') as any,
-                notes: simplePurchase.notes,
-                company_id: companyId, // Set company_id from options
-                created_by: userId ? parseInt(userId) : 1,
-              } as any)
-              importedCount++
-              // Only log every 10th import to reduce console spam
-              if (importedCount % 10 === 0) {
-                console.log(`✅ Imported ${importedCount} purchases so far...`)
+              try {
+                const createdPurchase = await purchaseService.createSimple({
+                  supplier_id: supplierId,
+                  invoice_number: simplePurchase.invoice_number,
+                  purchase_date: simplePurchase.purchase_date,
+                  items: validItems,
+                  total_amount: simplePurchase.total_amount || 0,
+                  payment_status: (simplePurchase.payment_status || 'pending') as any,
+                  notes: simplePurchase.notes,
+                  company_id: companyId, // Set company_id from options
+                  created_by: userId ? parseInt(userId) : 1,
+                } as any)
+                purchaseImportedCount++
+                importedCount++
+                // Only log every 10th import to reduce console spam
+                if (purchaseImportedCount % 10 === 0) {
+                  console.log(`✅ Imported ${purchaseImportedCount} purchases so far... (Invoice: ${simplePurchase.invoice_number || 'N/A'})`)
+                }
+              } catch (createError: any) {
+                console.error(`❌ Failed to create Simple purchase:`, {
+                  invoice: simplePurchase.invoice_number || 'N/A',
+                  supplier_id: supplierId,
+                  items_count: validItems.length,
+                  error: createError.message || createError,
+                })
+                errorCount++
+                continue
               }
             }
           } catch (error: any) {
@@ -799,7 +940,10 @@ export const backupService = {
           }
         }
         
-        console.log(`📊 Import Summary: Processed: ${processedCount}, Imported: ${importedCount}, Skipped: ${skippedCount}, Errors: ${errorCount}`)
+        console.log(`📊 Purchase Import Summary: Processed: ${processedCount}, Imported: ${purchaseImportedCount}, Skipped: ${skippedCount}, Errors: ${errorCount}`)
+        console.log(`📊 Barcode Statistics: Items with barcodes: ${itemsWithBarcodes}, Items with articles: ${itemsWithArticles}, Items without barcodes: ${itemsWithoutBarcodes}`)
+      } else {
+        console.log(`⚠️ [Import] Purchase import skipped. Options.importPurchases: ${options.importPurchases}, Backup has purchases: ${!!backup.data.purchases}`)
       }
 
       // Import Sales (if enabled and data exists)

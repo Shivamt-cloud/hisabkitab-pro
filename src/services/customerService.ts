@@ -1,8 +1,9 @@
-// Customer Management Service using IndexedDB
+// Customer Management Service using IndexedDB and Supabase
 
 import { Customer, CustomerSummary } from '../types/customer'
 import { saleService } from './saleService'
-import { getAll, getById, put, deleteById, getByIndex, STORES } from '../database/db'
+import { cloudCustomerService } from './cloudCustomerService'
+import { getAll, put, STORES } from '../database/db'
 
 // Initialize with sample data if empty
 async function initializeData(): Promise<void> {
@@ -19,36 +20,21 @@ async function initializeData(): Promise<void> {
 }
 
 export const customerService = {
+  // Get all customers (from cloud, with local fallback)
   getAll: async (includeInactive: boolean = false, companyId?: number | null): Promise<Customer[]> => {
     await initializeData()
-    let customers: Customer[]
-    
-    // If companyId is provided, filter STRICTLY by company_id (no backward compatibility - data isolation is critical)
-    // Also explicitly exclude records with null/undefined company_id to prevent data leakage
-    if (companyId !== undefined && companyId !== null) {
-      customers = await getByIndex<Customer>(STORES.CUSTOMERS, 'company_id', companyId)
-      // Additional filter to ensure we only get records with matching company_id
-      customers = customers.filter(c => c.company_id === companyId)
-    } else if (companyId === null) {
-      // If companyId is explicitly null (user has no company), return empty array for data isolation
-      customers = []
-    } else {
-      // If companyId is undefined, return all (for admin users who haven't selected a company)
-      customers = await getAll<Customer>(STORES.CUSTOMERS)
-    }
-    
-    if (!includeInactive) {
-      customers = customers.filter(c => c.is_active)
-    }
-    
-    return customers.sort((a, b) => new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime())
+    // Use cloud service which handles fallback to local
+    const customers = await cloudCustomerService.getAll(includeInactive, companyId)
+    return customers
   },
 
+  // Get customer by ID (from cloud, with local fallback)
   getById: async (id: number): Promise<Customer | null> => {
-    const customer = await getById<Customer>(STORES.CUSTOMERS, id)
+    const customer = await cloudCustomerService.getById(id)
     return customer || null
   },
 
+  // Create customer (saves to cloud and local)
   create: async (customer: Omit<Customer, 'id' | 'created_at' | 'updated_at'>): Promise<Customer> => {
     // Check for duplicates only within the same company
     const customers = await customerService.getAll(true, customer.company_id)
@@ -69,20 +55,16 @@ export const customerService = {
       }
     }
 
-    const newCustomer: Customer = {
+    // Use cloud service which handles both cloud and local storage
+    return await cloudCustomerService.create({
       ...customer,
-      id: Date.now(),
       outstanding_amount: customer.outstanding_amount || 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
-    
-    await put(STORES.CUSTOMERS, newCustomer)
-    return newCustomer
+    })
   },
 
+  // Update customer (updates cloud and local)
   update: async (id: number, customer: Partial<Customer>): Promise<Customer | null> => {
-    const existing = await getById<Customer>(STORES.CUSTOMERS, id)
+    const existing = await customerService.getById(id)
     if (!existing) return null
 
     // Check for duplicate email if provided and different from current (within same company)
@@ -105,24 +87,13 @@ export const customerService = {
       }
     }
 
-    const updatedCustomer: Customer = {
-      ...existing,
-      ...customer,
-      id: existing.id, // Ensure ID doesn't change
-      updated_at: new Date().toISOString(),
-    }
-    
-    await put(STORES.CUSTOMERS, updatedCustomer)
-    return updatedCustomer
+    // Use cloud service which handles both cloud and local storage
+    return await cloudCustomerService.update(id, customer)
   },
 
+  // Delete customer (deletes from cloud and local)
   delete: async (id: number): Promise<boolean> => {
-    try {
-      await deleteById(STORES.CUSTOMERS, id)
-      return true
-    } catch (error) {
-      return false
-    }
+    return await cloudCustomerService.delete(id)
   },
 
   search: async (query: string): Promise<Customer[]> => {

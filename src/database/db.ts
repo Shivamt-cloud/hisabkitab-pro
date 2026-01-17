@@ -2,7 +2,7 @@
 // Provides a simple interface to interact with IndexedDB
 
 const DB_NAME = 'hisabkitab_db'
-const DB_VERSION = 9 // Incremented to add missing indexes for PURCHASES and STOCK_ADJUSTMENTS stores
+const DB_VERSION = 13 // Incremented to add USER_DEVICES store
 
 // Object store names (tables)
 export const STORES = {
@@ -29,6 +29,8 @@ export const STORES = {
   EXPENSES: 'expenses',
   SUPPLIER_PAYMENTS: 'supplier_payments',
   SUPPLIER_CHECKS: 'supplier_checks',
+  REGISTRATION_REQUESTS: 'registration_requests',
+  USER_DEVICES: 'user_devices',
 } as const
 
 let dbInstance: IDBDatabase | null = null
@@ -395,6 +397,23 @@ export function initDB(config: DBConfig = {}): Promise<IDBDatabase> {
         if (!checksStore.indexNames.contains('status')) {
           checksStore.createIndex('status', 'status', { unique: false })
         }
+      }
+
+      // Handle REGISTRATION_REQUESTS store
+      if (!db.objectStoreNames.contains(STORES.REGISTRATION_REQUESTS)) {
+        const requestsStore = db.createObjectStore(STORES.REGISTRATION_REQUESTS, { keyPath: 'id' })
+        requestsStore.createIndex('email', 'email', { unique: false })
+        requestsStore.createIndex('created_at', 'created_at', { unique: false })
+        requestsStore.createIndex('status', 'status', { unique: false })
+      }
+
+      // Handle USER_DEVICES store
+      if (!db.objectStoreNames.contains(STORES.USER_DEVICES)) {
+        const devicesStore = db.createObjectStore(STORES.USER_DEVICES, { keyPath: 'id' })
+        devicesStore.createIndex('user_id', 'user_id', { unique: false })
+        devicesStore.createIndex('device_id', 'device_id', { unique: false })
+        devicesStore.createIndex('is_active', 'is_active', { unique: false })
+        devicesStore.createIndex('last_accessed', 'last_accessed', { unique: false })
       }
       }) // Close upgradePromise Promise
     }

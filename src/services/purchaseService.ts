@@ -1,111 +1,50 @@
-// Purchase service using IndexedDB
+// Purchase service using IndexedDB and Supabase
 // Handles both GST and Simple purchases
 
 import { Purchase, GSTPurchase, SimplePurchase, PurchaseItem, Supplier, PurchaseType } from '../types/purchase'
 import { productService } from './productService'
+import { cloudPurchaseService } from './cloudPurchaseService'
+import { cloudSupplierService } from './cloudSupplierService'
 import { getAll, getById, put, deleteById, getByIndex, STORES } from '../database/db'
 
 // Suppliers
 export const supplierService = {
+  // Get all suppliers (from cloud, with local fallback)
   getAll: async (companyId?: number | null): Promise<Supplier[]> => {
-    // Always load all suppliers first to avoid index issues
-    const allSuppliers = await getAll<Supplier>(STORES.SUPPLIERS)
-    
-    // If companyId is provided, include records with matching company_id OR null/undefined (old data)
-    if (companyId !== undefined && companyId !== null) {
-      return allSuppliers.filter(s => {
-        // Include records with matching company_id OR old data without company_id
-        return s.company_id === companyId || s.company_id === null || s.company_id === undefined
-      })
-    } else if (companyId === null) {
-      // If companyId is explicitly null (user has no company), return empty array for data isolation
-      return []
-    }
-    // If companyId is undefined, return all (for admin users who haven't selected a company)
-    
-    return allSuppliers
+    return await cloudSupplierService.getAll(companyId)
   },
 
+  // Get supplier by ID (from cloud, with local fallback)
   getById: async (id: number): Promise<Supplier | undefined> => {
-    return await getById<Supplier>(STORES.SUPPLIERS, id)
+    return await cloudSupplierService.getById(id)
   },
 
+  // Create supplier (saves to cloud and local)
   create: async (supplier: Omit<Supplier, 'id' | 'created_at' | 'updated_at'>): Promise<Supplier> => {
-    const newSupplier: Supplier = {
-      ...supplier,
-      id: Date.now(),
-      is_registered: !!supplier.gstin,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
-    await put(STORES.SUPPLIERS, newSupplier)
-    return newSupplier
+    return await cloudSupplierService.create(supplier)
   },
 
+  // Update supplier (updates cloud and local)
   update: async (id: number, supplier: Partial<Supplier>): Promise<Supplier | null> => {
-    const existing = await getById<Supplier>(STORES.SUPPLIERS, id)
-    if (!existing) return null
-
-    const updated: Supplier = {
-      ...existing,
-      ...supplier,
-      is_registered: supplier.gstin ? true : existing.is_registered,
-      updated_at: new Date().toISOString(),
-    }
-    await put(STORES.SUPPLIERS, updated)
-    return updated
+    return await cloudSupplierService.update(id, supplier)
   },
 
+  // Delete supplier (deletes from cloud and local)
   delete: async (id: number): Promise<boolean> => {
-    try {
-      await deleteById(STORES.SUPPLIERS, id)
-      return true
-    } catch (error) {
-      return false
-    }
+    return await cloudSupplierService.delete(id)
   },
 }
 
 // Purchases
 export const purchaseService = {
+  // Get all purchases (from cloud, with local fallback)
   getAll: async (type?: PurchaseType, companyId?: number | null): Promise<Purchase[]> => {
-    // Always load all purchases first to avoid index issues
-    let purchases = await getAll<Purchase>(STORES.PURCHASES)
-    console.log('[PurchaseService] getAll called with companyId:', companyId, 'type:', typeof companyId)
-    console.log('[PurchaseService] Total purchases before filter:', purchases.length)
-    console.log('[PurchaseService] Purchase company_ids sample:', purchases.slice(0, 5).map(p => ({ id: p.id, company_id: p.company_id, type: typeof p.company_id })))
-    
-    // If companyId is provided, include records with matching company_id OR null/undefined (old data)
-    // This ensures old data without company_id is still visible
-    if (companyId !== undefined && companyId !== null) {
-      const beforeFilter = purchases.length
-      const oldDataCount = purchases.filter(p => p.company_id === null || p.company_id === undefined).length
-      purchases = purchases.filter(p => {
-        // Include records with matching company_id OR old data without company_id
-        const matches = p.company_id === companyId || p.company_id === null || p.company_id === undefined
-        return matches
-      })
-      console.log('[PurchaseService] Filtered purchases:', purchases.length, 'from', beforeFilter, 'for companyId:', companyId)
-      if (oldDataCount > 0) {
-        console.warn(`[PurchaseService] ⚠️ Found ${oldDataCount} old records without company_id - these are included for backward compatibility`)
-      }
-    } else if (companyId === null) {
-      // If companyId is explicitly null (user has no company), return empty array for data isolation
-      console.log('[PurchaseService] companyId is null, returning empty array')
-      purchases = []
-    } else {
-      console.log('[PurchaseService] companyId is undefined, returning all purchases (admin mode)')
-    }
-    // If companyId is undefined, return all (for admin users who haven't selected a company)
-    
-    if (type) {
-      purchases = purchases.filter(p => p.type === type)
-    }
-    return purchases
+    return await cloudPurchaseService.getAll(type, companyId)
   },
 
+  // Get purchase by ID (from cloud, with local fallback)
   getById: async (id: number): Promise<Purchase | undefined> => {
-    return await getById<Purchase>(STORES.PURCHASES, id)
+    return await cloudPurchaseService.getById(id)
   },
 
   createGST: async (purchase: Omit<GSTPurchase, 'id' | 'created_at' | 'updated_at'>): Promise<GSTPurchase> => {
@@ -160,8 +99,8 @@ export const purchaseService = {
       }
     }
     
-    await put(STORES.PURCHASES, newPurchase)
-    return newPurchase
+    // Use cloud service which handles both cloud and local storage
+    return await cloudPurchaseService.create(newPurchase)
   },
 
   createSimple: async (purchase: Omit<SimplePurchase, 'id' | 'created_at' | 'updated_at'>): Promise<SimplePurchase> => {
@@ -216,8 +155,8 @@ export const purchaseService = {
       }
     }
     
-    await put(STORES.PURCHASES, newPurchase)
-    return newPurchase
+    // Use cloud service which handles both cloud and local storage
+    return await cloudPurchaseService.create(newPurchase)
   },
 
   update: async (id: number, purchase: Partial<Purchase>): Promise<Purchase | null> => {
@@ -259,16 +198,17 @@ export const purchaseService = {
       }
     }
 
-    await put(STORES.PURCHASES, updatedPurchase)
-    return updatedPurchase
+    // Use cloud service which handles both cloud and local storage
+    return await cloudPurchaseService.update(id, purchase)
   },
 
+  // Delete purchase (deletes from cloud and local)
   delete: async (id: number): Promise<boolean> => {
     try {
       console.log(`[PurchaseService] Attempting to delete purchase ${id}`)
-      await deleteById(STORES.PURCHASES, id)
+      const result = await cloudPurchaseService.delete(id)
       console.log(`[PurchaseService] ✅ Successfully deleted purchase ${id}`)
-      return true
+      return result
     } catch (error: any) {
       console.error(`[PurchaseService] ❌ Error deleting purchase ${id}:`, error)
       console.error(`[PurchaseService] Error details:`, {

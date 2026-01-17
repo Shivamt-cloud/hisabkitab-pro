@@ -5,6 +5,7 @@ import { saleService } from '../services/saleService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Sale } from '../types/sale'
 import { Eye, ShoppingCart, TrendingUp, DollarSign, Archive, Home, FileSpreadsheet, FileText, Trash2 } from 'lucide-react'
+import { exportToExcel, exportDataToPDF } from '../utils/exportUtils'
 
 type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
 
@@ -202,97 +203,40 @@ const SalesHistory = () => {
   }
 
   const exportToExcel = () => {
-    // Create CSV content (simplified Excel export)
     const headers = ['Date', 'Invoice', 'Customer', 'Items', 'Amount', 'Payment Status', 'Payment Method', 'Status']
     const rows = sales.map(sale => [
       new Date(sale.sale_date).toLocaleDateString('en-IN'),
       sale.invoice_number,
       sale.customer_name || 'Walk-in Customer',
       sale.items.length,
-      sale.grand_total.toFixed(2),
+      parseFloat(sale.grand_total.toFixed(2)),
       sale.payment_status,
       sale.payment_method || '',
       sale.archived ? 'Archived' : 'Active'
     ])
 
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
-    ].join('\n')
-
-    // Create and download file
-    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    const url = URL.createObjectURL(blob)
-    link.setAttribute('href', url)
-    link.setAttribute('download', `sales_history_${timePeriod}_${new Date().toISOString().split('T')[0]}.csv`)
-    link.style.visibility = 'hidden'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+    const filename = `sales_history_${timePeriod}_${new Date().toISOString().split('T')[0]}`
+    exportToExcel(rows, headers, filename, 'Sales History')
   }
 
   const exportToPDF = () => {
-    // Create a simple text-based PDF using window.print or generate HTML for printing
-    const printWindow = window.open('', '_blank')
-    if (!printWindow) return
+    const headers = ['Date', 'Invoice', 'Customer', 'Items', 'Amount', 'Payment Status', 'Payment Method', 'Status']
+    const rows = sales.map(sale => [
+      new Date(sale.sale_date).toLocaleDateString('en-IN'),
+      sale.invoice_number,
+      sale.customer_name || 'Walk-in Customer',
+      sale.items.length,
+      `₹${sale.grand_total.toFixed(2)}`,
+      sale.payment_status,
+      sale.payment_method || '',
+      sale.archived ? 'Archived' : 'Active'
+    ])
 
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Sales History Report</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            h1 { color: #333; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-            th { background-color: #4f46e5; color: white; }
-            tr:nth-child(even) { background-color: #f2f2f2; }
-            .header { margin-bottom: 20px; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>Sales History Report</h1>
-            <p>Period: ${timePeriod === 'all' ? 'All Time' : timePeriod}</p>
-            <p>Total Records: ${sales.length}</p>
-            <p>Generated: ${new Date().toLocaleString('en-IN')}</p>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Invoice</th>
-                <th>Customer</th>
-                <th>Items</th>
-                <th>Amount</th>
-                <th>Payment Status</th>
-                <th>Payment Method</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${sales.map(sale => `
-                <tr>
-                  <td>${new Date(sale.sale_date).toLocaleDateString('en-IN')}</td>
-                  <td>${sale.invoice_number}</td>
-                  <td>${sale.customer_name || 'Walk-in Customer'}</td>
-                  <td>${sale.items.length}</td>
-                  <td>₹${sale.grand_total.toFixed(2)}</td>
-                  <td>${sale.payment_status}</td>
-                  <td>${sale.payment_method || ''}</td>
-                  <td>${sale.archived ? 'Archived' : 'Active'}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </body>
-      </html>
-    `
-    printWindow.document.write(htmlContent)
-    printWindow.document.close()
-    printWindow.print()
+    const period = timePeriod === 'all' ? 'All Time' : timePeriod
+    const title = `Sales History Report (${period})`
+    const filename = `sales_history_${timePeriod}_${new Date().toISOString().split('T')[0]}`
+    
+    exportDataToPDF(rows, headers, filename, title)
   }
 
   // Block non-admin access

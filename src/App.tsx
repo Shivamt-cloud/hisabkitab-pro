@@ -48,6 +48,7 @@ import { DatabaseProvider } from './components/DatabaseProvider'
 import { LicenseGuard } from './components/LicenseGuard'
 import { LicenseExpiredBanner } from './components/LicenseExpiredBanner'
 import { UpdateBanner } from './components/UpdateBanner'
+import { UpgradeBanner } from './components/UpgradeBanner'
 
 // Lazy load to prevent import errors from breaking the app
 // const BackupRestore = lazy(() => import('./pages/BackupRestore'))
@@ -60,6 +61,7 @@ function App() {
           <LicenseGuard>
             <LicenseExpiredBanner />
             <UpdateBanner />
+            <UpgradeBanner />
             <Routes>
             <Route path="/login" element={<Login />} />
           <Route

@@ -18,9 +18,14 @@ function downloadExcel(workbook: XLSX.WorkBook, filename: string) {
 export function generateSamplePurchases() {
   const data = [
     ['SrNo', 'Customer Name', 'GST Number', 'Bill No', 'Bill Date', 'HSN', 'Desc', 'Article', 'Barcode', 'GST%', 'Qty', 'UNIT', 'Purchase', 'Sale', 'MRP', 'Taxable Amt', 'SGST', 'CGST', 'IGST', 'Oth Amt', 'Bill Amt'],
-    ['1', 'ABC Suppliers', '27AAAAA0000A1Z5', 'ABC/2025/001', '07-Apr-2025', '6107', 'Sample Product 1', 'ART-001', '1234567890123', '5.00', '60.00', 'PCS', '262.27', '280.00', '300.00', '15736.17', '393.41', '393.41', '0.00', '0.01', '16523.00'],
-    ['2', 'XYZ Traders', '09ABXYZ0000A1Z6', 'XYZ/2025/002', '08/Apr/2025', '6107', 'Sample Product 2', 'ART-002', '9876543210987', '5.00', '50.00', 'PCS', '87.14', '95.00', '100.00', '4357.13', '108.93', '108.93', '0.00', '0.01', '4575.00'],
-    ['3', 'DEF Company', '27DEFAA0000A1Z7', 'DEF/2025/003', '10-Apr-2025', '8517', 'Sample Product 3', 'ART-003', '4567890123456', '18.00', '10.00', 'PCS', '5000.00', '5500.00', '6000.00', '50000.00', '4500.00', '4500.00', '0.00', '0.00', '59000.00'],
+    // Example 1: Standard EAN-13 barcode
+    ['1', 'ABC Suppliers', '27AAAAA0000A1Z5', 'ABC/2025/001', '07-Apr-2025', '6107', 'Sample Product 1', 'ART-001', '8904201446686', '5.00', '60.00', 'PCS', '262.27', '280.00', '300.00', '15736.17', '393.41', '393.41', '0.00', '0.01', '16523.00'],
+    // Example 2: Another barcode (note: barcodes can be numbers or text)
+    ['2', 'XYZ Traders', '09ABXYZ0000A1Z6', 'XYZ/2025/002', '08/Apr/2025', '6107', 'Sample Product 2', 'ART-002', '8905005506422', '5.00', '50.00', 'PCS', '87.14', '95.00', '100.00', '4357.13', '108.93', '108.93', '0.00', '0.01', '4575.00'],
+    // Example 3: Product with article and barcode
+    ['3', 'DEF Company', '27DEFAA0000A1Z7', 'DEF/2025/003', '10-Apr-2025', '8517', 'Sample Product 3', 'SUIT-BLK-001', '99000000298', '18.00', '10.00', 'PCS', '5000.00', '5500.00', '6000.00', '50000.00', '4500.00', '4500.00', '0.00', '0.00', '59000.00'],
+    // Example 4: Product without barcode (barcode column can be empty)
+    ['4', 'GHI Suppliers', '27GHIAA0000A1Z8', 'GHI/2025/004', '11-Apr-2025', '8517', 'Sample Product 4', 'ART-004', '', '18.00', '5.00', 'PCS', '1000.00', '1200.00', '1500.00', '5000.00', '450.00', '450.00', '0.00', '0.00', '5900.00'],
   ]
 
   const ws = XLSX.utils.aoa_to_sheet(data)
@@ -113,8 +118,10 @@ export function generateUniversalTemplate() {
   // Purchases Sheet
   const purchasesData = [
     ['SrNo', 'Customer Name', 'GST Number', 'Bill No', 'Bill Date', 'HSN', 'Desc', 'Article', 'Barcode', 'GST%', 'Qty', 'UNIT', 'Purchase', 'Sale', 'MRP', 'Taxable Amt', 'SGST', 'CGST', 'IGST', 'Oth Amt', 'Bill Amt'],
-    ['1', 'ABC Suppliers', '27AAAAA0000A1Z5', 'ABC/2025/001', '07-Apr-2025', '6107', 'Sample Product 1', 'ART-001', '1234567890123', '5.00', '60.00', 'PCS', '262.27', '280.00', '300.00', '15736.17', '393.41', '393.41', '0.00', '0.01', '16523.00'],
-    ['2', 'XYZ Traders', '09ABXYZ0000A1Z6', 'XYZ/2025/002', '08/Apr/2025', '6107', 'Sample Product 2', 'ART-002', '9876543210987', '5.00', '50.00', 'PCS', '87.14', '95.00', '100.00', '4357.13', '108.93', '108.93', '0.00', '0.01', '4575.00'],
+    // Example 1: Standard EAN-13 barcode
+    ['1', 'ABC Suppliers', '27AAAAA0000A1Z5', 'ABC/2025/001', '07-Apr-2025', '6107', 'Sample Product 1', 'ART-001', '8904201446686', '5.00', '60.00', 'PCS', '262.27', '280.00', '300.00', '15736.17', '393.41', '393.41', '0.00', '0.01', '16523.00'],
+    // Example 2: Another barcode
+    ['2', 'XYZ Traders', '09ABXYZ0000A1Z6', 'XYZ/2025/002', '08/Apr/2025', '6107', 'Sample Product 2', 'ART-002', '8905005506422', '5.00', '50.00', 'PCS', '87.14', '95.00', '100.00', '4357.13', '108.93', '108.93', '0.00', '0.01', '4575.00'],
   ]
   const purchasesWS = XLSX.utils.aoa_to_sheet(purchasesData)
   XLSX.utils.book_append_sheet(wb, purchasesWS, 'Purchases')

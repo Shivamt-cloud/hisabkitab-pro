@@ -1,60 +1,31 @@
-// Expense service using IndexedDB
+// Expense service using IndexedDB and Supabase
 import { Expense } from '../types/expense'
-import { STORES, getAll, getById, put, deleteById } from '../database/db'
+import { cloudExpenseService } from './cloudExpenseService'
 
 export const expenseService = {
+  // Get all expenses (from cloud, with local fallback)
   getAll: async (companyId?: number | null): Promise<Expense[]> => {
-    let expenses = await getAll<Expense>(STORES.EXPENSES)
-    
-    // Filter by company_id if provided
-    if (companyId !== undefined && companyId !== null) {
-      expenses = expenses.filter(e => e.company_id === companyId)
-    } else if (companyId === null) {
-      expenses = []
-    }
-    
-    // Sort by date (newest first)
-    return expenses.sort((a, b) => 
-      new Date(b.expense_date).getTime() - new Date(a.expense_date).getTime()
-    )
+    return await cloudExpenseService.getAll(companyId)
   },
 
+  // Get expense by ID (from cloud, with local fallback)
   getById: async (id: number): Promise<Expense | undefined> => {
-    return await getById<Expense>(STORES.EXPENSES, id)
+    return await cloudExpenseService.getById(id)
   },
 
+  // Create expense (saves to cloud and local)
   create: async (expense: Omit<Expense, 'id' | 'created_at' | 'updated_at'>): Promise<Expense> => {
-    const newExpense: Expense = {
-      ...expense,
-      id: Date.now(),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
-    
-    await put(STORES.EXPENSES, newExpense)
-    return newExpense
+    return await cloudExpenseService.create(expense)
   },
 
+  // Update expense (updates cloud and local)
   update: async (id: number, expense: Partial<Expense>): Promise<Expense | null> => {
-    const existing = await getById<Expense>(STORES.EXPENSES, id)
-    if (!existing) return null
-
-    const updated: Expense = {
-      ...existing,
-      ...expense,
-      updated_at: new Date().toISOString(),
-    }
-    await put(STORES.EXPENSES, updated)
-    return updated
+    return await cloudExpenseService.update(id, expense)
   },
 
+  // Delete expense (deletes from cloud and local)
   delete: async (id: number): Promise<boolean> => {
-    try {
-      await deleteById(STORES.EXPENSES, id)
-      return true
-    } catch (error) {
-      return false
-    }
+    return await cloudExpenseService.delete(id)
   },
 
   getByDateRange: async (startDate: string, endDate: string, companyId?: number | null): Promise<Expense[]> => {
@@ -78,6 +49,7 @@ export const expenseService = {
     return expenses.reduce((sum, e) => sum + e.amount, 0)
   },
 }
+
 
 
 

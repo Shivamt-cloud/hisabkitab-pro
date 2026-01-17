@@ -3,9 +3,10 @@ import { useAuth } from '../context/AuthContext'
 import { useNavigate, useParams } from 'react-router-dom'
 import { productService, categoryService, Product, Category } from '../services/productService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
-import { ArrowLeft, Save, Package, RefreshCw, Calculator, Home } from 'lucide-react'
+import { ArrowLeft, Save, Package, RefreshCw, Calculator, Home, Upload, X, Image as ImageIcon } from 'lucide-react'
 import { validateBarcode } from '../utils/barcodeGenerator'
 import { calculateTax, GST_RATES, getSplitGSTRates, validateHSNCode } from '../utils/taxCalculator'
+import { compressImage, fileToBase64, validateImageFile } from '../utils/imageUtils'
 
 const ProductForm = () => {
   const { hasPermission, getCurrentCompanyId } = useAuth()
@@ -33,6 +34,8 @@ const ProductForm = () => {
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [showTaxBreakdown, setShowTaxBreakdown] = useState(false)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [uploadingImage, setUploadingImage] = useState(false)
 
   useEffect(() => {
     loadCategories()
@@ -51,8 +54,50 @@ const ProductForm = () => {
       const product = await productService.getById(parseInt(id), true)
       if (product) {
         setFormData(product)
+        if (product.image_url) {
+          setImagePreview(product.image_url)
+        }
       }
     }
+  }
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validate file
+    const validation = validateImageFile(file)
+    if (!validation.valid) {
+      setErrors({ ...errors, image: validation.error || 'Invalid image file' })
+      return
+    }
+
+    setUploadingImage(true)
+    setErrors({ ...errors, image: '' })
+
+    try {
+      // Compress image
+      const compressedBlob = await compressImage(file, 800, 800, 0.8)
+      const compressedFile = new File([compressedBlob], file.name, { type: 'image/jpeg' })
+      
+      // Convert to base64
+      const base64 = await fileToBase64(compressedFile)
+      
+      // Update form data and preview
+      setFormData({ ...formData, image_url: base64 })
+      setImagePreview(base64)
+    } catch (error) {
+      console.error('Error uploading image:', error)
+      setErrors({ ...errors, image: 'Failed to process image. Please try again.' })
+    } finally {
+      setUploadingImage(false)
+    }
+  }
+
+  const handleRemoveImage = () => {
+    setFormData({ ...formData, image_url: undefined })
+    setImagePreview(null)
+    setErrors({ ...errors, image: '' })
   }
 
   const handleGSTRateChange = (rate: number) => {
@@ -270,6 +315,51 @@ const ProductForm = () => {
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none"
                     placeholder="Enter product description"
                   />
+                </div>
+
+                {/* Product Image */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Product Image
+                  </label>
+                  {imagePreview ? (
+                    <div className="relative inline-block">
+                      <img
+                        src={imagePreview}
+                        alt="Product preview"
+                        className="w-48 h-48 object-cover rounded-xl border border-gray-300"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleRemoveImage}
+                        className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
+                        title="Remove image"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-gray-300 border-dashed rounded-xl cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
+                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                        <Upload className="w-10 h-10 mb-3 text-gray-400" />
+                        <p className="mb-2 text-sm text-gray-500">
+                          <span className="font-semibold">Click to upload</span> or drag and drop
+                        </p>
+                        <p className="text-xs text-gray-500">PNG, JPG, WEBP up to 5MB</p>
+                      </div>
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept="image/*"
+                        onChange={handleImageUpload}
+                        disabled={uploadingImage}
+                      />
+                    </label>
+                  )}
+                  {uploadingImage && (
+                    <p className="mt-2 text-sm text-blue-600">Uploading and compressing image...</p>
+                  )}
+                  {errors.image && <p className="mt-1 text-sm text-red-600">{errors.image}</p>}
                 </div>
               </div>
             </div>

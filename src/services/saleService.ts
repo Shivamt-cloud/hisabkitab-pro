@@ -1,4 +1,4 @@
-// Sale service using IndexedDB
+// Sale service using IndexedDB and Supabase
 // Handles sales and product archival
 
 import { Sale, SaleItem, Customer } from '../types/sale'
@@ -7,35 +7,19 @@ import { productService } from './productService'
 import { purchaseService } from './purchaseService'
 import { salesCommissionService } from './salespersonService'
 import { customerService } from './customerService'
+import { cloudSaleService } from './cloudSaleService'
 import { getAll, getById, put, deleteById, getByIndex, STORES } from '../database/db'
 
 // Sales
 export const saleService = {
+  // Get all sales (from cloud, with local fallback)
   getAll: async (includeArchived: boolean = false, companyId?: number | null): Promise<Sale[]> => {
-    // Always load all sales first to avoid index issues
-    let sales = await getAll<Sale>(STORES.SALES)
-    
-    // If companyId is provided, filter STRICTLY by company_id (no backward compatibility - data isolation is critical)
-    // Also explicitly exclude records with null/undefined company_id to prevent data leakage
-    if (companyId !== undefined && companyId !== null) {
-      sales = sales.filter(s => {
-        // Only include records that have the exact matching company_id
-        return s.company_id === companyId
-      })
-    } else if (companyId === null) {
-      // If companyId is explicitly null (user has no company), return empty array for data isolation
-      sales = []
-    }
-    // If companyId is undefined, return all (for admin users who haven't selected a company)
-    
-    if (!includeArchived) {
-      sales = sales.filter(s => !s.archived)
-    }
-    return sales
+    return await cloudSaleService.getAll(includeArchived, companyId)
   },
 
+  // Get sale by ID (from cloud, with local fallback)
   getById: async (id: number): Promise<Sale | undefined> => {
-    return await getById<Sale>(STORES.SALES, id)
+    return await cloudSaleService.getById(id)
   },
 
   create: async (sale: Omit<Sale, 'id' | 'created_at' | 'updated_at' | 'archived'>): Promise<Sale> => {
@@ -361,30 +345,19 @@ export const saleService = {
       }
     }
     
-    await put(STORES.SALES, newSale)
-    return newSale
+    // Use cloud service which handles both cloud and local storage
+    return await cloudSaleService.create(newSale)
   },
 
+  // Update sale (updates cloud and local)
   update: async (id: number, sale: Partial<Sale>): Promise<Sale | null> => {
-    const existing = await getById<Sale>(STORES.SALES, id)
-    if (!existing) return null
-
-    const updated: Sale = {
-      ...existing,
-      ...sale,
-      updated_at: new Date().toISOString(),
-    }
-    await put(STORES.SALES, updated)
-    return updated
+    // Use cloud service which handles both cloud and local storage
+    return await cloudSaleService.update(id, sale)
   },
 
+  // Delete sale (deletes from cloud and local)
   delete: async (id: number): Promise<boolean> => {
-    try {
-      await deleteById(STORES.SALES, id)
-      return true
-    } catch (error) {
-      return false
-    }
+    return await cloudSaleService.delete(id)
   },
 
   // Archive a sale (mark products as archived)

@@ -207,7 +207,24 @@ const Products = () => {
                         <tr key={product.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4">
                             <div className="flex items-center">
-                              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center text-white font-bold mr-3">
+                              {product.image_url ? (
+                                <img
+                                  src={product.image_url}
+                                  alt={product.name}
+                                  className="w-12 h-12 object-cover rounded-lg border border-gray-300 mr-3 flex-shrink-0"
+                                  onError={(e) => {
+                                    // Fallback to initial if image fails to load
+                                    const target = e.target as HTMLImageElement
+                                    target.style.display = 'none'
+                                    if (target.nextElementSibling) {
+                                      (target.nextElementSibling as HTMLElement).style.display = 'flex'
+                                    }
+                                  }}
+                                />
+                              ) : null}
+                              <div
+                                className={`w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center text-white font-bold mr-3 flex-shrink-0 ${product.image_url ? 'hidden' : ''}`}
+                              >
                                 {product.name.charAt(0).toUpperCase()}
                               </div>
                               <div>

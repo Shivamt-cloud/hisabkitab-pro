@@ -6,9 +6,10 @@ import { productService } from '../services/productService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { GSTPurchase, PurchaseItem, Supplier } from '../types/purchase'
 import { Product } from '../services/productService'
-import { ArrowLeft, Save, Plus, Trash2, Calculator, Package, Home, RefreshCw, Barcode } from 'lucide-react'
+import { ArrowLeft, Save, Plus, Trash2, Calculator, Package, Home, RefreshCw, Barcode, Camera } from 'lucide-react'
 import { calculateTax, GST_RATES } from '../utils/taxCalculator'
 import { generateBarcode, BarcodeFormat, validateBarcode, BARCODE_FORMAT_INFO } from '../utils/barcodeGenerator'
+import BarcodeScanner from '../components/BarcodeScanner'
 
 const GSTPurchaseForm = () => {
   const { hasPermission, user, getCurrentCompanyId } = useAuth()
@@ -29,6 +30,8 @@ const GSTPurchaseForm = () => {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [autoGenerateBarcode, setAutoGenerateBarcode] = useState(false)
   const [barcodeFormat, setBarcodeFormat] = useState<BarcodeFormat>('EAN13')
+  const [scannerOpen, setScannerOpen] = useState(false)
+  const [scanningItemIndex, setScanningItemIndex] = useState<number | null>(null)
 
   useEffect(() => {
     loadData()
@@ -618,6 +621,17 @@ const GSTPurchaseForm = () => {
                               placeholder="Scan/Enter"
                               readOnly={autoGenerateBarcode && item.product_id > 0}
                             />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setScanningItemIndex(index)
+                                setScannerOpen(true)
+                              }}
+                              className="px-3 py-2 bg-green-100 hover:bg-green-200 text-green-700 rounded text-sm font-medium"
+                              title="Scan barcode with camera"
+                            >
+                              <Camera className="w-4 h-4" />
+                            </button>
                             {!autoGenerateBarcode && item.product_id > 0 && (
                               <button
                                 type="button"
@@ -810,6 +824,22 @@ const GSTPurchaseForm = () => {
             </div>
           </form>
         </main>
+
+        {/* Barcode Scanner */}
+        <BarcodeScanner
+          isOpen={scannerOpen}
+          onScan={(barcode) => {
+            if (scanningItemIndex !== null) {
+              updateItem(scanningItemIndex, 'barcode', barcode)
+            }
+            setScannerOpen(false)
+            setScanningItemIndex(null)
+          }}
+          onClose={() => {
+            setScannerOpen(false)
+            setScanningItemIndex(null)
+          }}
+        />
       </div>
     </ProtectedRoute>
   )

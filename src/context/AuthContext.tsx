@@ -4,6 +4,10 @@ import { PermissionModule, PermissionAction } from '../types/permissions'
 import { userService } from '../services/userService'
 import { auditService } from '../services/auditService'
 import { permissionService } from '../services/permissionService'
+import { companyService } from '../services/companyService'
+import { cloudDeviceService } from '../services/cloudDeviceService'
+import { getTierPricing } from '../utils/tierPricing'
+import { getDeviceId, getDeviceType, getDeviceName } from '../utils/deviceId'
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
@@ -66,6 +70,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const foundUser = await userService.verifyLogin(email, password)
 
     if (foundUser) {
+      // Device registration and limit checking (only for non-admin users with company)
+      if (foundUser.role !== 'admin' && foundUser.company_id) {
+        try {
+          // Get company to check subscription tier
+          const company = await companyService.getById(foundUser.company_id)
+          if (company && company.subscription_tier) {
+            // Get device limit for the subscription tier
+            const tierPricing = getTierPricing(company.subscription_tier)
+            const deviceLimit = tierPricing.deviceLimit
+            
+            // Get current device ID
+            const deviceId = getDeviceId()
+            
+            // Check if device is already registered
+            const isDeviceRegistered = await cloudDeviceService.isDeviceRegistered(foundUser.id, deviceId)
+            
+            if (!isDeviceRegistered) {
+              // Device is not registered, check if we can register it
+              if (deviceLimit !== 'unlimited') {
+                // Count current active devices for the company
+                const currentDeviceCount = await cloudDeviceService.getActiveDeviceCountForCompany(foundUser.company_id)
+                
+                // Check if device limit is reached
+                if (currentDeviceCount >= deviceLimit) {
+                  console.error(`Device limit reached for company ${foundUser.company_id}. Current: ${currentDeviceCount}, Limit: ${deviceLimit}`)
+                  setIsLoading(false)
+                  // Block login - device limit exceeded
+                  return false
+                }
+              }
+              
+              // Register the device
+              const deviceType = getDeviceType()
+              const deviceName = getDeviceName()
+              await cloudDeviceService.registerDevice(foundUser.id, deviceId, {
+                device_name: deviceName,
+                device_type: deviceType,
+                browser_info: navigator.userAgent,
+                user_agent: navigator.userAgent,
+              })
+              console.log(`Device registered for user ${foundUser.id}: ${deviceName}`)
+            } else {
+              // Device is already registered, update last accessed timestamp
+              await cloudDeviceService.updateLastAccessed(foundUser.id, deviceId)
+            }
+          }
+        } catch (error) {
+          console.error('Error during device registration:', error)
+          // On error, allow login to proceed (fail open for now)
+          // In production, you might want to be more strict
+        }
+      }
+      
       setUser(foundUser)
       localStorage.setItem('hisabkitab_user', JSON.stringify(foundUser))
       

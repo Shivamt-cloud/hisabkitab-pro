@@ -381,7 +381,24 @@ function convertPurchaseData(rows: any[][], headers: string[]): {
       const hsnCode = hsnCodeIdx !== null ? cleanString(row[hsnCodeIdx]) : ''
       const description = descriptionIdx !== null ? cleanString(row[descriptionIdx]) : hsnCode || 'Unknown Product'
       const article = articleIdx !== null ? cleanString(row[articleIdx]) : ''
-      const barcode = barcodeIdx !== null ? cleanString(row[barcodeIdx]) : ''
+      
+      // CRITICAL: Handle barcode extraction properly - Excel may read barcodes as numbers
+      // Preserve leading zeros and handle both string and numeric barcodes
+      let barcode = ''
+      if (barcodeIdx !== null && row[barcodeIdx] !== null && row[barcodeIdx] !== undefined) {
+        const barcodeValue = row[barcodeIdx]
+        // If it's a number, convert to string without scientific notation and preserve as-is
+        if (typeof barcodeValue === 'number') {
+          // For large numbers (barcodes), convert to string without scientific notation
+          barcode = String(Math.floor(barcodeValue)) // Use Math.floor to avoid decimal places
+        } else {
+          barcode = String(barcodeValue).trim()
+        }
+        // Remove empty strings
+        if (barcode === '' || barcode === 'null' || barcode === 'undefined') {
+          barcode = ''
+        }
+      }
       const gstRate = gstRateIdx !== null ? cleanNumber(row[gstRateIdx]) : 0
       const quantity = quantityIdx !== null ? cleanInt(row[quantityIdx]) : 0
       const unit = unitIdx !== null ? cleanString(row[unitIdx]) : 'pcs'

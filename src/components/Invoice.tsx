@@ -1,5 +1,7 @@
+import { useRef } from 'react'
 import { InvoiceData } from '../types/invoice'
 import { Printer, Download, X, Share2, Plus } from 'lucide-react'
+import { exportInvoiceToPDF, exportHTMLToPDF, printReceipt } from '../utils/exportUtils'
 
 interface InvoiceProps {
   invoiceData: InvoiceData
@@ -9,8 +11,35 @@ interface InvoiceProps {
 }
 
 const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: InvoiceProps) => {
+  const invoiceRef = useRef<HTMLDivElement>(null)
+
   const handlePrint = () => {
     window.print()
+  }
+
+  const handleDownloadPDF = async () => {
+    try {
+      if (invoiceRef.current) {
+        // Add ID to invoice container for PDF export
+        const tempId = `invoice-${Date.now()}`
+        invoiceRef.current.setAttribute('id', tempId)
+        
+        await exportHTMLToPDF(tempId, `Invoice_${invoiceData.invoice_number}`, {
+          format: 'a4',
+          orientation: 'portrait',
+          margin: 10,
+        })
+        
+        invoiceRef.current.removeAttribute('id')
+      } else {
+        // Fallback to simplified PDF export
+        exportInvoiceToPDF(invoiceData, `Invoice_${invoiceData.invoice_number}`)
+      }
+    } catch (error) {
+      console.error('Error generating PDF:', error)
+      // Fallback to simplified PDF export
+      exportInvoiceToPDF(invoiceData, `Invoice_${invoiceData.invoice_number}`)
+    }
   }
 
   const handleShareWhatsApp = () => {
@@ -60,169 +89,11 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
   }
 
   const handleDownload = () => {
-    // Create a printable version
-    const printWindow = window.open('', '_blank')
-    if (!printWindow) return
+    handleDownloadPDF()
+  }
 
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Invoice ${invoiceData.invoice_number}</title>
-          <style>
-            @media print {
-              @page {
-                size: A4;
-                margin: 10mm;
-              }
-              body {
-                margin: 0;
-                padding: 0;
-              }
-              .no-print {
-                display: none;
-              }
-            }
-            body {
-              font-family: 'Arial', sans-serif;
-              margin: 0;
-              padding: 20px;
-              color: #333;
-            }
-            .invoice-container {
-              max-width: 800px;
-              margin: 0 auto;
-              background: white;
-              padding: 40px;
-            }
-            .invoice-header {
-              display: flex;
-              justify-content: space-between;
-              margin-bottom: 40px;
-              border-bottom: 2px solid #e5e7eb;
-              padding-bottom: 20px;
-            }
-            .company-info h1 {
-              margin: 0;
-              font-size: 28px;
-              color: #1f2937;
-            }
-            .company-info p {
-              margin: 5px 0;
-              color: #6b7280;
-              font-size: 14px;
-            }
-            .invoice-details {
-              text-align: right;
-            }
-            .invoice-details h2 {
-              margin: 0;
-              font-size: 24px;
-              color: #1f2937;
-            }
-            .invoice-details p {
-              margin: 5px 0;
-              color: #6b7280;
-              font-size: 14px;
-            }
-            .billing-section {
-              display: flex;
-              justify-content: space-between;
-              margin-bottom: 30px;
-            }
-            .billing-box {
-              flex: 1;
-            }
-            .billing-box h3 {
-              margin: 0 0 10px 0;
-              font-size: 14px;
-              color: #9ca3af;
-              text-transform: uppercase;
-            }
-            .billing-box p {
-              margin: 5px 0;
-              color: #1f2937;
-              font-size: 14px;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-bottom: 30px;
-            }
-            thead {
-              background: #f3f4f6;
-            }
-            th {
-              padding: 12px;
-              text-align: left;
-              font-size: 12px;
-              color: #6b7280;
-              text-transform: uppercase;
-              border-bottom: 2px solid #e5e7eb;
-            }
-            td {
-              padding: 12px;
-              border-bottom: 1px solid #e5e7eb;
-              color: #1f2937;
-            }
-            .text-right {
-              text-align: right;
-            }
-            .totals {
-              margin-left: auto;
-              width: 300px;
-            }
-            .totals-row {
-              display: flex;
-              justify-content: space-between;
-              padding: 8px 0;
-              font-size: 14px;
-            }
-            .totals-row.grand-total {
-              font-size: 18px;
-              font-weight: bold;
-              border-top: 2px solid #1f2937;
-              padding-top: 12px;
-              margin-top: 8px;
-            }
-            .footer {
-              margin-top: 40px;
-              padding-top: 20px;
-              border-top: 1px solid #e5e7eb;
-              font-size: 12px;
-              color: #6b7280;
-              text-align: center;
-            }
-            .terms-section {
-              margin-top: 30px;
-              padding-top: 20px;
-              border-top: 1px solid #e5e7eb;
-              font-size: 11px;
-              color: #6b7280;
-            }
-            .terms-section h4 {
-              font-size: 12px;
-              color: #1f2937;
-              margin-bottom: 8px;
-            }
-            .terms-section ul {
-              margin: 5px 0;
-              padding-left: 20px;
-            }
-            .terms-section li {
-              margin: 3px 0;
-            }
-          </style>
-        </head>
-        <body>
-          ${generateInvoiceHTML(invoiceData)}
-        </body>
-      </html>
-    `)
-    printWindow.document.close()
-    setTimeout(() => {
-      printWindow.print()
-    }, 250)
+  const handlePrintReceipt = () => {
+    printReceipt(invoiceData)
   }
 
   return (
@@ -256,9 +127,16 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
             <Share2 className="w-5 h-5 text-green-600" />
           </button>
           <button
+            onClick={handlePrintReceipt}
+            className="p-2 hover:bg-purple-50 rounded transition-colors"
+            title="Print Receipt (Thermal)"
+          >
+            <Receipt className="w-5 h-5 text-purple-600" />
+          </button>
+          <button
             onClick={handlePrint}
             className="p-2 hover:bg-gray-100 rounded transition-colors"
-            title="Print"
+            title="Print Invoice"
           >
             <Printer className="w-5 h-5 text-gray-600" />
           </button>
@@ -273,7 +151,7 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
       )}
 
       {/* Invoice Content */}
-      <div className="invoice-container bg-white shadow-xl rounded-lg p-8 max-w-4xl mx-auto">
+      <div ref={invoiceRef} className="invoice-container bg-white shadow-xl rounded-lg p-8 max-w-4xl mx-auto">
         {/* Header */}
         <div className="invoice-header border-b-2 border-gray-200 pb-6 mb-8">
           <div className="company-info">

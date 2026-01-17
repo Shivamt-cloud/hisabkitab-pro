@@ -1,6 +1,7 @@
-// Product service using IndexedDB
+// Product service using IndexedDB and Supabase
 
 import { getAll, getById, put, deleteById, getByIndex, STORES } from '../database/db'
+import { cloudProductService } from './cloudProductService'
 
 export interface Category {
   id: number
@@ -132,52 +133,16 @@ export const categoryService = {
 
 // Products
 export const productService = {
+  // Get all products (from cloud, with local fallback)
   getAll: async (includeArchived: boolean = false, companyId?: number | null): Promise<Product[]> => {
     await initializeDefaultCategories()
-    // Always load all products first to avoid index issues
-    let products = await getAll<Product>(STORES.PRODUCTS)
-    
-    // If companyId is provided, filter STRICTLY by company_id (no backward compatibility - data isolation is critical)
-    // Also explicitly exclude records with null/undefined company_id to prevent data leakage
-    if (companyId !== undefined && companyId !== null) {
-      products = products.filter(p => {
-        // Only include records that have the exact matching company_id
-        return p.company_id === companyId
-      })
-    } else if (companyId === null) {
-      // If companyId is explicitly null (user has no company), return empty array for data isolation
-      products = []
-    }
-    // If companyId is undefined, return all (for admin users who haven't selected a company)
-    
-    // Filter by status if needed
-    if (!includeArchived) {
-      products = products.filter(p => p.status === 'active')
-    }
-    
-    // Join with categories
-    const categories = await categoryService.getAll()
-    return products.map(p => ({
-      ...p,
-      category_name: p.category_id ? categories.find(c => c.id === p.category_id)?.name : undefined,
-      status: p.status || 'active',
-      barcode_status: p.barcode_status || (p.barcode ? 'active' : 'inactive'),
-    }))
+    // Use cloud service which handles fallback to local
+    return await cloudProductService.getAll(includeArchived, companyId)
   },
 
+  // Get product by ID (from cloud, with local fallback)
   getById: async (id: number, includeArchived: boolean = false): Promise<Product | undefined> => {
-    const product = await getById<Product>(STORES.PRODUCTS, id)
-    if (!product) return undefined
-    if (!includeArchived && product.status !== 'active') return undefined
-    
-    // Join with category
-    const categories = await categoryService.getAll()
-    return {
-      ...product,
-      category_name: product.category_id ? categories.find(c => c.id === product.category_id)?.name : undefined,
-      status: product.status || 'active',
-      barcode_status: product.barcode_status || (product.barcode ? 'active' : 'inactive'),
-    }
+    return await cloudProductService.getById(id, includeArchived)
   },
 
   getByCategory: async (categoryId: number): Promise<Product[]> => {
@@ -227,43 +192,30 @@ export const productService = {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
-    await put(STORES.PRODUCTS, newProduct)
-    
-    // Return with category name
-    const categories = await categoryService.getAll()
-    return {
-      ...newProduct,
-      category_name: newProduct.category_id ? categories.find(c => c.id === newProduct.category_id)?.name : undefined,
-    }
+    // Use cloud service which handles both cloud and local storage
+    return await cloudProductService.create({
+      ...product,
+      sku: sku,
+      stock_quantity: product.stock_quantity || 0,
+      unit: product.unit || 'pcs',
+      is_active: product.is_active !== undefined ? product.is_active : true,
+      gst_rate: product.gst_rate || 0,
+      tax_type: product.tax_type || 'exclusive',
+      status: 'active',
+      barcode_status: product.barcode ? 'active' : 'inactive',
+    })
   },
 
+  // Update product (updates cloud and local)
   update: async (id: number, product: Partial<Product>): Promise<Product | null> => {
-    const existing = await getById<Product>(STORES.PRODUCTS, id)
-    if (!existing) return null
-
     const { category_name, ...updateData } = product
-    const updated: Product = {
-      ...existing,
-      ...updateData,
-      updated_at: new Date().toISOString(),
-    }
-    await put(STORES.PRODUCTS, updated)
-    
-    // Return with category name
-    const categories = await categoryService.getAll()
-    return {
-      ...updated,
-      category_name: updated.category_id ? categories.find(c => c.id === updated.category_id)?.name : undefined,
-    }
+    // Use cloud service which handles both cloud and local storage
+    return await cloudProductService.update(id, updateData)
   },
 
+  // Delete product (deletes from cloud and local)
   delete: async (id: number): Promise<boolean> => {
-    try {
-      await deleteById(STORES.PRODUCTS, id)
-      return true
-    } catch (error) {
-      return false
-    }
+    return await cloudProductService.delete(id)
   },
 
   updateStock: async (id: number, quantity: number, type: 'add' | 'subtract' | 'set'): Promise<Product | null> => {

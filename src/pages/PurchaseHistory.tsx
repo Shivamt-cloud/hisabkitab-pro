@@ -5,6 +5,7 @@ import { purchaseService } from '../services/purchaseService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Purchase, PurchaseType } from '../types/purchase'
 import { Plus, Eye, Edit, Filter, FileText, TrendingUp, Home, FileSpreadsheet, Search, X, Trash2 } from 'lucide-react'
+import { exportToExcel } from '../utils/exportUtils'
 
 type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
 
@@ -359,20 +360,8 @@ const PurchaseHistory = () => {
       ]
     })
 
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
-    ].join('\n')
-
-    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    const url = URL.createObjectURL(blob)
-    link.setAttribute('href', url)
-    link.setAttribute('download', `purchase_history_${timePeriod}_${new Date().toISOString().split('T')[0]}.csv`)
-    link.style.visibility = 'hidden'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+    const filename = `purchase_history_${timePeriod}_${new Date().toISOString().split('T')[0]}`
+    exportToExcel(rows, headers, filename, 'Purchase History')
   }
 
   const exportToPDF = () => {

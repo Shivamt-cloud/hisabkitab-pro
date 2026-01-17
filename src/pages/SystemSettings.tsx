@@ -10,9 +10,14 @@ import { CompanySettings, InvoiceSettings, TaxSettings, GeneralSettings } from '
 import { Company } from '../types/company'
 import { UserRole } from '../types/auth'
 import { PermissionModule, PermissionAction, PERMISSION_MODULES, ModulePermission } from '../types/permissions'
-import { Home, Save, Building2, FileText, Percent, Settings, RotateCcw, Download, Upload, Plus, Edit, Trash2, Users, Eye, EyeOff, X, Shield, UserCog, UserCheck, Lock, Unlock } from 'lucide-react'
+import { Home, Save, Building2, FileText, Percent, Settings, RotateCcw, Download, Upload, Plus, Edit, Trash2, Users, Eye, EyeOff, X, Shield, UserCog, UserCheck, Lock, Unlock, UserPlus, Mail, CheckCircle, Clock, AlertCircle, Smartphone } from 'lucide-react'
+import { registrationRequestService, RegistrationRequest } from '../services/registrationRequestService'
+import { generateMailtoLink, getEmailTemplateForStatus } from '../utils/registrationEmailTemplates'
+import { cloudDeviceService } from '../services/cloudDeviceService'
+import { Device } from '../types/device'
+import { getMaxUsersForPlan, canCreateUser } from '../utils/planUserLimits'
 
-type SettingsTab = 'companies' | 'users' | 'invoice' | 'tax' | 'general'
+type SettingsTab = 'companies' | 'users' | 'registration-requests' | 'devices' | 'invoice' | 'tax' | 'general'
 
 const SystemSettings = () => {
   const { user, getCurrentCompanyId, switchCompany } = useAuth()
@@ -65,6 +70,16 @@ const SystemSettings = () => {
   const [autoGenerateEmail, setAutoGenerateEmail] = useState(true)
   const [autoGenerateUserCode, setAutoGenerateUserCode] = useState(true)
 
+  // Registration Requests management states
+  const [registrationRequests, setRegistrationRequests] = useState<RegistrationRequest[]>([])
+  const [selectedRegistrationRequest, setSelectedRegistrationRequest] = useState<RegistrationRequest | null>(null)
+  const [statusUpdates, setStatusUpdates] = useState<Record<number, RegistrationRequest['status']>>({})
+
+  // Device management states
+  const [selectedUserForDevices, setSelectedUserForDevices] = useState<string | null>(null)
+  const [userDevices, setUserDevices] = useState<Device[]>([])
+  const [loadingDevices, setLoadingDevices] = useState(false)
+
   // Settings for currently selected company
   const [selectedCompanyForSettings, setSelectedCompanyForSettings] = useState<number | null>(selectedCompanyId)
   const [invoice, setInvoice] = useState<InvoiceSettings>({
@@ -101,11 +116,19 @@ const SystemSettings = () => {
   useEffect(() => {
     loadCompanies()
     loadUsers()
+    loadRegistrationRequests()
     // Load settings when company is selected
     if (selectedCompanyForSettings) {
       loadCompanySettings(selectedCompanyForSettings)
     }
   }, [])
+
+  useEffect(() => {
+    // Reload registration requests when tab is active
+    if (activeTab === 'registration-requests') {
+      loadRegistrationRequests()
+    }
+  }, [activeTab])
 
   // Auto-generate email (username@hisabkitab.com) when name is provided
   useEffect(() => {
@@ -199,6 +222,48 @@ const SystemSettings = () => {
     }
   }
 
+  const loadRegistrationRequests = async () => {
+    try {
+      if (user?.role === 'admin') {
+        const requests = await registrationRequestService.getAll()
+        setRegistrationRequests(requests)
+      }
+    } catch (error) {
+      console.error('Error loading registration requests:', error)
+    }
+  }
+
+  const loadUserDevices = async (userId: string) => {
+    setLoadingDevices(true)
+    try {
+      const devices = await cloudDeviceService.getUserDevices(userId)
+      setUserDevices(devices)
+    } catch (error) {
+      console.error('Error loading user devices:', error)
+      alert('Failed to load devices')
+    } finally {
+      setLoadingDevices(false)
+    }
+  }
+
+  const handleRemoveDevice = async (userId: string, deviceId: string) => {
+    if (!window.confirm('Are you sure you want to remove this device? The user will need to register it again to access from this device.')) {
+      return
+    }
+
+    try {
+      await cloudDeviceService.removeDevice(userId, deviceId)
+      alert('Device removed successfully')
+      // Reload devices
+      if (selectedUserForDevices) {
+        loadUserDevices(selectedUserForDevices)
+      }
+    } catch (error) {
+      console.error('Error removing device:', error)
+      alert('Failed to remove device')
+    }
+  }
+
   const handleCompanySubmit = async (e: FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -208,10 +273,11 @@ const SystemSettings = () => {
         alert('Company updated successfully!')
       } else {
         const { custom_unique_code, ...companyDataToCreate } = companyFormData
-        await companyService.create({ 
+        const newCompany = await companyService.create({ 
           ...companyDataToCreate,
           unique_code: custom_unique_code || undefined
         } as Omit<Company, 'id' | 'created_at' | 'updated_at' | 'unique_code'> & { unique_code?: string })
+        
         alert('Company created successfully!')
       }
       setShowCompanyForm(false)
@@ -233,9 +299,13 @@ const SystemSettings = () => {
         is_active: true,
         custom_unique_code: '',
       })
-      loadCompanies()
+      
+      // Reload companies to refresh the list
+      await loadCompanies()
     } catch (error: any) {
-      alert(error.message || 'Failed to save company')
+      console.error('Error saving company:', error)
+      const errorMessage = error?.message || error?.error?.message || 'Failed to save company'
+      alert(`Error: ${errorMessage}`)
     } finally {
       setLoading(false)
     }
@@ -337,6 +407,27 @@ const SystemSettings = () => {
           userData.company_id = userFormData.company_id
         }
         
+        // Check user limit if company is specified (not for admin users)
+        if (userData.company_id && userFormData.role !== 'admin') {
+          const company = companies.find(c => c.id === userData.company_id)
+          if (company) {
+            const subscriptionTier = company.subscription_tier || 'basic'
+            const maxUsers = company.max_users !== undefined ? company.max_users : (getMaxUsersForPlan(subscriptionTier) === 'unlimited' ? undefined : getMaxUsersForPlan(subscriptionTier) as number)
+            
+            if (maxUsers !== undefined) {
+              // Count current users for this company
+              const companyUsers = allUsers.filter(u => u.company_id === company.id)
+              const currentUserCount = companyUsers.length
+              
+              if (!canCreateUser(currentUserCount, maxUsers)) {
+                alert(`User limit reached for this company. The ${subscriptionTier} plan allows a maximum of ${maxUsers} users. Current users: ${currentUserCount}. Please upgrade the plan to add more users.`)
+                setLoading(false)
+                return
+              }
+            }
+          }
+        }
+        
         const newUser = await userService.create(userData as Omit<UserWithPassword, 'id'>)
         userId = newUser.id
         alert('User created successfully!')
@@ -420,6 +511,151 @@ const SystemSettings = () => {
         alert('Failed to delete user')
       }
     }
+  }
+
+  // Helper function to get next allowed statuses based on current status
+  const getNextAllowedStatuses = (currentStatus: RegistrationRequest['status']): RegistrationRequest['status'][] => {
+    const statusFlow: Record<RegistrationRequest['status'], RegistrationRequest['status'][]> = {
+      pending: ['under_review', 'activation_rejected'],
+      under_review: ['query_initiated', 'activation_rejected'],
+      query_initiated: ['query_completed', 'activation_rejected'],
+      query_completed: ['registration_accepted', 'activation_rejected'],
+      registration_accepted: ['agreement_pending', 'activation_rejected'],
+      agreement_pending: ['agreement_accepted', 'activation_rejected'],
+      agreement_accepted: ['payment_pending', 'activation_rejected'],
+      payment_pending: ['payment_completed', 'activation_rejected'],
+      payment_completed: ['activation_completed', 'activation_rejected'],
+      activation_completed: [], // Final status
+      activation_rejected: [], // Final status
+    }
+    return statusFlow[currentStatus] || []
+  }
+
+  // Helper function to calculate flags based on status
+  const calculateFlagsFromStatus = (status: RegistrationRequest['status']) => {
+    const flags = {
+      communication_initiated: false,
+      registration_done: false,
+      agreement_done: false,
+      payment_done: false,
+      company_activated: false,
+      company_rejected: false,
+    }
+
+    // Communication Initiated: activated from query_initiated onwards
+    if (['query_initiated', 'query_completed', 'registration_accepted', 'agreement_pending', 'agreement_accepted', 'payment_pending', 'payment_completed', 'activation_completed', 'activation_rejected'].includes(status)) {
+      flags.communication_initiated = true
+    }
+
+    // Registration Done: activated from registration_accepted onwards
+    if (['registration_accepted', 'agreement_pending', 'agreement_accepted', 'payment_pending', 'payment_completed', 'activation_completed'].includes(status)) {
+      flags.registration_done = true
+    }
+
+    // Agreement Done: activated from agreement_accepted onwards
+    if (['agreement_accepted', 'payment_pending', 'payment_completed', 'activation_completed'].includes(status)) {
+      flags.agreement_done = true
+    }
+
+    // Payment Done: activated from payment_completed onwards
+    if (['payment_completed', 'activation_completed'].includes(status)) {
+      flags.payment_done = true
+    }
+
+    // Company Activated: activated when status is activation_completed
+    if (status === 'activation_completed') {
+      flags.company_activated = true
+    }
+
+    // Company Rejected: activated when status is activation_rejected
+    if (status === 'activation_rejected') {
+      flags.company_rejected = true
+    }
+
+    return flags
+  }
+
+  // Registration Requests handlers
+  const handleStatusChange = (id: number, newStatus: RegistrationRequest['status']) => {
+    setStatusUpdates(prev => ({ ...prev, [id]: newStatus }))
+  }
+
+  const handleSubmitStatusUpdate = async (id: number, currentStatus: RegistrationRequest['status']) => {
+    const newStatus = statusUpdates[id]
+    if (!newStatus || newStatus === currentStatus) {
+      return // No change
+    }
+
+    try {
+      // Calculate flags based on new status
+      const flags = calculateFlagsFromStatus(newStatus)
+
+      // Update status and flags together (atomic update)
+      const updatedRequest = await registrationRequestService.updateStatusAndFlags(id, newStatus, flags)
+
+      if (updatedRequest) {
+        // Update local state directly with the updated request to avoid race conditions
+        setRegistrationRequests(prev => 
+          prev.map(req => req.id === id ? updatedRequest : req)
+        )
+      } else {
+        // If update failed, reload from database
+        await loadRegistrationRequests()
+      }
+
+      // Clear the status update from local state
+      setStatusUpdates(prev => {
+        const updated = { ...prev }
+        delete updated[id]
+        return updated
+      })
+
+      alert('Status updated successfully!')
+    } catch (error) {
+      console.error('Error updating status:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+      alert('Failed to update status: ' + errorMessage)
+      // Reload to show current state
+      await loadRegistrationRequests()
+    }
+  }
+
+  const handlePopulateFromRegistrationRequest = (request: RegistrationRequest) => {
+    // Get max users based on subscription tier
+    const subscriptionTier = request.subscription_tier || 'basic'
+    const maxUsers = getMaxUsersForPlan(subscriptionTier)
+    
+    // Populate company form
+    setCompanyFormData({
+      name: request.business_name,
+      email: request.email,
+      phone: request.phone,
+      address: request.address,
+      city: request.city,
+      state: request.state,
+      pincode: request.pincode,
+      country: request.country,
+      gstin: request.gstin || '',
+      website: request.website || '',
+      subscription_tier: subscriptionTier,
+      max_users: maxUsers === 'unlimited' ? undefined : maxUsers,
+      subscription_status: 'active',
+      is_active: true,
+    })
+    setEditingCompany(null)
+    setShowCompanyForm(true)
+    setActiveTab('companies')
+
+    // Populate user form
+    setUserFormData({
+      name: request.name,
+      email: request.email,
+      password: request.password || '',
+      role: 'staff',
+      company_id: undefined, // Will be set after company is created
+    })
+    setAutoGenerateEmail(false)
+    setAutoGenerateUserCode(false)
   }
 
   useEffect(() => {
@@ -621,6 +857,30 @@ const SystemSettings = () => {
                     <Users className="w-4 h-4" />
                     Users
                     {activeTab === 'users' && (
+                      <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('registration-requests')}
+                    className={`px-6 py-3 font-semibold text-sm transition-colors relative flex items-center gap-2 ${
+                      activeTab === 'registration-requests' ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    Registration Requests
+                    {activeTab === 'registration-requests' && (
+                      <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('devices')}
+                    className={`px-6 py-3 font-semibold text-sm transition-colors relative flex items-center gap-2 ${
+                      activeTab === 'devices' ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <Smartphone className="w-4 h-4" />
+                    Devices
+                    {activeTab === 'devices' && (
                       <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
                     )}
                   </button>
@@ -1503,6 +1763,314 @@ const SystemSettings = () => {
                     <div className="text-center py-8 text-gray-500">
                       <Users className="w-12 h-12 mx-auto mb-2 text-gray-400" />
                       <p>No users found{selectedCompanyId ? ' for this company' : ''}.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Registration Requests Management */}
+            {activeTab === 'registration-requests' && user?.role === 'admin' && (
+              <div className="space-y-6">
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-gray-900">Registration Requests</h3>
+                  </div>
+
+                  <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Name</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Email</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Business</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Status</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Flags</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date</th>
+                          <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {registrationRequests.map((req) => {
+                          const getStatusBadge = (status: RegistrationRequest['status']) => {
+                            const statusConfig = {
+                              pending: { bg: 'bg-gray-100', text: 'text-gray-800', label: 'Pending' },
+                              under_review: { bg: 'bg-yellow-100', text: 'text-yellow-800', label: 'Under Review' },
+                              query_initiated: { bg: 'bg-blue-100', text: 'text-blue-800', label: 'Query Initiated' },
+                              query_completed: { bg: 'bg-cyan-100', text: 'text-cyan-800', label: 'Query Completed' },
+                              registration_accepted: { bg: 'bg-indigo-100', text: 'text-indigo-800', label: 'Registration Accepted' },
+                              agreement_pending: { bg: 'bg-orange-100', text: 'text-orange-800', label: 'Agreement Pending' },
+                              agreement_accepted: { bg: 'bg-amber-100', text: 'text-amber-800', label: 'Agreement Accepted' },
+                              payment_pending: { bg: 'bg-purple-100', text: 'text-purple-800', label: 'Payment Pending' },
+                              payment_completed: { bg: 'bg-pink-100', text: 'text-pink-800', label: 'Payment Completed' },
+                              activation_completed: { bg: 'bg-green-100', text: 'text-green-800', label: 'Activation Completed' },
+                              activation_rejected: { bg: 'bg-red-100', text: 'text-red-800', label: 'Activation Rejected' },
+                            }
+                            const config = statusConfig[status] || statusConfig.pending
+                            return (
+                              <span className={`px-2 py-1 ${config.bg} ${config.text} rounded-full text-xs font-semibold`}>
+                                {config.label}
+                              </span>
+                            )
+                          }
+                          return (
+                            <tr key={req.id} className="hover:bg-gray-50">
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="text-sm font-medium text-gray-900">{req.name}</div>
+                                <div className="text-xs text-gray-500">{req.registration_method === 'google' ? 'Google Sign-in' : 'Direct Registration'}</div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="text-sm text-gray-900">{req.email}</div>
+                                <div className="text-xs text-gray-500">{req.phone}</div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="text-sm font-medium text-gray-900">{req.business_name}</div>
+                                <div className="text-xs text-gray-500">{req.business_type}</div>
+                                <div className="text-xs text-gray-500">{req.city}, {req.state}</div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                {getStatusBadge(req.status)}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="flex flex-col gap-1">
+                                  <div className="flex items-center gap-1 text-xs">
+                                    {req.communication_initiated ? (
+                                      <CheckCircle className="w-4 h-4 text-green-600" />
+                                    ) : (
+                                      <Clock className="w-4 h-4 text-gray-400" />
+                                    )}
+                                    <span className={req.communication_initiated ? 'text-green-600 font-semibold' : 'text-gray-600'}>Communication Initiated</span>
+                                  </div>
+                                  <div className="flex items-center gap-1 text-xs">
+                                    {req.registration_done ? (
+                                      <CheckCircle className="w-4 h-4 text-green-600" />
+                                    ) : (
+                                      <Clock className="w-4 h-4 text-gray-400" />
+                                    )}
+                                    <span className={req.registration_done ? 'text-green-600 font-semibold' : 'text-gray-600'}>Registration Done</span>
+                                  </div>
+                                  <div className="flex items-center gap-1 text-xs">
+                                    {req.agreement_done ? (
+                                      <CheckCircle className="w-4 h-4 text-green-600" />
+                                    ) : (
+                                      <Clock className="w-4 h-4 text-gray-400" />
+                                    )}
+                                    <span className={req.agreement_done ? 'text-green-600 font-semibold' : 'text-gray-600'}>Agreement Done</span>
+                                  </div>
+                                  <div className="flex items-center gap-1 text-xs">
+                                    {req.payment_done ? (
+                                      <CheckCircle className="w-4 h-4 text-green-600" />
+                                    ) : (
+                                      <Clock className="w-4 h-4 text-gray-400" />
+                                    )}
+                                    <span className={req.payment_done ? 'text-green-600 font-semibold' : 'text-gray-600'}>Payment Done</span>
+                                  </div>
+                                  <div className="flex items-center gap-1 text-xs">
+                                    {req.company_activated ? (
+                                      <CheckCircle className="w-4 h-4 text-green-600" />
+                                    ) : (
+                                      <Clock className="w-4 h-4 text-gray-400" />
+                                    )}
+                                    <span className={req.company_activated ? 'text-green-600 font-semibold' : 'text-gray-600'}>Company Activated</span>
+                                  </div>
+                                  <div className="flex items-center gap-1 text-xs">
+                                    {req.company_rejected ? (
+                                      <CheckCircle className="w-4 h-4 text-red-600" />
+                                    ) : (
+                                      <Clock className="w-4 h-4 text-gray-400" />
+                                    )}
+                                    <span className={req.company_rejected ? 'text-red-600 font-semibold' : 'text-gray-600'}>Company Rejected</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {new Date(req.created_at).toLocaleDateString()}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <div className="flex items-center justify-end gap-2">
+                                  <select
+                                    value={statusUpdates[req.id] || req.status}
+                                    onChange={(e) => handleStatusChange(req.id, e.target.value as RegistrationRequest['status'])}
+                                    className="text-xs border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                  >
+                                    {(() => {
+                                      const statusLabels: Record<RegistrationRequest['status'], string> = {
+                                        pending: 'Pending',
+                                        under_review: 'Under Review',
+                                        query_initiated: 'Query Initiated',
+                                        query_completed: 'Query Completed',
+                                        registration_accepted: 'Registration Accepted',
+                                        agreement_pending: 'Agreement Pending',
+                                        agreement_accepted: 'Agreement Accepted',
+                                        payment_pending: 'Payment Pending',
+                                        payment_completed: 'Payment Completed',
+                                        activation_completed: 'Activation Completed',
+                                        activation_rejected: 'Activation Rejected',
+                                      }
+                                      const allStatuses: RegistrationRequest['status'][] = ['pending', 'under_review', 'query_initiated', 'query_completed', 'registration_accepted', 'agreement_pending', 'agreement_accepted', 'payment_pending', 'payment_completed', 'activation_completed', 'activation_rejected']
+                                      return allStatuses.map((status) => (
+                                        <option key={status} value={status}>
+                                          {statusLabels[status]}
+                                        </option>
+                                      ))
+                                    })()}
+                                  </select>
+                                  {(statusUpdates[req.id] && statusUpdates[req.id] !== req.status) && (
+                                    <button
+                                      onClick={() => handleSubmitStatusUpdate(req.id, req.status)}
+                                      className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-semibold hover:bg-blue-700 transition-colors flex items-center gap-1"
+                                      title="Submit Status Update"
+                                    >
+                                      <Save className="w-3 h-3" />
+                                      Submit
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => window.open(generateMailtoLink(req), '_blank')}
+                                    className="text-blue-600 hover:text-blue-900 p-1 hover:bg-blue-50 rounded transition-colors"
+                                    title="Send Email"
+                                  >
+                                    <Mail className="w-4 h-4" />
+                                  </button>
+                                  {req.status === 'activation_completed' && req.company_activated && (
+                                    <button
+                                      onClick={() => handlePopulateFromRegistrationRequest(req)}
+                                      className="text-green-600 hover:text-green-900 p-1 hover:bg-green-50 rounded transition-colors"
+                                      title="Create Company & User"
+                                    >
+                                      <Plus className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {registrationRequests.length === 0 && (
+                    <div className="text-center py-8 text-gray-500">
+                      <UserPlus className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+                      <p>No registration requests found.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Device Management */}
+            {activeTab === 'devices' && user?.role === 'admin' && (
+              <div className="space-y-6">
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-gray-900">Device Management</h3>
+                  </div>
+
+                  {/* User Selector */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Select User to View Devices
+                    </label>
+                    <select
+                      value={selectedUserForDevices || ''}
+                      onChange={(e) => {
+                        const userId = e.target.value
+                        setSelectedUserForDevices(userId || null)
+                        if (userId) {
+                          loadUserDevices(userId)
+                        } else {
+                          setUserDevices([])
+                        }
+                      }}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                    >
+                      <option value="">Select a user...</option>
+                      {allUsers.map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name} ({u.email}) {u.company_id ? `- Company: ${companies.find(c => c.id === u.company_id)?.name || 'Unknown'}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-600 mt-2">
+                      {selectedUserForDevices 
+                        ? `Viewing devices for: ${allUsers.find(u => u.id === selectedUserForDevices)?.name || 'Unknown'}`
+                        : 'Select a user to view their registered devices'}
+                    </p>
+                  </div>
+
+                  {/* Devices List */}
+                  {selectedUserForDevices && (
+                    <div>
+                      {loadingDevices ? (
+                        <div className="bg-white border border-gray-200 rounded-xl p-8 text-center">
+                          <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                          <p className="text-gray-600">Loading devices...</p>
+                        </div>
+                      ) : userDevices.length === 0 ? (
+                        <div className="bg-white border border-gray-200 rounded-xl p-8 text-center">
+                          <Smartphone className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                          <p className="text-gray-600 font-semibold">No devices registered</p>
+                          <p className="text-sm text-gray-500 mt-1">This user has not registered any devices yet.</p>
+                        </div>
+                      ) : (
+                        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                          <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+                            <h4 className="font-semibold text-gray-900">
+                              Registered Devices ({userDevices.length})
+                            </h4>
+                          </div>
+                          <div className="divide-y divide-gray-200">
+                            {userDevices.map((device) => (
+                              <div key={device.id} className="p-6 hover:bg-gray-50 transition-colors">
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-3 mb-2">
+                                      <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                                        <Smartphone className="w-5 h-5 text-blue-600" />
+                                      </div>
+                                      <div>
+                                        <div className="font-semibold text-gray-900">
+                                          {device.device_name || device.device_id.substring(0, 20) + '...'}
+                                        </div>
+                                        <div className="text-sm text-gray-500 mt-0.5">
+                                          {device.device_type ? device.device_type.charAt(0).toUpperCase() + device.device_type.slice(1) : 'Unknown'} Device
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="ml-13 space-y-1">
+                                      <div className="text-xs text-gray-600">
+                                        <span className="font-medium">Device ID:</span> {device.device_id}
+                                      </div>
+                                      {device.browser_info && (
+                                        <div className="text-xs text-gray-600">
+                                          <span className="font-medium">Browser:</span> {device.browser_info}
+                                        </div>
+                                      )}
+                                      <div className="text-xs text-gray-600">
+                                        <span className="font-medium">Last Accessed:</span> {new Date(device.last_accessed).toLocaleString()}
+                                      </div>
+                                      <div className="text-xs text-gray-600">
+                                        <span className="font-medium">Registered:</span> {new Date(device.created_at).toLocaleString()}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="ml-4">
+                                    <button
+                                      onClick={() => handleRemoveDevice(device.user_id, device.device_id)}
+                                      className="px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors flex items-center gap-2 text-sm font-semibold"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                      Remove
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -130,13 +130,37 @@ export const cloudUserService = {
    * Create user in cloud
    */
   create: async (userData: Omit<UserWithPassword, 'id'>): Promise<UserWithPassword> => {
+    // Check if email already exists in local storage (IndexedDB) to avoid constraint errors
+    try {
+      const localUsers = await getAll<UserWithPassword>(STORES.USERS)
+      const existingUser = localUsers.find(u => u.email.toLowerCase() === userData.email.toLowerCase())
+      if (existingUser) {
+        throw new Error('User with this email already exists')
+      }
+    } catch (error: any) {
+      // If it's already our duplicate error, rethrow it
+      if (error.message && error.message.includes('already exists')) {
+        throw error
+      }
+      // Otherwise, log and continue (might be a database issue, but we'll let the constraint handle it)
+      console.warn('Error checking for duplicate email in local storage:', error)
+    }
+
     const newUser: UserWithPassword = {
       ...userData,
       id: Date.now().toString(),
     }
 
     // Always save to local storage first (for offline support)
-    await put(STORES.USERS, newUser)
+    try {
+      await put(STORES.USERS, newUser)
+    } catch (error: any) {
+      // If it's a constraint error (duplicate email), provide a better error message
+      if (error.message && error.message.includes('constraint')) {
+        throw new Error('User with this email already exists')
+      }
+      throw error
+    }
 
     // If Supabase available and online, sync to cloud
     if (isSupabaseAvailable() && isOnline()) {
