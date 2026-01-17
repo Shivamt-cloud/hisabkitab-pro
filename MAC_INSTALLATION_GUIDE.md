@@ -111,3 +111,4 @@ If both are `true`, the install should work!
 
 **Which browser are you using?** Let me know and I can provide specific instructions! 🚀
 
+

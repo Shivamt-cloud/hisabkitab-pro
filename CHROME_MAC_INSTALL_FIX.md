@@ -129,3 +129,4 @@ The install option will appear once Chrome evaluates the app!
 
 Let me check if icons are missing and help you add them. Icons are required for Chrome to show the install option.
 
+

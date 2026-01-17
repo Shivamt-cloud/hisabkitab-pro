@@ -76,3 +76,4 @@ fetch('/icons/icon-512x512.png').then(r => console.log('Icon 512:', r.status))
 
 Both should return `200 OK`.
 
+

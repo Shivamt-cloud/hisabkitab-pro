@@ -222,3 +222,4 @@ autoUpdater.on('update-downloaded', (info) => {
   // Optionally show notification to user
 })
 
+

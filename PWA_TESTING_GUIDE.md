@@ -230,3 +230,4 @@ If all tests pass, your PWA is working perfectly! 🚀
 - Works offline
 - Can be installed as app
 
+

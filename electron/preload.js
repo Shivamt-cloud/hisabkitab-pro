@@ -26,3 +26,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
 // Log that preload script loaded
 console.log('[Preload] Electron preload script loaded')
 
+

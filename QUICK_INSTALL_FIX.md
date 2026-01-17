@@ -54,3 +54,4 @@ Chrome has a "cooldown period" after uninstalling a PWA. The automatic install p
 
 **If you want the prompt back**: Run the console command above to reset it.
 
+

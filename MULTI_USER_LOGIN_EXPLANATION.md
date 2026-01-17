@@ -237,3 +237,4 @@ The app uses **localStorage** to store the logged-in user. Each browser tab/wind
 
 **You're all set for multi-user operations!** 🚀
 
+

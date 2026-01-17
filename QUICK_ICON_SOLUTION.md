@@ -112,3 +112,4 @@ Both should return `200 OK`.
 
 **Once icons are added, Chrome will show the install option!** 🚀
 
+

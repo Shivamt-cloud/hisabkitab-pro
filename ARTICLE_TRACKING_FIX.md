@@ -187,3 +187,4 @@ const stock = purchaseItem.quantity - (purchaseItem.sold_quantity || 0)
 
 
 
+

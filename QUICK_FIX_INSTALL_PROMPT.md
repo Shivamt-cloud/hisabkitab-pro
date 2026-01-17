@@ -92,3 +92,4 @@ window.dispatchEvent(new CustomEvent('pwa-installable'))
 
 The prompt will work! The browser just needs a moment to evaluate the app. 🚀
 
+

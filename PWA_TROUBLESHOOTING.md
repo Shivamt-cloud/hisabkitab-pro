@@ -212,3 +212,4 @@ This should trigger the install prompt to appear.
 
 Let me know what you see in the console! 🔍
 
+

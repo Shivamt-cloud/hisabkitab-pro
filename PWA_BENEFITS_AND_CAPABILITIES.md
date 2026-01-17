@@ -271,3 +271,4 @@ Your inventory management system is now a fully functional Progressive Web App!
 
 **Start managing your inventory like a pro!** 🚀
 
+
