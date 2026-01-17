@@ -480,5 +480,72 @@ export const cloudBackupService = {
       }
     }
   },
+
+  /**
+   * Verify bucket setup status
+   * Returns information about which buckets exist and which are missing
+   */
+  verifyBucketSetup: async (companyIds: number[]): Promise<{
+    success: boolean
+    buckets: Array<{
+      name: string
+      exists: boolean
+      companyId: number | null
+    }>
+    error?: string
+  }> => {
+    if (!isSupabaseAvailable() || !isOnline()) {
+      return {
+        success: false,
+        buckets: [],
+        error: 'Supabase not available or offline',
+      }
+    }
+
+    try {
+      // List all existing buckets
+      const { data: buckets, error: listError } = await supabase!.storage.listBuckets()
+      
+      if (listError) {
+        return {
+          success: false,
+          buckets: [],
+          error: listError.message || 'Failed to list buckets',
+        }
+      }
+
+      const existingBucketNames = new Set(buckets?.map(b => b.name) || [])
+      const bucketStatus: Array<{ name: string; exists: boolean; companyId: number | null }> = []
+
+      // Check admin bucket
+      const adminBucket = 'backups-admin'
+      bucketStatus.push({
+        name: adminBucket,
+        exists: existingBucketNames.has(adminBucket),
+        companyId: null,
+      })
+
+      // Check company buckets
+      for (const companyId of companyIds) {
+        const bucketName = `backups-company-${companyId}`
+        bucketStatus.push({
+          name: bucketName,
+          exists: existingBucketNames.has(bucketName),
+          companyId: companyId,
+        })
+      }
+
+      return {
+        success: true,
+        buckets: bucketStatus,
+      }
+    } catch (error: any) {
+      return {
+        success: false,
+        buckets: [],
+        error: error.message || 'Error verifying bucket setup',
+      }
+    }
+  },
 }
 
