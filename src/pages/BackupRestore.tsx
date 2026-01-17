@@ -3,9 +3,25 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { backupService } from '../services/backupService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
-import { Home, Download, Upload, Database, FileText, AlertCircle, CheckCircle, Info, X, Cloud, CloudDownload, Trash2, RefreshCw } from 'lucide-react'
-import { CloudBackupMetadata } from '../services/cloudBackupService'
+import { Home, Download, Upload, Database, FileText, AlertCircle, CheckCircle, Info, X, Cloud, CloudDownload, Trash2, RefreshCw, Wifi, WifiOff, Clock, CheckCircle2, XCircle } from 'lucide-react'
+import { CloudBackupMetadata, cloudBackupService } from '../services/cloudBackupService'
+import { companyService } from '../services/companyService'
 import { convertXLSXToJSON } from '../utils/xlsxConverter'
+import { syncService, SyncStatus } from '../services/syncService'
+import { onOnlineStatusChange } from '../utils/pwa'
+import { getAll, STORES } from '../database/db'
+import { cloudProductService } from '../services/cloudProductService'
+import { cloudCustomerService } from '../services/cloudCustomerService'
+import { cloudSupplierService } from '../services/cloudSupplierService'
+import { cloudPurchaseService } from '../services/cloudPurchaseService'
+import { cloudSaleService } from '../services/cloudSaleService'
+import { cloudExpenseService } from '../services/cloudExpenseService'
+import { Product } from '../services/productService'
+import { Customer } from '../types/customer'
+import { Supplier } from '../types/purchase'
+import { Purchase } from '../types/purchase'
+import { Sale } from '../types/sale'
+import { Expense } from '../types/expense'
 import { 
   generateSamplePurchases, 
   generateSampleProducts, 
@@ -42,22 +58,137 @@ const BackupRestore = () => {
   const [cloudBackups, setCloudBackups] = useState<CloudBackupMetadata[]>([])
   const [loadingCloudBackups, setLoadingCloudBackups] = useState(false)
   const [restoringFromCloud, setRestoringFromCloud] = useState(false)
+  const [bucketStatus, setBucketStatus] = useState<{
+    checking: boolean
+    status?: {
+      success: boolean
+      buckets: Array<{ name: string; exists: boolean; companyId: number | null }>
+      error?: string
+    }
+  }>({ checking: false })
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({
+    lastSyncTime: null,
+    lastSyncStatus: 'never',
+    pendingRecords: 0,
+    isOnline: navigator.onLine,
+    isSyncing: false,
+  })
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [syncStartTime, setSyncStartTime] = useState<number | null>(null)
+  const [syncElapsedTime, setSyncElapsedTime] = useState<number>(0)
+  const [recordCounts, setRecordCounts] = useState<{
+    products: { local: number; cloud: number }
+    customers: { local: number; cloud: number }
+    suppliers: { local: number; cloud: number }
+    purchases: { local: number; cloud: number }
+    sales: { local: number; cloud: number }
+    expenses: { local: number; cloud: number }
+  } | null>(null)
+  const [loadingCounts, setLoadingCounts] = useState(false)
+
+  const loadStats = async () => {
+    try {
+      const companyId = getCurrentCompanyId()
+      // Pass companyId directly - services will handle null by returning empty array for data isolation
+      // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
+      const statistics = await backupService.getStatistics(companyId)
+      setStats(statistics)
+    } catch (error) {
+      console.error('Error loading statistics:', error)
+    }
+  }
 
   useEffect(() => {
-    const loadStats = async () => {
+    const loadSyncStatus = async () => {
       try {
-        const companyId = getCurrentCompanyId()
-        // Pass companyId directly - services will handle null by returning empty array for data isolation
-        // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
-        const statistics = await backupService.getStatistics(companyId)
-        setStats(statistics)
+        const status = await syncService.getSyncStatus()
+        setSyncStatus(status)
       } catch (error) {
-        console.error('Error loading statistics:', error)
+        console.error('Error loading sync status:', error)
+        // Set default status if there's an error
+        setSyncStatus({
+          lastSyncTime: null,
+          lastSyncStatus: 'never',
+          pendingRecords: 0,
+          isOnline: navigator.onLine,
+          isSyncing: false,
+        })
       }
     }
-    loadStats()
-    loadCloudBackups()
+    
+    try {
+      loadStats()
+      loadSyncStatus()
+      
+      // Initialize auto-sync
+      const companyId = getCurrentCompanyId()
+      const cleanupAutoSync = syncService.initializeAutoSync(companyId)
+      
+      // Listen for online status changes to update sync status
+      const cleanupOnlineListener = onOnlineStatusChange(async () => {
+        try {
+          const status = await syncService.getSyncStatus()
+          setSyncStatus(status)
+        } catch (error) {
+          console.error('Error updating sync status:', error)
+        }
+      })
+      
+      // Update sync status periodically (every 30 seconds)
+      const interval = setInterval(async () => {
+        try {
+          const status = await syncService.getSyncStatus()
+          setSyncStatus(status)
+        } catch (error) {
+          console.error('Error updating sync status:', error)
+        }
+      }, 30000)
+      
+      return () => {
+        try {
+          cleanupAutoSync()
+          cleanupOnlineListener()
+          clearInterval(interval)
+        } catch (error) {
+          console.error('Error cleaning up sync listeners:', error)
+        }
+      }
+    } catch (error) {
+      console.error('Error initializing BackupRestore:', error)
+      // Still set a default sync status so the page can render
+      setSyncStatus({
+        lastSyncTime: null,
+        lastSyncStatus: 'never',
+        pendingRecords: 0,
+        isOnline: navigator.onLine,
+        isSyncing: false,
+      })
+    }
   }, [])
+
+  const checkBucketSetup = async () => {
+    setBucketStatus({ checking: true })
+    try {
+      // Get all companies
+      const companies = await companyService.getAll(true)
+      const companyIds = companies.map(c => c.id)
+      
+      // Verify bucket setup
+      const result = await cloudBackupService.verifyBucketSetup(companyIds)
+      setBucketStatus({ checking: false, status: result })
+    } catch (error: any) {
+      console.error('Error checking bucket setup:', error)
+      setBucketStatus({ 
+        checking: false, 
+        status: { 
+          success: false, 
+          buckets: [], 
+          error: error.message || 'Failed to check bucket setup' 
+        } 
+      })
+    }
+  }
 
   const loadCloudBackups = async () => {
     setLoadingCloudBackups(true)
@@ -141,6 +272,165 @@ const BackupRestore = () => {
     const sizes = ['B', 'KB', 'MB', 'GB']
     const i = Math.floor(Math.log(bytes) / Math.log(k))
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
+  }
+
+  const handleManualSync = async () => {
+    if (!syncStatus?.isOnline) {
+      alert('Device is offline. Please connect to the internet to sync data.')
+      return
+    }
+
+    const startTime = Date.now()
+    setSyncing(true)
+    setSyncResult(null)
+    setSyncStartTime(startTime)
+    setSyncElapsedTime(0)
+
+    try {
+      const companyId = getCurrentCompanyId()
+      const result = await syncService.syncAllPendingRecords(companyId)
+      
+      const finalElapsed = Math.floor((Date.now() - startTime) / 1000)
+      
+      if (result.success) {
+        setSyncResult({
+          success: true,
+          message: `✅ Sync completed successfully! ${result.synced} record(s) synced${result.deleted > 0 ? `, ${result.deleted} record(s) deleted` : ''} in ${finalElapsed}s.${result.failed > 0 ? ` ${result.failed} record(s) failed.` : ''}`,
+        })
+      } else {
+        setSyncResult({
+          success: result.synced > 0,
+          message: `⚠️ Sync completed with issues. ${result.synced} record(s) synced${result.deleted > 0 ? `, ${result.deleted} record(s) deleted` : ''}, ${result.failed} record(s) failed in ${finalElapsed}s.${result.errors.length > 0 ? ` Errors: ${result.errors.slice(0, 3).join(', ')}` : ''}`,
+        })
+      }
+
+      // Reload sync status and statistics
+      const status = await syncService.getSyncStatus()
+      setSyncStatus(status)
+      
+      // Reload statistics to reflect any deletions
+      await loadStats()
+      
+      // Refresh record counts to show IndexedDB vs Supabase comparison
+      if (recordCounts !== null) {
+        await checkRecordCounts()
+      }
+    } catch (error: any) {
+      setSyncResult({
+        success: false,
+        message: `❌ Sync failed: ${error.message || 'Unknown error'}`,
+      })
+    } finally {
+      setSyncing(false)
+      setSyncStartTime(null)
+      setSyncElapsedTime(0)
+    }
+  }
+
+  // Update elapsed time during sync
+  useEffect(() => {
+    if (syncing && syncStartTime) {
+      const interval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - syncStartTime) / 1000)
+        setSyncElapsedTime(elapsed)
+      }, 1000)
+      
+      return () => clearInterval(interval)
+    }
+  }, [syncing, syncStartTime])
+
+  const formatElapsedTime = (seconds: number): string => {
+    if (seconds < 60) {
+      return `${seconds}s`
+    }
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins}m ${secs}s`
+  }
+
+  const checkRecordCounts = async () => {
+    setLoadingCounts(true)
+    try {
+      const companyId = getCurrentCompanyId()
+      
+      // Get IndexedDB counts
+      const [localProducts, localCustomers, localSuppliers, localPurchases, localSales, localExpenses] = await Promise.all([
+        getAll<Product>(STORES.PRODUCTS),
+        getAll<Customer>(STORES.CUSTOMERS),
+        getAll<Supplier>(STORES.SUPPLIERS),
+        getAll<Purchase>(STORES.PURCHASES),
+        getAll<Sale>(STORES.SALES),
+        getAll<Expense>(STORES.EXPENSES),
+      ])
+      
+      // Filter by company
+      const companyLocalProducts = companyId !== undefined && companyId !== null
+        ? localProducts.filter(p => p.company_id === companyId)
+        : localProducts
+      const companyLocalCustomers = companyId !== undefined && companyId !== null
+        ? localCustomers.filter(c => c.company_id === companyId)
+        : localCustomers
+      const companyLocalSuppliers = companyId !== undefined && companyId !== null
+        ? localSuppliers.filter(s => s.company_id === companyId)
+        : localSuppliers
+      const companyLocalPurchases = companyId !== undefined && companyId !== null
+        ? localPurchases.filter(p => p.company_id === companyId)
+        : localPurchases
+      const companyLocalSales = companyId !== undefined && companyId !== null
+        ? localSales.filter(s => s.company_id === companyId)
+        : localSales
+      const companyLocalExpenses = companyId !== undefined && companyId !== null
+        ? localExpenses.filter(e => e.company_id === companyId)
+        : localExpenses
+      
+      // Get Supabase counts
+      const [cloudProducts, cloudCustomers, cloudSuppliers, cloudPurchases, cloudSales, cloudExpenses] = await Promise.all([
+        cloudProductService.getAll(true, companyId).catch(() => []),
+        cloudCustomerService.getAll(true, companyId).catch(() => []),
+        cloudSupplierService.getAll(companyId).catch(() => []),
+        cloudPurchaseService.getAll(undefined, companyId).catch(() => []),
+        cloudSaleService.getAll(true, companyId).catch(() => []),
+        cloudExpenseService.getAll(companyId).catch(() => []),
+      ])
+      
+      setRecordCounts({
+        products: { local: companyLocalProducts.length, cloud: cloudProducts.length },
+        customers: { local: companyLocalCustomers.length, cloud: cloudCustomers.length },
+        suppliers: { local: companyLocalSuppliers.length, cloud: cloudSuppliers.length },
+        purchases: { local: companyLocalPurchases.length, cloud: cloudPurchases.length },
+        sales: { local: companyLocalSales.length, cloud: cloudSales.length },
+        expenses: { local: companyLocalExpenses.length, cloud: cloudExpenses.length },
+      })
+    } catch (error) {
+      console.error('Error checking record counts:', error)
+      alert('Failed to check record counts. Check console for details.')
+    } finally {
+      setLoadingCounts(false)
+    }
+  }
+
+  const formatLastSyncTime = (timeStr: string | null): string => {
+    if (!timeStr) return 'Never synced'
+    
+    const syncTime = new Date(timeStr)
+    const now = new Date()
+    const diffMs = now.getTime() - syncTime.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+    const diffHours = Math.floor(diffMs / 3600000)
+    const diffDays = Math.floor(diffMs / 86400000)
+
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`
+    if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`
+    if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`
+    
+    return syncTime.toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
   }
 
   const handleExportJSON = async () => {
@@ -323,6 +613,18 @@ const BackupRestore = () => {
     try {
       const companyId = getCurrentCompanyId()
       
+      // Validate that a company is selected (for admin users) or user has a company (for regular users)
+      if (companyId === null) {
+        setImportResult({
+          success: false,
+          message: user?.role === 'admin' 
+            ? 'Please select a company first before importing data. Go to System Settings to select a company.'
+            : 'You must be associated with a company to import data. Please contact your administrator.',
+        })
+        setImporting(false)
+        return
+      }
+      
       // Parse file to estimate total records for progress
       let totalRecords = 0
       try {
@@ -339,6 +641,10 @@ const BackupRestore = () => {
       }
       
       const result = await backupService.importFromFile(fileContent, user?.id, {
+        importProducts: true,
+        importPurchases: true,
+        importSuppliers: true,
+        importCustomers: true,
         importSettings: true,
         merge: true, // Merge with existing data
         companyId: companyId, // Pass company ID to ensure purchases are linked correctly
@@ -406,7 +712,7 @@ const BackupRestore = () => {
               <Database className="w-6 h-6 text-blue-600" />
               Current Data Statistics
             </h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
                 <p className="text-sm text-gray-600 mb-1">Products</p>
                 <p className="text-2xl font-bold text-blue-600">{stats.products}</p>
@@ -422,6 +728,10 @@ const BackupRestore = () => {
               <div className="bg-orange-50 rounded-lg p-4 border border-orange-200">
                 <p className="text-sm text-gray-600 mb-1">Customers</p>
                 <p className="text-2xl font-bold text-orange-600">{stats.customers}</p>
+              </div>
+              <div className="bg-cyan-50 rounded-lg p-4 border border-cyan-200">
+                <p className="text-sm text-gray-600 mb-1">Suppliers</p>
+                <p className="text-2xl font-bold text-cyan-600">{stats.suppliers}</p>
               </div>
             </div>
           </div>
@@ -712,99 +1022,314 @@ const BackupRestore = () => {
             </div>
           </div>
 
-          {/* Cloud Backups Section */}
+          {/* IndexedDB vs Supabase Counts Comparison */}
           <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
-                  <Cloud className="w-6 h-6 text-blue-600" />
-                  Cloud Backups
-                </h2>
-                <p className="text-gray-600">Restore from automatic cloud backups (12 PM & 6 PM)</p>
-              </div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                <Database className="w-5 h-5 text-blue-600" />
+                IndexedDB vs Supabase Record Counts
+              </h2>
               <button
-                onClick={loadCloudBackups}
-                disabled={loadingCloudBackups}
+                onClick={checkRecordCounts}
+                disabled={loadingCounts}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                <RefreshCw className={`w-4 h-4 ${loadingCloudBackups ? 'animate-spin' : ''}`} />
-                Refresh
+                <RefreshCw className={`w-4 h-4 ${loadingCounts ? 'animate-spin' : ''}`} />
+                {loadingCounts ? 'Checking...' : 'Check Counts'}
               </button>
             </div>
-
-            {loadingCloudBackups ? (
-              <div className="text-center py-8 text-gray-500">
-                <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-                Loading cloud backups...
-              </div>
-            ) : cloudBackups.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
-                <Cloud className="w-12 h-12 mx-auto mb-3 text-gray-400" />
-                <p className="text-lg font-medium mb-1">No cloud backups found</p>
-                <p className="text-sm">Automatic backups are scheduled at 12 PM and 6 PM</p>
-                <p className="text-sm mt-2">Backups are kept for 3 days (rolling retention)</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {cloudBackups.map((backup) => (
-                      <tr key={backup.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                          {new Date(backup.backup_date).toLocaleDateString('en-IN', {
-                            day: 'numeric',
-                            month: 'short',
-                            year: 'numeric',
-                          })}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
-                          {backup.backup_time}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
-                          {formatFileSize(backup.size_bytes)}
-                          {backup.compressed && (
-                            <span className="ml-1 text-xs text-gray-500">(compressed)</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-sm">
-                          <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                            Available
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-sm text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => handleRestoreFromCloud(backup)}
-                              disabled={restoringFromCloud}
-                              className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 text-xs"
-                            >
-                              <CloudDownload className="w-3 h-3" />
-                              Restore
-                            </button>
-                            <button
-                              onClick={() => handleDeleteCloudBackup(backup)}
-                              className="px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-1 text-xs"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            
+            {recordCounts && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+                {Object.entries(recordCounts).map(([key, counts]) => {
+                  const diff = counts.local - counts.cloud
+                  const isLocalGreater = diff > 0
+                  const isEqual = diff === 0
+                  const label = key.charAt(0).toUpperCase() + key.slice(1)
+                  
+                  return (
+                    <div key={key} className={`p-4 rounded-lg border-2 ${
+                      isEqual 
+                        ? 'bg-green-50 border-green-200'
+                        : isLocalGreater
+                        ? 'bg-orange-50 border-orange-200'
+                        : 'bg-blue-50 border-blue-200'
+                    }`}>
+                      <p className="text-sm font-medium text-gray-700 mb-2">{label}</p>
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">IndexedDB:</span>
+                          <span className="font-bold text-gray-900">{counts.local}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Supabase:</span>
+                          <span className="font-bold text-gray-900">{counts.cloud}</span>
+                        </div>
+                        <div className={`flex justify-between text-sm font-semibold pt-1 border-t ${
+                          isEqual
+                            ? 'border-green-300 text-green-700'
+                            : isLocalGreater
+                            ? 'border-orange-300 text-orange-700'
+                            : 'border-blue-300 text-blue-700'
+                        }`}>
+                          <span>Difference:</span>
+                          <span>{diff > 0 ? `+${diff}` : diff}</span>
+                        </div>
+                        {isLocalGreater && (
+                          <p className="text-xs text-orange-600 mt-1">
+                            ⚠️ {diff} record(s) in IndexedDB not in Supabase (may need sync or deletion)
+                          </p>
+                        )}
+                        {!isLocalGreater && diff < 0 && (
+                          <p className="text-xs text-blue-600 mt-1">
+                            ℹ️ {Math.abs(diff)} record(s) in Supabase not in IndexedDB
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             )}
+            
+            {!recordCounts && (
+              <p className="text-gray-500 text-center py-8">Click "Check Counts" to compare IndexedDB and Supabase record counts</p>
+            )}
+          </div>
+
+          {/* Data Sync Status Section */}
+          {(
+            <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+                    {syncStatus.isOnline ? (
+                      <Wifi className="w-6 h-6 text-green-600" />
+                    ) : (
+                      <WifiOff className="w-6 h-6 text-red-600" />
+                    )}
+                    Data Sync Status
+                  </h2>
+                  <p className="text-gray-600">
+                    {syncStatus.isOnline 
+                      ? 'Your data syncs automatically to cloud when online' 
+                      : 'Device is offline. Data will sync when connection is restored'}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleManualSync}
+                    disabled={syncing || !syncStatus?.isOnline}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+                    {syncing ? `Syncing... ${formatElapsedTime(syncElapsedTime)}` : 'Sync Now'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Sync Status Card */}
+              <div className={`mb-6 p-6 rounded-xl border-2 ${
+                syncStatus.lastSyncStatus === 'success'
+                  ? 'bg-green-50 border-green-200'
+                  : syncStatus.lastSyncStatus === 'failed'
+                  ? 'bg-red-50 border-red-200'
+                  : 'bg-gray-50 border-gray-200'
+              }`}>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Last Sync Time */}
+                  <div className="flex items-start gap-3">
+                    <div className={`p-2 rounded-lg ${
+                      syncStatus.lastSyncStatus === 'success' 
+                        ? 'bg-green-100' 
+                        : syncStatus.lastSyncStatus === 'failed'
+                        ? 'bg-red-100'
+                        : 'bg-gray-100'
+                    }`}>
+                      <Clock className={`w-5 h-5 ${
+                        syncStatus.lastSyncStatus === 'success' 
+                          ? 'text-green-600' 
+                          : syncStatus.lastSyncStatus === 'failed'
+                          ? 'text-red-600'
+                          : 'text-gray-600'
+                      }`} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600 mb-1">Last Sync</p>
+                      <p className="text-lg font-bold text-gray-900">
+                        {formatLastSyncTime(syncStatus.lastSyncTime)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Sync Status */}
+                  <div className="flex items-start gap-3">
+                    <div className={`p-2 rounded-lg ${
+                      syncStatus.lastSyncStatus === 'success' 
+                        ? 'bg-green-100' 
+                        : syncStatus.lastSyncStatus === 'failed'
+                        ? 'bg-red-100'
+                        : 'bg-gray-100'
+                    }`}>
+                      {syncStatus.lastSyncStatus === 'success' ? (
+                        <CheckCircle2 className="w-5 h-5 text-green-600" />
+                      ) : syncStatus.lastSyncStatus === 'failed' ? (
+                        <XCircle className="w-5 h-5 text-red-600" />
+                      ) : (
+                        <AlertCircle className="w-5 h-5 text-gray-600" />
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600 mb-1">Status</p>
+                      <p className={`text-lg font-bold ${
+                        syncStatus.lastSyncStatus === 'success' 
+                          ? 'text-green-700' 
+                          : syncStatus.lastSyncStatus === 'failed'
+                          ? 'text-red-700'
+                          : 'text-gray-700'
+                      }`}>
+                        {syncStatus.lastSyncStatus === 'success' 
+                          ? 'Synced' 
+                          : syncStatus.lastSyncStatus === 'failed'
+                          ? 'Failed'
+                          : 'Never Synced'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Pending Records */}
+                  <div className="flex items-start gap-3">
+                    <div className={`p-2 rounded-lg ${
+                      syncStatus.pendingRecords > 0 
+                        ? 'bg-yellow-100' 
+                        : 'bg-green-100'
+                    }`}>
+                      <Database className={`w-5 h-5 ${
+                        syncStatus.pendingRecords > 0 
+                          ? 'text-yellow-600' 
+                          : 'text-green-600'
+                      }`} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600 mb-1">Pending Records</p>
+                      <p className={`text-lg font-bold ${
+                        syncStatus.pendingRecords > 0 
+                          ? 'text-yellow-700' 
+                          : 'text-green-700'
+                      }`}>
+                        {syncStatus.pendingRecords === 0 
+                          ? 'All Synced' 
+                          : `${syncStatus.pendingRecords} waiting`}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sync Progress Message */}
+                {syncing && (
+                  <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="flex items-start gap-3">
+                      <RefreshCw className="w-5 h-5 text-blue-600 mt-0.5 animate-spin flex-shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-blue-900 mb-1">
+                          Syncing data to cloud... ({formatElapsedTime(syncElapsedTime)})
+                        </p>
+                        <p className="text-xs text-blue-700">
+                          💡 You can continue working on sales, purchases, and other activities. The sync will continue in the background.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Sync Result Message */}
+                {syncResult && !syncing && (
+                  <div className={`mt-4 p-4 rounded-lg ${
+                    syncResult.success 
+                      ? 'bg-green-100 border border-green-300' 
+                      : 'bg-red-100 border border-red-300'
+                  }`}>
+                    <p className={`text-sm font-medium ${
+                      syncResult.success ? 'text-green-800' : 'text-red-800'
+                    }`}>
+                      {syncResult.message}
+                    </p>
+                  </div>
+                )}
+
+                {/* Online/Offline Status */}
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <div className="flex items-center gap-2 text-sm">
+                    {syncStatus.isOnline ? (
+                      <>
+                        <Wifi className="w-4 h-4 text-green-600" />
+                        <span className="text-green-700 font-medium">Online - Ready to sync</span>
+                      </>
+                    ) : (
+                      <>
+                        <WifiOff className="w-4 h-4 text-red-600" />
+                        <span className="text-red-700 font-medium">Offline - Data will sync automatically when connection is restored</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Information */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-blue-800">
+                    <p className="font-semibold mb-1">How Data Sync Works:</p>
+                    <ul className="list-disc list-inside space-y-1 ml-2">
+                      <li>All data is saved to your device first (works offline)</li>
+                      <li>When online, data automatically syncs to cloud (Supabase)</li>
+                      <li>If you work offline, data syncs automatically when internet returns</li>
+                      <li>Click "Sync Now" to manually sync pending records</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Optional: Manual Backup Section (Collapsible) */}
+          <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                <Cloud className="w-5 h-5 text-blue-600" />
+                Manual Backup (Optional)
+              </h2>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              Create a manual backup of your data. This is optional as data syncs automatically to cloud.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={async () => {
+                  try {
+                    const companyId = getCurrentCompanyId()
+                    const backupData = await backupService.exportAll(user?.id, companyId || undefined)
+                    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `backup-${new Date().toISOString().split('T')[0]}.json`
+                    document.body.appendChild(a)
+                    a.click()
+                    document.body.removeChild(a)
+                    URL.revokeObjectURL(url)
+                    alert('Backup downloaded successfully!')
+                  } catch (error: any) {
+                    alert(`Failed to create backup: ${error.message}`)
+                  }
+                }}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                Download Backup
+              </button>
+            </div>
           </div>
 
           {/* Information Section */}
