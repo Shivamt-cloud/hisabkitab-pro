@@ -5,7 +5,7 @@ import { purchaseService } from '../services/purchaseService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Purchase, PurchaseType } from '../types/purchase'
 import { Plus, Eye, Edit, Filter, FileText, TrendingUp, Home, FileSpreadsheet, Search, X, Trash2 } from 'lucide-react'
-import { exportToExcel } from '../utils/exportUtils'
+import { exportToExcel as exportExcel } from '../utils/exportUtils'
 
 type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
 
@@ -361,7 +361,7 @@ const PurchaseHistory = () => {
     })
 
     const filename = `purchase_history_${timePeriod}_${new Date().toISOString().split('T')[0]}`
-    exportToExcel(rows, headers, filename, 'Purchase History')
+    exportExcel(rows, headers, filename, 'Purchase History')
   }
 
   const exportToPDF = () => {

@@ -100,7 +100,7 @@ export const purchaseService = {
     }
     
     // Use cloud service which handles both cloud and local storage
-    return await cloudPurchaseService.create(newPurchase)
+    return await cloudPurchaseService.create(newPurchase) as GSTPurchase
   },
 
   createSimple: async (purchase: Omit<SimplePurchase, 'id' | 'created_at' | 'updated_at'>): Promise<SimplePurchase> => {
@@ -156,7 +156,7 @@ export const purchaseService = {
     }
     
     // Use cloud service which handles both cloud and local storage
-    return await cloudPurchaseService.create(newPurchase)
+    return await cloudPurchaseService.create(newPurchase) as SimplePurchase
   },
 
   update: async (id: number, purchase: Partial<Purchase>): Promise<Purchase | null> => {

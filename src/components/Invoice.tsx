@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import { InvoiceData } from '../types/invoice'
-import { Printer, Download, X, Share2, Plus } from 'lucide-react'
+import { Printer, Download, X, Share2, Plus, Receipt } from 'lucide-react'
 import { exportInvoiceToPDF, exportHTMLToPDF, printReceipt } from '../utils/exportUtils'
 
 interface InvoiceProps {

@@ -5,7 +5,7 @@ import { saleService } from '../services/saleService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Sale } from '../types/sale'
 import { Eye, ShoppingCart, TrendingUp, DollarSign, Archive, Home, FileSpreadsheet, FileText, Trash2 } from 'lucide-react'
-import { exportToExcel, exportDataToPDF } from '../utils/exportUtils'
+import { exportToExcel as exportExcel, exportDataToPDF } from '../utils/exportUtils'
 
 type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
 
@@ -216,7 +216,7 @@ const SalesHistory = () => {
     ])
 
     const filename = `sales_history_${timePeriod}_${new Date().toISOString().split('T')[0]}`
-    exportToExcel(rows, headers, filename, 'Sales History')
+    exportExcel(rows, headers, filename, 'Sales History')
   }
 
   const exportToPDF = () => {

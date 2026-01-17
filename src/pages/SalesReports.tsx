@@ -13,7 +13,7 @@ import {
 import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText, Eye, ShoppingCart } from 'lucide-react'
 import { saleService } from '../services/saleService'
 import { Sale } from '../types/sale'
-import { exportToExcel, exportDataToPDF } from '../utils/exportUtils'
+import { exportToExcel as exportExcel, exportDataToPDF } from '../utils/exportUtils'
 
 type ReportView = 'product' | 'category' | 'customer' | 'salesperson' | 'sales'
 
@@ -202,7 +202,7 @@ const SalesReports = () => {
     }
 
     const filename = `sales_report_${activeView}_${timePeriod}_${new Date().toISOString().split('T')[0]}`
-    exportToExcel(rows, headers, filename, sheetName)
+    exportExcel(rows, headers, filename, sheetName)
   }
 
   const exportToPDF = () => {
