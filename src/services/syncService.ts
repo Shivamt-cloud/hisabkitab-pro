@@ -127,7 +127,7 @@ export const syncService = {
     }
 
     if (!isSupabaseAvailable()) {
-      result.errors.push('Supabase not configured')
+      result.errors.push('Supabase not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment variables in Netlify Dashboard → Site Settings → Environment Variables')
       return result
     }
 
