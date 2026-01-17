@@ -113,3 +113,24 @@ After adding the environment variables and redeploying:
 5. Verify sync works in production
 
 After this, your sync feature should work correctly in production! 🚀
+
+---
+
+## 📝 Current Configuration (as of latest update)
+
+### Supabase Credentials:
+- **Project URL:** `https://uywqvyohahdadrlcbkzb.supabase.co`
+- **Anon Key:** `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV5d3F2eW9oYWhkYWRybGNia3piIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY2NDkwMjgsImV4cCI6MjA4MjIyNTAyOH0.cC7u1znzYmwLEfkHQBxvjeI6aAjhsCk2HsiYRMdJ6sQ`
+
+### Netlify Environment Variables Setup:
+1. **Variable Name:** `VITE_SUPABASE_URL`
+   - **Value:** `https://uywqvyohahdadrlcbkzb.supabase.co`
+   - **Scopes:** All scopes
+   - **Values:** Same value for all deploy contexts
+
+2. **Variable Name:** `VITE_SUPABASE_ANON_KEY`
+   - **Value:** `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV5d3F2eW9oYWhkYWRybGNia3piIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY2NDkwMjgsImV4cCI6MjA4MjIyNTAyOH0.cC7u1znzYmwLEfkHQBxvjeI6aAjhsCk2HsiYRMdJ6sQ`
+   - **Scopes:** All scopes
+   - **Values:** Same value for all deploy contexts
+
+**Note:** After adding these variables in Netlify, a new deployment will automatically trigger when code is pushed to GitHub. The environment variables will be available in the next build.
