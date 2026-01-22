@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { productService, Product } from '../services/productService'
@@ -36,6 +36,8 @@ const SaleForm = () => {
   const [errors, setErrors] = useState<{ [key: string]: string }>({})
   const [customerCreditBalance, setCustomerCreditBalance] = useState<number>(0)
   const [creditApplied, setCreditApplied] = useState<number>(0) // Amount of credit applied to this sale
+  const [discountType, setDiscountType] = useState<'percentage' | 'fixed'>('percentage') // Discount type: percentage or fixed amount
+  const [discountValue, setDiscountValue] = useState<number>(0) // Discount value (percentage or fixed amount)
 
   // Separate function to load customers (can be called independently)
   const loadCustomers = async () => {
@@ -228,12 +230,14 @@ const SaleForm = () => {
           if (missingProductIds.length > 0) {
             console.warn('Products in purchases but not in products list:', missingProductIds)
             // Try to load these products with includeArchived=true
+            // IMPORTANT: Include products from purchases even if inactive, so they can be sold
             for (const productId of missingProductIds) {
               try {
                 const product = await productService.getById(productId, true)
-                if (product && product.status === 'active') {
+                if (product) {
+                  // Include product even if inactive - it has purchase history so should be sellable
                   products.push(product)
-                  console.log('Added missing product:', product)
+                  console.log(`✅ Added missing product from purchase: ${product.id} (${product.name}), status: ${product.status}`)
                 }
               } catch (err) {
                 console.error(`Error loading product ${productId}:`, err)
@@ -351,192 +355,322 @@ const SaleForm = () => {
     setCreditApplied(0)
   }, [customerId])
 
-  const filteredProducts = availableProducts.filter(product => {
-    // Show nothing by default - only show products when searching
+  // NEW SIMPLIFIED SEARCH: Direct search in purchase history by article/barcode only
+  // This searches purchases directly - simple, fast, and accurate
+  const searchPurchaseItems = useMemo(() => {
     if (!searchQuery.trim()) {
-      return false
+      return []
     }
     
-    const query = searchQuery.trim() // Keep original case for barcode matching
+    const query = searchQuery.trim()
     const queryLower = query.toLowerCase()
     
-    // Search by product name (most common)
-    const nameMatch = product.name.toLowerCase().includes(queryLower)
+    // Strip prefixes (Article_, Barcode_, etc.)
+    const prefixPattern = /^(article|barcode)[_:\s-]+/i
+    const normalizedQuery = prefixPattern.test(query) ? query.replace(prefixPattern, '').trim() : query
+    const normalizedQueryLower = normalizedQuery.toLowerCase()
     
-    // Search by SKU
-    const skuMatch = product.sku?.toLowerCase().includes(queryLower) || false
+    const matchingItems: Array<{
+      purchase: Purchase
+      item: PurchaseItem
+      product: Product | undefined
+      availableStock: number
+      matchType: 'article' | 'barcode' | 'both'
+      isExactMatch: boolean
+    }> = []
     
-    // Search by category
-    const categoryMatch = product.category_name?.toLowerCase().includes(queryLower) || false
-    
-    // Search by HSN code
-    const hsnMatch = product.hsn_code?.toLowerCase().includes(queryLower) || false
-    
-    // Search by barcode from product itself (exact match or partial)
-    const productBarcode = product.barcode || ''
-    const barcodeMatch = productBarcode === query || productBarcode.toLowerCase().includes(queryLower)
-    
-    // Search by barcode from purchase history (exact match or partial) - keep original case
-    const purchaseBarcodes = productBarcodeMap.get(product.id) || []
-    const purchaseBarcodeMatch = purchaseBarcodes.some(barcode => {
-      // Exact match (case sensitive for barcodes)
-      if (barcode === query) return true
-      // Partial match (case insensitive)
-      return barcode.toLowerCase().includes(queryLower)
-    })
-    
-    // Also check if the query is a barcode that maps to this product
-    // Try exact match first, then case-insensitive match
-    let barcodePurchaseItem = barcodeToPurchaseItemMap.get(query)
-    if (!barcodePurchaseItem) {
-      // Try case-insensitive lookup by iterating through the map
-      barcodeToPurchaseItemMap.forEach((item, barcode) => {
-        if (barcode.toLowerCase() === queryLower && item.product_id === product.id) {
-          barcodePurchaseItem = item
+    // Search purchases directly - simple loop through all purchases
+    for (const purchase of purchases) {
+      for (const item of purchase.items) {
+        if (!item.product_id) continue
+        
+        let matchesArticle = false
+        let matchesBarcode = false
+        let isExactMatch = false
+        
+        // Check article
+        if (item.article) {
+          const articleStr = String(item.article).trim()
+          const articleLower = articleStr.toLowerCase()
+          const articleNormalized = articleLower.replace(/^article[_:\s-]+/i, '')
+          
+          // Exact match
+          if (articleLower === queryLower || 
+              articleStr === query ||
+              articleNormalized === normalizedQueryLower ||
+              articleLower === `article_${normalizedQueryLower}` ||
+              articleStr === `Article_${normalizedQuery}`) {
+            matchesArticle = true
+            isExactMatch = true
+          }
+          // Contains match
+          else if (articleLower.includes(queryLower) || 
+                   articleLower.includes(normalizedQueryLower) ||
+                   queryLower.includes(articleNormalized) ||
+                   normalizedQueryLower.includes(articleNormalized)) {
+            matchesArticle = true
+          }
         }
-      })
-    }
-    const barcodeMatchesProduct = barcodePurchaseItem && barcodePurchaseItem.product_id === product.id
-    
-    // Search by article code from purchase history (exact match or partial)
-    const productArticles = productArticleMap.get(product.id) || []
-    const articleMatch = productArticles.some(article => {
-      const articleNormalized = String(article).trim()
-      const articleLower = articleNormalized.toLowerCase()
-      return articleLower === queryLower || articleNormalized === query || articleLower.includes(queryLower) || articleNormalized.includes(query)
-    })
-    
-    // Also check if the query is an article that maps to this product (check articleToPurchaseItemMap)
-    // This checks if ANY article in the map matches the query AND belongs to this product
-    let articleItemMatch = false
-    let matchingArticleItem: PurchaseItem | null = null
-    
-    // Search through all articles in the map (not just for this product)
-    articleToPurchaseItemMap.forEach((item, article) => {
-      // Check if the article matches the query
-      const articleNormalized = String(article).trim()
-      const articleLower = articleNormalized.toLowerCase()
-      const articleMatchesQuery = articleLower === queryLower || articleNormalized === query || articleLower.includes(queryLower) || articleNormalized.includes(query)
-      
-      // If article matches AND it belongs to this product, mark it as a match
-      if (articleMatchesQuery && item.product_id === product.id) {
-        articleItemMatch = true
-        const itemWithDate = item as PurchaseItem & { purchase_date?: string }
-        const matchingWithDate = matchingArticleItem as PurchaseItem & { purchase_date?: string }
-        if (!matchingArticleItem || (itemWithDate.purchase_date && matchingWithDate.purchase_date && 
-            new Date(itemWithDate.purchase_date) > new Date(matchingWithDate.purchase_date))) {
-          matchingArticleItem = item
+        
+        // Check barcode
+        if (item.barcode) {
+          const barcodeStr = String(item.barcode).trim()
+          const barcodeLower = barcodeStr.toLowerCase()
+          
+          // Exact match
+          if (barcodeLower === queryLower || 
+              barcodeStr === query ||
+              barcodeLower === `barcode_${normalizedQueryLower}` ||
+              barcodeStr === `Barcode_${normalizedQuery}`) {
+            matchesBarcode = true
+            isExactMatch = true
+          }
+          // Contains match
+          else if (barcodeLower.includes(queryLower) || 
+                   barcodeLower.includes(normalizedQueryLower) ||
+                   queryLower.includes(barcodeLower)) {
+            matchesBarcode = true
+          }
+        }
+        
+        if (matchesArticle || matchesBarcode) {
+          // Find product
+          const product = availableProducts.find(p => p.id === item.product_id)
+          
+          // Calculate available stock
+          const soldQty = item.sold_quantity || 0
+          const availableStock = item.quantity - soldQty
+          
+          matchingItems.push({
+            purchase,
+            item,
+            product,
+            availableStock,
+            matchType: matchesArticle && matchesBarcode ? 'both' : (matchesArticle ? 'article' : 'barcode'),
+            isExactMatch
+          })
         }
       }
+    }
+    
+    // Sort: exact matches first, then by available stock (highest first), then by purchase date (newest first)
+    matchingItems.sort((a, b) => {
+      // Exact matches first
+      if (a.isExactMatch && !b.isExactMatch) return -1
+      if (!a.isExactMatch && b.isExactMatch) return 1
+      
+      // Then by available stock (highest first)
+      if (a.availableStock !== b.availableStock) {
+        return b.availableStock - a.availableStock
+      }
+      
+      // Then by purchase date (newest first)
+      const dateA = new Date(a.purchase.purchase_date).getTime()
+      const dateB = new Date(b.purchase.purchase_date).getTime()
+      return dateB - dateA
     })
     
-    const matches = nameMatch || barcodeMatch || purchaseBarcodeMatch || barcodeMatchesProduct || skuMatch || categoryMatch || hsnMatch || articleMatch || articleItemMatch || articleItemMatch
-    
-    // Debug logging for all searches
-    if (matches) {
-      console.log(`✅ Match found for "${query}" in product ${product.id} (${product.name}):`, {
-        productBarcode,
-        purchaseBarcodes,
-        productArticles,
-        nameMatch,
-        barcodeMatch,
-        purchaseBarcodeMatch,
-        articleMatch,
-        skuMatch,
-        categoryMatch,
-        hsnMatch
-      })
-    }
-    
-    // Extra debug for the specific barcode
-    if (query === '8904201446686' || query.includes('8904201446686')) {
-      console.log(`🔍 Checking product ${product.id} (${product.name}) for barcode "${query}":`, {
-        productBarcode,
-        purchaseBarcodes,
-        barcodeMatch,
-        purchaseBarcodeMatch,
-        matches
-      })
-    }
-    
-    // Debug for SUIT article and 99000000298 barcode
-    if (query === 'SUIT' || query.toLowerCase() === 'suit' || query === '99000000298') {
-      console.log(`🔍 [DEBUG] Checking product ${product.id} (${product.name}) for "${query}":`, {
-        productBarcode,
-        purchaseBarcodes,
-        productArticles,
-        barcodeMatch,
-        purchaseBarcodeMatch,
-        barcodeMatchesProduct,
-        articleMatch,
-        articleItemMatch,
-        matches,
-        barcodeToPurchaseItemMap: barcodeToPurchaseItemMap.has(query) || barcodeToPurchaseItemMap.has(queryLower) ? 'Found in map' : 'Not in map',
-        articleToPurchaseItemMap: Array.from(articleToPurchaseItemMap.keys()).filter(k => k.toLowerCase().includes('suit') || k === 'SUIT')
-      })
-    }
-    
-    return matches
-  })
+    return matchingItems
+  }, [searchQuery, purchases, availableProducts])
   
-  // Debug: Log filtered results for the specific barcode
+  // Keep filteredProducts empty for backward compatibility (we use searchPurchaseItems now)
+  const filteredProducts = useMemo(() => {
+    return []
+  }, [])
+  
+  // sortedFilteredProducts is no longer needed - we use searchPurchaseItems directly
+  const sortedFilteredProducts = useMemo(() => {
+    return []
+  }, [])
+  
+  // Debug: Comprehensive search debugging - runs for ALL searches
   useEffect(() => {
     const query = searchQuery.trim()
-    if (query === '8904201446686' || query.includes('8904201446686') || 
-        query === 'SUIT' || query.toLowerCase() === 'suit' || 
-        query === '99000000298') {
-      console.log(`🔍 [DEBUG] Search query: "${searchQuery}"`)
-      console.log(`📦 Total available products: ${availableProducts.length}`)
-      console.log(`✅ Filtered products: ${filteredProducts.length}`)
-      console.log(`📋 Filtered product IDs:`, filteredProducts.map(p => ({ id: p.id, name: p.name })))
-      console.log(`🗺️ Barcode map size: ${productBarcodeMap.size}`)
-      console.log(`🗺️ Article map size: ${productArticleMap.size}`)
-      console.log(`🗺️ Barcode to purchase item map size: ${barcodeToPurchaseItemMap.size}`)
-      console.log(`🗺️ Article to purchase item map size: ${articleToPurchaseItemMap.size}`)
-      
-      // Check specifically for 99000000298
-      if (query === '99000000298' || query.includes('99000000298')) {
-        console.log(`🔍 [DEBUG] Looking for barcode 99000000298 in maps:`)
-        console.log(`  - In barcodeToPurchaseItemMap (exact):`, barcodeToPurchaseItemMap.has('99000000298'))
-        productBarcodeMap.forEach((barcodes, productId) => {
-          const foundBarcodes = barcodes.filter(b => String(b).includes('99000000298'))
-          if (foundBarcodes.length > 0) {
-            console.log(`  - Found in productBarcodeMap for product ${productId}:`, foundBarcodes)
-          }
+    if (!query) return
+    
+    console.log(`\n🔍 ========== SEARCH DEBUG: "${searchQuery}" ==========`)
+    console.log(`📦 Total available products: ${availableProducts.length}`)
+    console.log(`✅ Filtered products: ${filteredProducts.length}`)
+    console.log(`🗺️ Maps Status:`)
+    console.log(`   - productArticleMap: ${productArticleMap.size} products with articles`)
+    console.log(`   - productBarcodeMap: ${productBarcodeMap.size} products with barcodes`)
+    console.log(`   - articleToPurchaseItemMap: ${articleToPurchaseItemMap.size} articles`)
+    console.log(`   - barcodeToPurchaseItemMap: ${barcodeToPurchaseItemMap.size} barcodes`)
+    console.log(`   - Total purchases: ${purchases.length}`)
+    
+    // Normalize query (strip prefix if present)
+    const prefixPattern = /^(article|barcode)[_:\s-]+/i
+    const normalizedQuery = prefixPattern.test(query) ? query.replace(prefixPattern, '').trim() : query
+    const queryLower = normalizedQuery.toLowerCase()
+    
+    console.log(`\n🔎 Checking for "${query}" (normalized: "${normalizedQuery}"):`)
+    
+    // Check articleToPurchaseItemMap
+    const articleKeys = Array.from(articleToPurchaseItemMap.keys())
+    const matchingArticles = articleKeys.filter(k => {
+      const kStr = String(k).trim()
+      const kLower = kStr.toLowerCase()
+      return kLower === queryLower || 
+             kLower === normalizedQuery.toLowerCase() ||
+             kStr === query ||
+             kStr === normalizedQuery ||
+             kLower.includes(queryLower) ||
+             queryLower.includes(kLower)
+    })
+    
+    if (matchingArticles.length > 0) {
+      console.log(`✅ Found ${matchingArticles.length} matching article(s) in articleToPurchaseItemMap:`, matchingArticles)
+      matchingArticles.forEach(article => {
+        const item = articleToPurchaseItemMap.get(article)
+        const product = availableProducts.find(p => p.id === item?.product_id)
+        console.log(`   - "${article}" → Product ID: ${item?.product_id} (${product?.name || 'NOT FOUND'}), Item ID: ${item?.id}`)
+      })
+    } else {
+      console.log(`❌ No matching articles found in articleToPurchaseItemMap`)
+      console.log(`   Total articles in map: ${articleKeys.length}`)
+      if (articleKeys.length > 0) {
+        console.log(`   Sample articles (first 20):`, articleKeys.slice(0, 20))
+        // Show ALL articles to help debug
+        console.log(`   ALL articles in database:`, articleKeys.sort())
+        
+        // Check for similar articles
+        const queryParts = queryLower.split(/\s+/).filter(p => p.length > 2)
+        const similarArticles = articleKeys.filter(a => {
+          const aLower = String(a).toLowerCase()
+          const aNormalized = aLower.replace(/^article[_:\s-]+/i, '')
+          return queryParts.some(part => aLower.includes(part) || aNormalized.includes(part)) ||
+                 aLower.includes(queryLower) ||
+                 queryLower.includes(aNormalized) ||
+                 aNormalized.includes(queryLower)
         })
-        // Check all purchases directly
-        console.log(`  - Checking all purchases for barcode 99000000298:`)
-        purchases.forEach(purchase => {
-          purchase.items.forEach(item => {
-            if (item.barcode && String(item.barcode).includes('99000000298')) {
-              console.log(`    Found in Purchase ${purchase.id}, Item ${item.id}:`, item)
-            }
-          })
-        })
-      }
-      
-      // Check specifically for SUIT
-      if (query === 'SUIT' || query.toLowerCase() === 'suit') {
-        console.log(`🔍 [DEBUG] Looking for article SUIT in maps:`)
-        console.log(`  - In articleToPurchaseItemMap (exact):`, articleToPurchaseItemMap.has('SUIT') || articleToPurchaseItemMap.has('suit'))
-        productArticleMap.forEach((articles, productId) => {
-          const foundArticles = articles.filter(a => String(a).toLowerCase().includes('suit'))
-          if (foundArticles.length > 0) {
-            console.log(`  - Found in productArticleMap for product ${productId}:`, foundArticles)
-          }
-        })
-        // Check all purchases directly
-        console.log(`  - Checking all purchases for article SUIT:`)
-        purchases.forEach(purchase => {
-          purchase.items.forEach(item => {
-            if (item.article && String(item.article).toLowerCase().includes('suit')) {
-              console.log(`    Found in Purchase ${purchase.id}, Item ${item.id}:`, item)
-            }
-          })
-        })
+        
+        if (similarArticles.length > 0) {
+          console.log(`   Similar articles found (containing parts of "${query}"):`, similarArticles)
+        } else {
+          console.log(`   ❌ No similar articles found. The article "${query}" does not exist.`)
+        }
       }
     }
-  }, [searchQuery, availableProducts.length, filteredProducts.length, productBarcodeMap.size, productArticleMap.size, barcodeToPurchaseItemMap, articleToPurchaseItemMap, purchases])
+    
+    // Check productArticleMap
+    let foundInProductMap = false
+    productArticleMap.forEach((articles, productId) => {
+      const matching = articles.filter(a => {
+        const aStr = String(a).trim()
+        const aLower = aStr.toLowerCase()
+        return aLower === queryLower || 
+               aLower === normalizedQuery.toLowerCase() ||
+               aStr === query ||
+               aStr === normalizedQuery ||
+               aLower.includes(queryLower) ||
+               queryLower.includes(aLower)
+      })
+      if (matching.length > 0) {
+        foundInProductMap = true
+        const product = availableProducts.find(p => p.id === productId)
+        console.log(`✅ Found in productArticleMap for Product ${productId} (${product?.name || 'NOT FOUND'}):`, matching)
+      }
+    })
+    if (!foundInProductMap) {
+      console.log(`❌ Not found in productArticleMap`)
+    }
+    
+    // Check purchases directly
+    const foundInPurchases: Array<{
+      purchaseId: number
+      purchaseDate: string
+      itemId: number
+      productId: number
+      productName?: string
+      article: string
+      articleOriginal: any
+      articleType: string
+    }> = []
+    purchases.forEach(purchase => {
+      purchase.items.forEach(item => {
+        if (item.article) {
+          const itemArticle = String(item.article).trim()
+          const itemArticleLower = itemArticle.toLowerCase()
+          if (itemArticleLower === queryLower || 
+              itemArticleLower === normalizedQuery.toLowerCase() ||
+              itemArticle === query ||
+              itemArticle === normalizedQuery ||
+              itemArticleLower.includes(queryLower) ||
+              queryLower.includes(itemArticleLower)) {
+            foundInPurchases.push({
+              purchaseId: purchase.id,
+              purchaseDate: purchase.purchase_date,
+              itemId: item.id || 0,
+              productId: item.product_id || 0,
+              productName: item.product_name,
+              article: itemArticle,
+              articleOriginal: item.article,
+              articleType: typeof item.article
+            })
+          }
+        }
+      })
+    })
+    
+    if (foundInPurchases.length > 0) {
+      console.log(`✅ Found ${foundInPurchases.length} matching item(s) in purchases directly:`)
+      foundInPurchases.forEach(found => {
+        const product = availableProducts.find(p => p.id === found.productId)
+        console.log(`   - Purchase ${found.purchaseId} (${new Date(found.purchaseDate).toLocaleDateString()})`)
+        console.log(`     Item ID: ${found.itemId}, Product ID: ${found.productId} (${found.productName})`)
+        console.log(`     Article: "${found.article}" (original: ${found.articleOriginal}, type: ${found.articleType})`)
+        console.log(`     Product exists: ${product ? 'YES' : 'NO'}, Status: ${product?.status || 'N/A'}`)
+      })
+    } else {
+      console.log(`❌ Not found in purchases directly`)
+      
+      // Show all articles from purchases if no match
+      if (purchases.length > 0) {
+        const allPurchaseArticles = new Set<string>()
+        purchases.forEach(purchase => {
+          purchase.items.forEach(item => {
+            if (item.article) {
+              allPurchaseArticles.add(String(item.article).trim())
+            }
+          })
+        })
+        const allArticlesArray = Array.from(allPurchaseArticles).sort()
+        console.log(`\n   All articles in purchases (${allArticlesArray.length}):`, allArticlesArray)
+        
+        // Check for similar
+        const queryParts = queryLower.split(/\s+/).filter(p => p.length > 2)
+        const similarInPurchases = allArticlesArray.filter(a => {
+          const aLower = String(a).toLowerCase()
+          const aNormalized = aLower.replace(/^article[_:\s-]+/i, '')
+          return queryParts.some(part => aLower.includes(part) || aNormalized.includes(part)) ||
+                 aLower.includes(queryLower) ||
+                 queryLower.includes(aNormalized) ||
+                 aNormalized.includes(queryLower)
+        })
+        
+        if (similarInPurchases.length > 0) {
+          console.log(`   Similar articles in purchases:`, similarInPurchases)
+        }
+      }
+    }
+    
+    // Debug: Show search results from purchase items
+    if (searchPurchaseItems.length > 0) {
+      console.log(`\n📋 Found ${searchPurchaseItems.length} purchase item(s):`)
+      searchPurchaseItems.forEach(({ purchase, item, product, availableStock, matchType, isExactMatch }) => {
+        console.log(`   - Purchase #${purchase.id}, Item #${item.id}`)
+        console.log(`     Product: ${product?.name || item.product_name || 'Unknown'} (ID: ${item.product_id})`)
+        if (item.article) console.log(`     Article: ${item.article}`)
+        if (item.barcode) console.log(`     Barcode: ${item.barcode}`)
+        console.log(`     Stock: ${availableStock} / ${item.quantity}`)
+        console.log(`     Match: ${matchType}${isExactMatch ? ' (exact)' : ' (partial)'}`)
+      })
+    } else {
+      console.log(`\n❌ No purchase items matched the search query`)
+    }
+    
+    console.log(`🔍 ========== END SEARCH DEBUG ==========\n`)
+  }, [searchQuery, availableProducts.length, searchPurchaseItems.length, productBarcodeMap.size, productArticleMap.size, barcodeToPurchaseItemMap, articleToPurchaseItemMap, purchases])
 
   // Generate unique key for a purchase item
   // Format: "P{purchase_id}-I{purchase_item_id}" or "PROD-{product_id}" if no purchase item
@@ -772,14 +906,18 @@ const SaleForm = () => {
     
     if (existingItem) {
       // Increase quantity if the same product with the same article is already in cart
-      // Get remaining stock for this item
-      const remainingStock = getRemainingStockForItem(existingItem)
+      // Get maximum allowed quantity for this item
+      const maxQuantity = getRemainingStockForItem(existingItem)
       
-      // For returns, allow adding even if stock is 0
-      if (existingItem.sale_type === 'return' || existingItem.quantity < remainingStock) {
+      // For returns, check sold_quantity (returnable), for sales check remaining stock
+      if (existingItem.quantity < maxQuantity) {
         updateItemQuantity(existingItem, existingItem.quantity + 1)
       } else {
-        alert(`Only ${remainingStock} units remaining in stock${existingItem.purchase_item_article ? ` for article "${existingItem.purchase_item_article}"` : ''}`)
+        if (existingItem.sale_type === 'return') {
+          alert(`Only ${maxQuantity} units can be returned${existingItem.purchase_item_article ? ` for article "${existingItem.purchase_item_article}"` : ''} (based on original purchase quantity)`)
+        } else {
+          alert(`Only ${maxQuantity} units remaining in stock${existingItem.purchase_item_article ? ` for article "${existingItem.purchase_item_article}"` : ''}`)
+        }
       }
     } else {
       // Use the purchase item details we already found above (from purchaseItemId and purchaseItemArticle)
@@ -968,44 +1106,73 @@ const SaleForm = () => {
   // IMPORTANT: This should be called with product_id to ensure correct matching
   // Returns the purchase item with the most available stock for this product+article combination
   const getPurchaseItemForArticle = (article: string, productId?: number): PurchaseItem | null => {
+    // Strip common prefixes from article search
+    let normalizedArticle = article.trim()
+    const prefixPattern = /^(article|barcode)[_:\s-]+/i
+    if (prefixPattern.test(normalizedArticle)) {
+      normalizedArticle = normalizedArticle.replace(prefixPattern, '').trim()
+    }
+    
+    const articleLower = normalizedArticle.toLowerCase()
+    
     if (productId === undefined) {
       // If no productId, try to find any purchase item with this article
-    const articleLower = article.toLowerCase()
       for (const purchase of purchases) {
         for (const item of purchase.items) {
-          if (item.article && 
-              (item.article.toLowerCase() === articleLower || item.article === article)) {
-            return item
+          if (item.article) {
+            const itemArticle = String(item.article).trim()
+            const itemArticleLower = itemArticle.toLowerCase()
+            // Check multiple matching strategies
+            if (itemArticleLower === articleLower || 
+                itemArticle === normalizedArticle ||
+                itemArticle === article ||
+                itemArticleLower === `article_${articleLower}` ||
+                itemArticle === `Article_${normalizedArticle}` ||
+                itemArticleLower.includes(articleLower) ||
+                articleLower.includes(itemArticleLower)) {
+              return item
+            }
           }
+        }
       }
-    }
-    return null
+      return null
     }
     
     // Search purchases directly to find the best matching purchase item
     // Priority: Most available stock > Most recent purchase
-    const articleLower = article.toLowerCase()
     let bestMatch: PurchaseItem | null = null
     let bestStock = -1
     let bestPurchaseDate: string | null = null
     
     for (const purchase of purchases) {
       for (const item of purchase.items) {
-        if (item.product_id === productId && 
-            item.article && 
-            (item.article.toLowerCase() === articleLower || item.article === article)) {
-          const availableStock = (item.quantity || 0) - (item.sold_quantity || 0)
+        if (item.product_id === productId && item.article) {
+          const itemArticle = String(item.article).trim()
+          const itemArticleLower = itemArticle.toLowerCase()
           
-          // Prefer item with more available stock
-          // If stock is same, prefer more recent purchase
-          if (availableStock > bestStock || 
-              (availableStock === bestStock && 
-               purchase.purchase_date && 
-               bestPurchaseDate &&
-               new Date(purchase.purchase_date) > new Date(bestPurchaseDate))) {
-            bestMatch = item
-            bestStock = availableStock
-            bestPurchaseDate = purchase.purchase_date || null
+          // Check multiple matching strategies
+          const matches = itemArticleLower === articleLower || 
+                         itemArticle === normalizedArticle ||
+                         itemArticle === article ||
+                         itemArticleLower === `article_${articleLower}` ||
+                         itemArticle === `Article_${normalizedArticle}` ||
+                         itemArticleLower.includes(articleLower) ||
+                         articleLower.includes(itemArticleLower)
+          
+          if (matches) {
+            const availableStock = (item.quantity || 0) - (item.sold_quantity || 0)
+            
+            // Prefer item with more available stock
+            // If stock is same, prefer more recent purchase
+            if (availableStock > bestStock || 
+                (availableStock === bestStock && 
+                 purchase.purchase_date && 
+                 bestPurchaseDate &&
+                 new Date(purchase.purchase_date) > new Date(bestPurchaseDate))) {
+              bestMatch = item
+              bestStock = availableStock
+              bestPurchaseDate = purchase.purchase_date || null
+            }
           }
         }
       }
@@ -1016,7 +1183,16 @@ const SaleForm = () => {
   
   // Get display price info for a product (use purchase item if available)
   const getProductDisplayInfo = (product: Product, searchQuery: string) => {
-    const query = searchQuery.trim()
+    let query = searchQuery.trim()
+    
+    // Strip common prefixes from search query (Article_, Barcode_, etc.)
+    const prefixPattern = /^(article|barcode)[_:\s-]+/i
+    const hadPrefix = prefixPattern.test(query)
+    if (hadPrefix) {
+      query = query.replace(prefixPattern, '').trim()
+      console.log(`🔍 [getProductDisplayInfo] Stripped prefix from "${searchQuery}" to "${query}" for product ${product.id} (${product.name})`)
+    }
+    
     const queryLower = query.toLowerCase()
     
     // Check if search query is a barcode that matches this product
@@ -1034,8 +1210,20 @@ const SaleForm = () => {
     // Also search purchases directly to find articles for this product
     let matchingArticle = ''
     productArticles.forEach(article => {
-      if (article.toLowerCase() === queryLower || article.toLowerCase().includes(queryLower)) {
-        matchingArticle = article
+      const articleStr = String(article).trim()
+      const articleLower = articleStr.toLowerCase()
+      // Check multiple matching strategies including prefix variations
+      if (articleLower === queryLower || 
+          articleStr === query ||
+          articleLower.includes(queryLower) ||
+          articleStr.includes(query) ||
+          articleLower === `article_${queryLower}` ||
+          articleStr === `Article_${query}` ||
+          queryLower === `article_${articleLower}` ||
+          query === `Article_${articleStr}` ||
+          articleLower.replace(/^article[_:\s-]+/i, '') === queryLower ||
+          queryLower.replace(/^article[_:\s-]+/i, '') === articleLower) {
+        matchingArticle = articleStr
       }
     })
     
@@ -1043,14 +1231,43 @@ const SaleForm = () => {
     if (!matchingArticle) {
       for (const purchase of purchases) {
         for (const item of purchase.items) {
-          if (item.product_id === product.id && 
-              item.article && 
-              (item.article.toLowerCase() === queryLower || item.article.toLowerCase().includes(queryLower))) {
-            matchingArticle = item.article
-            break
+          if (item.product_id === product.id && item.article) {
+            const articleStr = String(item.article).trim()
+            const articleLower = articleStr.toLowerCase()
+            // Check multiple matching strategies including prefix variations
+            const matches = articleLower === queryLower || 
+                articleStr === query ||
+                articleLower.includes(queryLower) ||
+                articleStr.includes(query) ||
+                articleLower === `article_${queryLower}` ||
+                articleStr === `Article_${query}` ||
+                queryLower === `article_${articleLower}` ||
+                query === `Article_${articleStr}` ||
+                articleLower.replace(/^article[_:\s-]+/i, '') === queryLower ||
+                queryLower.replace(/^article[_:\s-]+/i, '') === articleLower
+            
+            if (matches) {
+              matchingArticle = articleStr
+              console.log(`✅ [getProductDisplayInfo] Found matching article "${articleStr}" for query "${searchQuery}" (normalized: "${query}") in product ${product.id}`)
+              break
+            }
           }
         }
         if (matchingArticle) break
+      }
+      
+      // Debug: Log if no article found
+      if (!matchingArticle && (searchQuery.toLowerCase().includes('article') || query.match(/^\d+$/))) {
+        console.log(`⚠️ [getProductDisplayInfo] No matching article found for query "${searchQuery}" (normalized: "${query}") in product ${product.id} (${product.name})`)
+        console.log(`   Product articles from map:`, productArticles)
+        console.log(`   Checking purchases directly...`)
+        for (const purchase of purchases) {
+          for (const item of purchase.items) {
+            if (item.product_id === product.id && item.article) {
+              console.log(`   - Purchase ${purchase.id}, Item ${item.id}: article="${item.article}"`)
+            }
+          }
+        }
       }
     }
     
@@ -1153,7 +1370,23 @@ const SaleForm = () => {
         salePrice: product.selling_price || 0,
         purchasePrice: product.purchase_price || 0,
         barcode: product.barcode || '',
-        article: matchingArticle,
+        article: matchingArticle, // Always show the matching article
+        quantity: product.stock_quantity,
+        remainingStock: product.stock_quantity,
+        fromPurchase: false,
+        purchaseItem: null
+      }
+    }
+    
+    // If we have articles in the map but no match yet, show the first one
+    // This ensures articles are always displayed when available
+    if (productArticles.length > 0 && !matchingArticle) {
+      return {
+        mrp: product.selling_price || 0,
+        salePrice: product.selling_price || 0,
+        purchasePrice: product.purchase_price || 0,
+        barcode: product.barcode || '',
+        article: String(productArticles[0]).trim(), // Show first available article
         quantity: product.stock_quantity,
         remainingStock: product.stock_quantity,
         fromPurchase: false,
@@ -1232,8 +1465,67 @@ const SaleForm = () => {
     }
   }
 
+  // Get maximum returnable quantity for a return item (sold_quantity from purchase)
+  const getMaxReturnableQuantity = (item: SaleItem): number => {
+    // Priority 1: If we have unique key, use it to find the exact purchase item
+    if (item.purchase_item_unique_key) {
+      const [purchaseIdStr, itemIdStr] = item.purchase_item_unique_key.split('-I')
+      if (purchaseIdStr && itemIdStr) {
+        const purchaseId = parseInt(purchaseIdStr.replace('P', ''))
+        const purchaseItemId = parseInt(itemIdStr)
+        const purchase = purchases.find(p => p.id === purchaseId)
+        if (purchase) {
+          const purchaseItem = purchase.items.find(pi => pi.id === purchaseItemId)
+          if (purchaseItem && purchaseItem.product_id === item.product_id) {
+            const soldQty = purchaseItem.sold_quantity || 0
+            console.log(`[getMaxReturnableQuantity] Using unique_key ${item.purchase_item_unique_key}: Original Qty = ${purchaseItem.quantity}, Sold = ${soldQty}, Returnable = ${soldQty}`)
+            return soldQty
+          }
+        }
+      }
+    }
+    
+    // Priority 2: If we have purchase_item_id, use that (most accurate)
+    if (item.purchase_id && item.purchase_item_id) {
+      const purchase = purchases.find(p => p.id === item.purchase_id)
+      if (purchase) {
+        const purchaseItem = purchase.items.find(pi => pi.id === item.purchase_item_id)
+        if (purchaseItem && purchaseItem.product_id === item.product_id) {
+          const soldQty = purchaseItem.sold_quantity || 0
+          console.log(`[getMaxReturnableQuantity] Using purchase_item_id ${item.purchase_item_id}: Original Qty = ${purchaseItem.quantity}, Sold = ${soldQty}, Returnable = ${soldQty}`)
+          return soldQty
+        }
+      }
+    }
+    
+    // Priority 3: If we have article, find the purchase item by product_id + article
+    if (item.purchase_item_article) {
+      for (const purchase of purchases) {
+        for (const purchaseItem of purchase.items) {
+          if (purchaseItem.product_id === item.product_id && 
+              purchaseItem.article && 
+              purchaseItem.article.toLowerCase() === item.purchase_item_article?.toLowerCase()) {
+            const soldQty = purchaseItem.sold_quantity || 0
+            console.log(`[getMaxReturnableQuantity] Using article "${item.purchase_item_article}": Original Qty = ${purchaseItem.quantity}, Sold = ${soldQty}, Returnable = ${soldQty}`)
+            return soldQty
+          }
+        }
+      }
+    }
+    
+    // Fallback: If we can't find the purchase item, return 0 (can't return without purchase item info)
+    console.warn(`[getMaxReturnableQuantity] Could not find purchase item for return, returning 0`)
+    return 0
+  }
+
   // Get remaining stock for a sale item (from purchase items if available)
   const getRemainingStockForItem = (item: SaleItem): number => {
+    // For returns, use sold_quantity (how many can be returned), not remaining stock
+    if (item.sale_type === 'return') {
+      return getMaxReturnableQuantity(item)
+    }
+    
+    // For sales, use remaining stock (quantity - sold_quantity)
     // Priority 1: If we have unique key, use it to find the exact purchase item
     if (item.purchase_item_unique_key) {
       const [purchaseIdStr, itemIdStr] = item.purchase_item_unique_key.split('-I')
@@ -1304,43 +1596,62 @@ const SaleForm = () => {
   }
 
   const updateItemQuantity = (saleItem: SaleItem, quantity: number) => {
-    // Get remaining stock for this specific item
-    const remainingStock = getRemainingStockForItem(saleItem)
+    // Get maximum allowed quantity for this specific item
+    // For returns: use sold_quantity (how many can be returned)
+    // For sales: use remaining stock (quantity - sold_quantity)
+    const maxQuantity = getRemainingStockForItem(saleItem)
     
-    if (quantity > remainingStock) {
-      alert(`Only ${remainingStock} units remaining in stock${saleItem.purchase_item_article ? ` for article "${saleItem.purchase_item_article}"` : ''}`)
+    if (quantity > maxQuantity) {
+      if (saleItem.sale_type === 'return') {
+        alert(`Only ${maxQuantity} units can be returned${saleItem.purchase_item_article ? ` for article "${saleItem.purchase_item_article}"` : ''} (based on original purchase quantity)`)
+      } else {
+        alert(`Only ${maxQuantity} units remaining in stock${saleItem.purchase_item_article ? ` for article "${saleItem.purchase_item_article}"` : ''}`)
+      }
       return
     }
 
-    setSaleItems(saleItems.map(item => {
-      // Match by unique key first (most accurate)
-      if (saleItem.purchase_item_unique_key && item.purchase_item_unique_key) {
-        if (item.purchase_item_unique_key === saleItem.purchase_item_unique_key) {
-          return { ...item, quantity }
+    // Use functional update to ensure we have the latest state
+    setSaleItems(prevItems => {
+      const updatedItems = prevItems.map(item => {
+        // Match by unique key first (most accurate)
+        if (saleItem.purchase_item_unique_key && item.purchase_item_unique_key) {
+          if (item.purchase_item_unique_key === saleItem.purchase_item_unique_key) {
+            const newQuantity = Math.max(1, Math.min(quantity, maxQuantity))
+            const newTotal = item.unit_price * newQuantity
+            console.log(`[SaleForm] Updating quantity (unique key) for ${item.product_name}: ${item.quantity} -> ${newQuantity}, Total: ₹${item.total.toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
+            return { ...item, quantity: newQuantity, total: newTotal }
+          }
+          return item
+        }
+        
+        // Fallback: Match by product_id AND (purchase_item_id OR purchase_item_article)
+        const isMatch = item.product_id === saleItem.product_id &&
+          ((saleItem.purchase_item_id && item.purchase_item_id && item.purchase_item_id === saleItem.purchase_item_id &&
+            saleItem.purchase_id && item.purchase_id && item.purchase_id === saleItem.purchase_id) ||
+           (saleItem.purchase_item_article && item.purchase_item_article && 
+            item.purchase_item_article.toLowerCase() === saleItem.purchase_item_article.toLowerCase() &&
+            !saleItem.purchase_item_id && !item.purchase_item_id) ||
+           (!saleItem.purchase_item_id && !saleItem.purchase_item_article && 
+            !item.purchase_item_id && !item.purchase_item_article))
+        
+        if (isMatch) {
+          const newQuantity = Math.max(1, Math.min(quantity, maxQuantity))
+          // Recalculate total based on new quantity and current unit price
+          const newTotal = item.unit_price * newQuantity
+          console.log(`[SaleForm] Updating quantity for ${item.product_name}: ${item.quantity} -> ${newQuantity}, Unit Price: ₹${item.unit_price.toFixed(2)}, Total: ₹${item.total.toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
+          return {
+            ...item,
+            quantity: newQuantity,
+            total: newTotal
+          }
         }
         return item
-      }
+      })
       
-      // Fallback: Match by product_id AND (purchase_item_id OR purchase_item_article)
-      const isMatch = item.product_id === saleItem.product_id &&
-        ((saleItem.purchase_item_id && item.purchase_item_id && item.purchase_item_id === saleItem.purchase_item_id &&
-          saleItem.purchase_id && item.purchase_id && item.purchase_id === saleItem.purchase_id) ||
-         (saleItem.purchase_item_article && item.purchase_item_article && 
-          item.purchase_item_article.toLowerCase() === saleItem.purchase_item_article.toLowerCase() &&
-          !saleItem.purchase_item_id && !item.purchase_item_id) ||
-         (!saleItem.purchase_item_id && !saleItem.purchase_item_article && 
-          !item.purchase_item_id && !item.purchase_item_article))
-      
-      if (isMatch) {
-        const newQuantity = Math.max(1, Math.min(quantity, remainingStock))
-        return {
-          ...item,
-          quantity: newQuantity,
-          total: item.unit_price * newQuantity
-        }
-      }
-      return item
-    }))
+      const newSubtotal = updatedItems.reduce((sum, i) => sum + i.total, 0)
+      console.log(`[SaleForm] ✅ Updated quantity, new subtotal: ₹${newSubtotal.toFixed(2)}`)
+      return updatedItems
+    })
   }
 
   const removeItem = (itemToRemove: SaleItem) => {
@@ -1380,6 +1691,54 @@ const SaleForm = () => {
     return saleItems.reduce((sum, item) => sum + item.total, 0)
   }
 
+  // Calculate discount amount based on type
+  const getDiscountAmount = () => {
+    const subtotal = getSubtotal()
+    if (discountType === 'percentage') {
+      return (subtotal * discountValue) / 100
+    } else {
+      // Fixed amount - ensure it doesn't exceed subtotal
+      return Math.min(discountValue, subtotal)
+    }
+  }
+
+  // Calculate grand total after discount and credit (before rounding)
+  const getGrandTotalBeforeRounding = () => {
+    const subtotal = getSubtotal()
+    const discountAmount = getDiscountAmount()
+    const totalAfterDiscount = subtotal - discountAmount
+    return Math.max(0, totalAfterDiscount - creditApplied) // Ensure non-negative
+  }
+
+  // Round up to nearest whole number (no cents)
+  const roundUp = (amount: number): number => {
+    return Math.ceil(amount)
+  }
+
+  // Get rounded subtotal (rounded up to nearest whole number)
+  const getRoundedSubtotal = () => {
+    return roundUp(getSubtotal())
+  }
+
+  // Get rounded grand total (rounded up to nearest whole number)
+  const getGrandTotal = () => {
+    return roundUp(getGrandTotalBeforeRounding())
+  }
+
+  // Get rounding adjustment for subtotal
+  const getSubtotalRounding = () => {
+    const subtotal = getSubtotal()
+    const rounded = getRoundedSubtotal()
+    return rounded - subtotal
+  }
+
+  // Get rounding adjustment for grand total
+  const getGrandTotalRounding = () => {
+    const beforeRounding = getGrandTotalBeforeRounding()
+    const rounded = getGrandTotal()
+    return rounded - beforeRounding
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     
@@ -1394,8 +1753,9 @@ const SaleForm = () => {
       .reduce((sum, item) => sum + item.total, 0)
     
     // Calculate payment total and return amount (accounting for credit)
-    const subtotalAmount = getSubtotal()
-    const grandTotal = subtotalAmount - creditApplied // Deduct credit from grand total
+    // Use rounded values for calculations
+    const subtotalAmount = getRoundedSubtotal()
+    const grandTotal = getGrandTotal() // Already rounded (uses discount and credit internally)
     
     // Separate payment methods: exclude credit from payment total calculation
     const nonCreditPayments = paymentMethods.filter(p => p.method !== 'credit')
@@ -1420,8 +1780,8 @@ const SaleForm = () => {
     
     // Validate: payment + credit applied + credit payment should be at least equal to grand total
     const totalCoverage = paymentTotal + creditApplied + creditPaymentTotal
-    if (totalCoverage < subtotalAmount - 0.01) {
-      setErrors({ payment: `Payment total (₹${paymentTotal.toFixed(2)}) + Credit Applied (₹${creditApplied.toFixed(2)}) + Credit Payment (₹${creditPaymentTotal.toFixed(2)}) is less than grand total (₹${subtotalAmount.toFixed(2)})` })
+    if (totalCoverage < grandTotal - 0.01) {
+      setErrors({ payment: `Payment total (₹${paymentTotal.toFixed(2)}) + Credit Applied (₹${creditApplied.toFixed(2)}) + Credit Payment (₹${creditPaymentTotal.toFixed(2)}) is less than grand total (₹${grandTotal.toFixed(2)})` })
       return
     }
     setErrors({}) // Clear errors if validation passes
@@ -1437,9 +1797,13 @@ const SaleForm = () => {
       }
     }
 
-    const subtotal = getSubtotal()
+    // Use rounded values for sale
+    const subtotal = getRoundedSubtotal()
+    const discountAmount = getDiscountAmount()
     const taxAmount = 0 // No tax for simple sales
-    // grandTotal is already declared above for payment validation
+    const finalGrandTotal = getGrandTotal() // Already rounded
+    const subtotalRounding = getSubtotalRounding()
+    const grandTotalRounding = getGrandTotalRounding()
 
     const selectedSalesPerson = salesPersonId ? salesPersons.find(sp => sp.id === salesPersonId) : null
 
@@ -1469,9 +1833,10 @@ const SaleForm = () => {
         purchase_item_article: item.purchase_item_article,
         purchase_item_barcode: item.purchase_item_barcode
       })),
-      subtotal: subtotal,
+      subtotal: subtotal, // Rounded subtotal
+      discount: discountAmount > 0 ? discountAmount : undefined, // Save discount amount
       tax_amount: taxAmount,
-      grand_total: grandTotal,
+      grand_total: finalGrandTotal, // Rounded grand total
       payment_status: 'paid' as const,
       payment_method: finalPaymentMethods.length > 0 ? finalPaymentMethods[0].method : paymentMethod, // Legacy support
       payment_methods: finalPaymentMethods.map(p => ({ method: p.method, amount: p.amount })), // Multiple payment methods (including credit)
@@ -1531,222 +1896,153 @@ const SaleForm = () => {
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search by name, barcode, SKU, article, category, or HSN code..."
+                    placeholder="Search by article or barcode from purchase history..."
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                   />
                 </div>
                 
-                {/* Product List */}
+                {/* Purchase Items List - Direct search results */}
                 <div className="max-h-96 overflow-y-auto space-y-2">
                   {!searchQuery.trim() ? (
                     <div className="text-center py-12">
                       <Search className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                      <p className="text-gray-500 mb-2 font-medium">Search for products to add to sale</p>
-                      <p className="text-xs text-gray-400">Search by name, barcode, SKU, article, category, or HSN code</p>
+                      <p className="text-gray-500 mb-2 font-medium">Search purchase history to add items to sale</p>
+                      <p className="text-xs text-gray-400">Search by article or barcode from purchase history</p>
                     </div>
-                  ) : availableProducts.length === 0 ? (
-                    <p className="text-center text-gray-500 py-8">No products available. Please add products first.</p>
-                  ) : filteredProducts.length === 0 ? (
+                  ) : purchases.length === 0 ? (
+                    <p className="text-center text-gray-500 py-8">No purchases found. Please add purchases first.</p>
+                  ) : searchPurchaseItems.length === 0 ? (
                     <div className="text-center py-8">
-                      <p className="text-gray-500 mb-2">No products found matching "{searchQuery}"</p>
-                      <p className="text-xs text-gray-400">Try searching by name, barcode, SKU, article, category, or HSN code</p>
+                      <p className="text-gray-500 mb-2">No items found matching "{searchQuery}"</p>
+                      <p className="text-xs text-gray-400">Try searching by article or barcode from purchase history</p>
                       <p className="text-xs text-gray-400 mt-2">
-                        Available products: {availableProducts.length} | 
-                        Barcode map entries: {productBarcodeMap.size} | 
-                        Article map entries: {productArticleMap.size}
+                        Total purchases: {purchases.length} | 
+                        Total purchase items: {purchases.reduce((sum, p) => sum + p.items.length, 0)}
                       </p>
                     </div>
                   ) : (
                     <>
                       <p className="text-xs text-gray-500 mb-2">
-                        Found {filteredProducts.length} product{filteredProducts.length !== 1 ? 's' : ''} matching "{searchQuery}"
+                        Found {searchPurchaseItems.length} item{searchPurchaseItems.length !== 1 ? 's' : ''} matching "{searchQuery}"
                       </p>
-                      {filteredProducts.flatMap(product => {
-                        // Check if this is a product name search (not barcode or article)
-                        const query = searchQuery.trim()
-                        const queryLower = query.toLowerCase()
-                        const isProductNameSearch = 
-                          (queryLower === product.name.toLowerCase() || 
-                           queryLower.includes(product.name.toLowerCase()) ||
-                           product.name.toLowerCase().includes(queryLower)) &&
-                          !barcodeToPurchaseItemMap.has(query) &&
-                          !getPurchaseItemForArticle(query, product.id) &&
-                          query
-                        
-                        // If product name search, get all purchase items for this product
-                        let purchaseItemsToShow: Array<{purchase: Purchase, item: PurchaseItem}> = []
-                        
-                        if (isProductNameSearch) {
-                          // Find all purchase items for this product
-                          for (const purchase of purchases) {
-                            for (const item of purchase.items) {
-                              if (item.product_id === product.id) {
-                                const soldQty = item.sold_quantity || 0
-                                const availableStock = item.quantity - soldQty
-                                purchaseItemsToShow.push({ purchase, item })
-                              }
-                            }
-                          }
-                          
-                          // Sort by purchase date (oldest first) for FIFO display
-                          purchaseItemsToShow.sort((a, b) => {
-                            const dateA = new Date(a.purchase.purchase_date).getTime()
-                            const dateB = new Date(b.purchase.purchase_date).getTime()
-                            return dateA - dateB
-                          })
-                        }
-                        
-                        // If we have multiple purchase items, show each separately
-                        if (purchaseItemsToShow.length > 1) {
-                          return purchaseItemsToShow.map(({ purchase, item }) => {
-                            const soldQty = item.sold_quantity || 0
-                            const remainingStock = item.quantity - soldQty
-                            const mrp = item.mrp || product.selling_price || 0
-                            const salePrice = item.sale_price || (item.mrp || product.selling_price || 0)
-                            
-                            return (
-                              <div
-                                key={`${product.id}-${purchase.id}-${item.id}`}
-                                onClick={() => {
-                                  // Create a unique identifier to pass to addProductToSale
-                                  // We'll use purchase_id and purchase_item_id
-                                  addProductToSale(product, `PURCHASE-${purchase.id}-ITEM-${item.id}`)
-                                }}
-                                className={`flex items-center justify-between p-4 rounded-lg cursor-pointer transition-colors border ${
-                                  remainingStock > 0
-                                    ? 'bg-gray-50 hover:bg-blue-50 border-transparent hover:border-blue-200'
-                                    : 'bg-orange-50 hover:bg-orange-100 border-orange-200'
-                                }`}
-                              >
-                                <div className="flex-1">
-                                  <h3 className="font-semibold text-gray-900">{product.name}</h3>
-                                  <div className="flex items-center gap-4 text-sm text-gray-600 mt-1 flex-wrap">
-                                    <span className={remainingStock > 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'}>
-                                      Remaining Stock: {remainingStock} {product.unit}
+                      {searchPurchaseItems.map(({ purchase, item, product, availableStock, matchType, isExactMatch }) => {
+                        if (!product) {
+                          // Product not found - still show the item but with limited info
+                          return (
+                            <div
+                              key={`${purchase.id}-${item.id}`}
+                              className="flex items-center justify-between p-4 rounded-lg border border-orange-200 bg-orange-50"
+                            >
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                  <h3 className="font-semibold text-gray-900">{item.product_name || 'Unknown Product'}</h3>
+                                  {item.article && (
+                                    <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-bold border border-blue-300">
+                                      Article: {item.article}
                                     </span>
-                                    {item.article && (
-                                      <span className="text-blue-600 font-medium">Article: {item.article}</span>
-                                    )}
-                                    <span className="text-gray-500 text-xs">
-                                      Purchase #{purchase.id} • {new Date(purchase.purchase_date).toLocaleDateString()}
-                                    </span>
-                                  </div>
-                                </div>
-                                <div className="text-right">
-                                  {mrp > salePrice && (
-                                    <div className="text-xs text-gray-500 line-through">MRP: ₹{mrp.toFixed(2)}</div>
                                   )}
-                                  <div className="font-bold text-blue-600">₹{salePrice.toFixed(2)}</div>
-                                  <button
-                                    type="button"
-                                    className="mt-2 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      addProductToSale(product, `PURCHASE-${purchase.id}-ITEM-${item.id}`)
-                                    }}
-                                  >
-                                    Add
-                                  </button>
+                                  {isExactMatch && (
+                                    <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs font-bold">
+                                      ✓ Exact Match
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-4 text-sm text-gray-600 mt-1 flex-wrap">
+                                  <span className={availableStock > 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'}>
+                                    Stock: {availableStock} / {item.quantity}
+                                  </span>
+                                  {item.barcode && (
+                                    <span className="font-medium">
+                                      Barcode: <span className="font-bold text-blue-600">{item.barcode}</span>
+                                    </span>
+                                  )}
+                                  <span className="text-gray-500 text-xs">
+                                    Purchase #{purchase.id} • {new Date(purchase.purchase_date).toLocaleDateString()}
+                                  </span>
+                                  <span className="text-xs text-orange-600">
+                                    ⚠️ Product not loaded
+                                  </span>
                                 </div>
                               </div>
-                            )
-                          })
-                        } else {
-                          // Single purchase item or no purchase items - show as before
-                        const displayInfo = getProductDisplayInfo(product, searchQuery)
-                        const purchaseItem = displayInfo.purchaseItem
+                              <div className="text-right">
+                                <div className="font-bold text-blue-600">₹{(item.sale_price || item.mrp || 0).toFixed(2)}</div>
+                                <button
+                                  type="button"
+                                  className="mt-2 px-3 py-1 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    alert('Product not found. Please ensure the product exists and is active.')
+                                  }}
+                                >
+                                  Product Missing
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        }
                         
-                          return [(
-                      <div
-                        key={product.id}
-                            onClick={() => addProductToSale(product, searchQuery.trim())}
+                        const mrp = item.mrp || product.selling_price || 0
+                        const salePrice = item.sale_price || mrp
+                        
+                        return (
+                          <div
+                            key={`${purchase.id}-${item.id}`}
+                            onClick={() => {
+                              addProductToSale(product, `PURCHASE-${purchase.id}-ITEM-${item.id}`)
+                            }}
                             className={`flex items-center justify-between p-4 rounded-lg cursor-pointer transition-colors border ${
-                              product.stock_quantity > 0
+                              availableStock > 0
                                 ? 'bg-gray-50 hover:bg-blue-50 border-transparent hover:border-blue-200'
                                 : 'bg-orange-50 hover:bg-orange-100 border-orange-200'
                             }`}
-                      >
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-gray-900">{product.name}</h3>
-                              <div className="flex items-center gap-4 text-sm text-gray-600 mt-1 flex-wrap">
-                                {displayInfo.fromPurchase && displayInfo.remainingStock !== undefined ? (
-                                  <span className={displayInfo.remainingStock > 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'}>
-                                    Remaining Stock: {displayInfo.remainingStock} {product.unit}
-                                  </span>
-                                ) : (
-                                  <span className={product.stock_quantity > 0 ? '' : 'text-orange-600 font-semibold'}>
-                                    Remaining Stock: {product.stock_quantity} {product.unit}
-                                    {product.stock_quantity === 0 && ' (Out of Stock - Use for Returns)'}
+                          >
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                <h3 className="font-semibold text-gray-900">{product.name}</h3>
+                                {item.article && (
+                                  <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-bold border border-blue-300">
+                                    Article: {item.article}
                                   </span>
                                 )}
-                                {displayInfo.barcode && (
+                                {isExactMatch && (
+                                  <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs font-bold">
+                                    ✓ Exact {matchType === 'both' ? 'Match' : matchType}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-4 text-sm text-gray-600 mt-1 flex-wrap">
+                                <span className={availableStock > 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'}>
+                                  Stock: {availableStock} / {item.quantity} {product.unit}
+                                </span>
+                                {item.barcode && (
                                   <span className="font-medium">
-                                    Barcode: <span className="font-bold text-blue-600">{displayInfo.barcode}</span>
-                                    {displayInfo.fromPurchase && <span className="text-green-600 ml-1">(from purchase)</span>}
+                                    Barcode: <span className="font-bold text-blue-600">{item.barcode}</span>
                                   </span>
                                 )}
                                 {product.sku && <span>SKU: {product.sku}</span>}
-                                {displayInfo.article && (
-                                  <span className="text-blue-600 font-medium">
-                                    Article: {displayInfo.article}
-                                  </span>
-                                )}
-                                {!displayInfo.article && productArticleMap.get(product.id) && productArticleMap.get(product.id)!.length > 0 && (
-                                  <span className="text-gray-500 text-xs">
-                                    Other Articles: {productArticleMap.get(product.id)!.join(', ')}
-                                  </span>
-                                )}
+                                <span className="text-gray-500 text-xs">
+                                  Purchase #{purchase.id} • {new Date(purchase.purchase_date).toLocaleDateString()}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              {mrp > salePrice && (
+                                <div className="text-xs text-gray-500 line-through">MRP: ₹{mrp.toFixed(2)}</div>
+                              )}
+                              <div className="font-bold text-blue-600">₹{salePrice.toFixed(2)}</div>
+                              <button
+                                type="button"
+                                className="mt-2 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  addProductToSale(product, `PURCHASE-${purchase.id}-ITEM-${item.id}`)
+                                }}
+                              >
+                                Add
+                              </button>
+                            </div>
                           </div>
-                              {purchaseItem && (
-                                <div className="mt-2 text-xs bg-green-50 p-2 rounded border border-green-200">
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <div>
-                                      <span className="text-gray-600">MRP:</span>
-                                      <span className="font-semibold text-gray-900 ml-1">₹{displayInfo.mrp.toFixed(2)}</span>
-                                    </div>
-                                    <div>
-                                      <span className="text-gray-600">Sale Price:</span>
-                                      <span className="font-semibold text-blue-600 ml-1">₹{displayInfo.salePrice.toFixed(2)}</span>
-                                    </div>
-                                    {displayInfo.remainingStock !== undefined && (
-                                      <div>
-                                        <span className="text-gray-600">Remaining Stock:</span>
-                                        <span className={`font-medium ml-1 ${displayInfo.remainingStock > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                          {displayInfo.remainingStock} {product.unit}
-                                        </span>
-                                      </div>
-                                    )}
-                                    {displayInfo.article && (
-                                      <div className={displayInfo.quantity > 0 ? '' : 'col-span-2'}>
-                                        <span className="text-gray-600">Article:</span>
-                                        <span className="font-medium ml-1">{displayInfo.article}</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                        </div>
-                        <div className="text-right">
-                              {purchaseItem ? (
-                                <>
-                                  {displayInfo.mrp > displayInfo.salePrice && (
-                                    <div className="text-xs text-gray-500 line-through">MRP: ₹{displayInfo.mrp.toFixed(2)}</div>
-                                  )}
-                                  <div className="font-bold text-blue-600">₹{displayInfo.salePrice.toFixed(2)}</div>
-                                </>
-                              ) : (
-                                <div className="font-bold text-blue-600">₹{displayInfo.salePrice.toFixed(2)}</div>
-                              )}
-                          <button
-                            type="button"
-                            className="mt-2 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
-                          >
-                            Add
-                          </button>
-                        </div>
-                      </div>
-                        )]
-                        }
+                        )
                       })}
                     </>
                   )}
@@ -1767,7 +2063,12 @@ const SaleForm = () => {
                   <div className="space-y-3">
                     {saleItems.map(item => {
                       const product = availableProducts.find(p => p.id === item.product_id)
-                      const mrpTotal = (item.mrp || item.unit_price) * item.quantity
+                      // Calculate per-unit values
+                      const mrpPerUnit = item.mrp || item.unit_price || 0
+                      const sellingPricePerUnit = item.unit_price || 0
+                      // Calculate total values based on quantity
+                      const mrpTotal = mrpPerUnit * item.quantity
+                      const sellingPriceTotal = sellingPricePerUnit * item.quantity
                       const totalSavings = mrpTotal - item.total
                       const discountPercent = item.mrp && item.mrp > 0 
                         ? ((item.mrp - item.unit_price) / item.mrp * 100).toFixed(1)
@@ -1797,13 +2098,23 @@ const SaleForm = () => {
                                 </span>
                               </div>
                               {(() => {
-                                const remainingStock = getRemainingStockForItem(item)
-                                return (
-                                  <div className={`text-xs mt-1 ${remainingStock > 0 ? 'text-gray-500' : 'text-red-600 font-semibold'}`}>
-                                    Remaining Stock: {remainingStock} {product?.unit || 'pcs'}
-                                    {item.purchase_item_article && ` (Article: ${item.purchase_item_article})`}
-                                </div>
-                                )
+                                if (item.sale_type === 'return') {
+                                  const maxReturnable = getMaxReturnableQuantity(item)
+                                  return (
+                                    <div className={`text-xs mt-1 ${maxReturnable > 0 ? 'text-gray-500' : 'text-red-600 font-semibold'}`}>
+                                      Max Returnable: {maxReturnable} {product?.unit || 'pcs'}
+                                      {item.purchase_item_article && ` (Article: ${item.purchase_item_article})`}
+                                    </div>
+                                  )
+                                } else {
+                                  const remainingStock = getRemainingStockForItem(item)
+                                  return (
+                                    <div className={`text-xs mt-1 ${remainingStock > 0 ? 'text-gray-500' : 'text-red-600 font-semibold'}`}>
+                                      Remaining Stock: {remainingStock} {product?.unit || 'pcs'}
+                                      {item.purchase_item_article && ` (Article: ${item.purchase_item_article})`}
+                                    </div>
+                                  )
+                                }
                               })()}
                             </div>
                             <button
@@ -1923,7 +2234,10 @@ const SaleForm = () => {
                                   const currentPrice = item.unit_price
                                   const discount = newMrp > currentPrice ? newMrp - currentPrice : 0
                                   const discountPct = newMrp > 0 ? (discount / newMrp * 100) : 0
-                                  setSaleItems(saleItems.map(i => {
+                                  
+                                  console.log(`[SaleForm] Updating MRP for ${item.product_name}: ₹${item.mrp || item.unit_price} -> ₹${newMrp}`)
+                                  
+                                  const updatedItems = saleItems.map(i => {
                                     // Match by unique key first (most accurate)
                                     if (item.purchase_item_unique_key && i.purchase_item_unique_key) {
                                       return i.purchase_item_unique_key === item.purchase_item_unique_key 
@@ -1955,7 +2269,9 @@ const SaleForm = () => {
                                     }
                                     
                                     return i
-                                  }))
+                                  })
+                                  
+                                  setSaleItems(updatedItems)
                                 }}
                                 className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
                                 min="0"
@@ -1969,42 +2285,75 @@ const SaleForm = () => {
                                 value={item.unit_price}
                                 onChange={(e) => {
                                   const newPrice = parseFloat(e.target.value) || 0
-                                  const mrp = item.mrp || newPrice
-                                  const discount = mrp > newPrice ? mrp - newPrice : 0
-                                  const discountPct = mrp > 0 ? (discount / mrp * 100) : 0
-                                  setSaleItems(saleItems.map(i => {
-                                    // Match by unique key first (most accurate)
-                                    if (item.purchase_item_unique_key && i.purchase_item_unique_key) {
-                                      return i.purchase_item_unique_key === item.purchase_item_unique_key 
-                                        ? { ...i, unit_price: newPrice, discount, discount_percentage: discountPct, total: newPrice * i.quantity } : i
-                                    }
+                                  
+                                  // Use functional update to ensure we have the latest state
+                                  setSaleItems(prevItems => {
+                                    const updatedItems = prevItems.map(i => {
+                                      // Match by unique key first (most accurate)
+                                      if (item.purchase_item_unique_key && i.purchase_item_unique_key) {
+                                        if (i.purchase_item_unique_key === item.purchase_item_unique_key) {
+                                          const mrp = i.mrp || newPrice
+                                          const discount = mrp > newPrice ? mrp - newPrice : 0
+                                          const discountPct = mrp > 0 ? (discount / mrp * 100) : 0
+                                          const newTotal = newPrice * i.quantity
+                                          console.log(`[SaleForm] Updated selling price for ${i.product_name}: ₹${i.unit_price} -> ₹${newPrice}, Qty: ${i.quantity}, Total: ₹${i.total.toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
+                                          return { ...i, unit_price: newPrice, discount, discount_percentage: discountPct, total: newTotal }
+                                        }
+                                        return i
+                                      }
+                                      
+                                      // Fallback: Match by product_id AND purchase_item_id
+                                      if (item.purchase_item_id && i.purchase_item_id && 
+                                          item.purchase_id && i.purchase_id) {
+                                        if (i.product_id === item.product_id &&
+                                            i.purchase_item_id === item.purchase_item_id &&
+                                            i.purchase_id === item.purchase_id) {
+                                          const mrp = i.mrp || newPrice
+                                          const discount = mrp > newPrice ? mrp - newPrice : 0
+                                          const discountPct = mrp > 0 ? (discount / mrp * 100) : 0
+                                          const newTotal = newPrice * i.quantity
+                                          console.log(`[SaleForm] Updated selling price for ${i.product_name}: ₹${i.unit_price} -> ₹${newPrice}, Qty: ${i.quantity}, Total: ₹${i.total.toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
+                                          return { ...i, unit_price: newPrice, discount, discount_percentage: discountPct, total: newTotal }
+                                        }
+                                        return i
+                                      }
+                                      
+                                      // Fallback: Match by product_id AND article
+                                      if (item.purchase_item_article && i.purchase_item_article &&
+                                          !item.purchase_item_id && !i.purchase_item_id) {
+                                        if (i.product_id === item.product_id &&
+                                            i.purchase_item_article.toLowerCase() === item.purchase_item_article.toLowerCase()) {
+                                          const mrp = i.mrp || newPrice
+                                          const discount = mrp > newPrice ? mrp - newPrice : 0
+                                          const discountPct = mrp > 0 ? (discount / mrp * 100) : 0
+                                          const newTotal = newPrice * i.quantity
+                                          console.log(`[SaleForm] Updated selling price for ${i.product_name}: ₹${i.unit_price} -> ₹${newPrice}, Qty: ${i.quantity}, Total: ₹${i.total.toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
+                                          return { ...i, unit_price: newPrice, discount, discount_percentage: discountPct, total: newTotal }
+                                        }
+                                        return i
+                                      }
+                                      
+                                      // Fallback: Match by product_id only
+                                      if (!item.purchase_item_id && !item.purchase_item_article &&
+                                          !i.purchase_item_id && !i.purchase_item_article) {
+                                        if (i.product_id === item.product_id) {
+                                          const mrp = i.mrp || newPrice
+                                          const discount = mrp > newPrice ? mrp - newPrice : 0
+                                          const discountPct = mrp > 0 ? (discount / mrp * 100) : 0
+                                          const newTotal = newPrice * i.quantity
+                                          console.log(`[SaleForm] Updated selling price for ${i.product_name}: ₹${i.unit_price} -> ₹${newPrice}, Qty: ${i.quantity}, Total: ₹${i.total.toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
+                                          return { ...i, unit_price: newPrice, discount, discount_percentage: discountPct, total: newTotal }
+                                        }
+                                        return i
+                                      }
+                                      
+                                      return i
+                                    })
                                     
-                                    // Fallback: Match by product_id AND purchase_item_id
-                                    if (item.purchase_item_id && i.purchase_item_id && 
-                                        item.purchase_id && i.purchase_id) {
-                                      return (i.product_id === item.product_id &&
-                                              i.purchase_item_id === item.purchase_item_id &&
-                                              i.purchase_id === item.purchase_id)
-                                        ? { ...i, unit_price: newPrice, discount, discount_percentage: discountPct, total: newPrice * i.quantity } : i
-                                    }
-                                    
-                                    // Fallback: Match by product_id AND article
-                                    if (item.purchase_item_article && i.purchase_item_article &&
-                                        !item.purchase_item_id && !i.purchase_item_id) {
-                                      return (i.product_id === item.product_id &&
-                                              i.purchase_item_article.toLowerCase() === item.purchase_item_article.toLowerCase())
-                                        ? { ...i, unit_price: newPrice, discount, discount_percentage: discountPct, total: newPrice * i.quantity } : i
-                                    }
-                                    
-                                    // Fallback: Match by product_id only
-                                    if (!item.purchase_item_id && !item.purchase_item_article &&
-                                        !i.purchase_item_id && !i.purchase_item_article) {
-                                      return i.product_id === item.product_id 
-                                        ? { ...i, unit_price: newPrice, discount, discount_percentage: discountPct, total: newPrice * i.quantity } : i
-                                    }
-                                    
-                                    return i
-                                  }))
+                                    const newSubtotal = updatedItems.reduce((sum, i) => sum + i.total, 0)
+                                    console.log(`[SaleForm] ✅ Updated all items, new subtotal: ₹${newSubtotal.toFixed(2)}`)
+                                    return updatedItems
+                                  })
                                 }}
                                 className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
                                 min="0"
@@ -2041,14 +2390,31 @@ const SaleForm = () => {
                             </div>
                             <div className="text-right">
                               {item.mrp && item.mrp > item.unit_price && (
-                                <div className="text-xs text-gray-500 line-through">
-                                  MRP: ₹{mrpTotal.toFixed(2)}
-                                </div>
+                                <>
+                                  <div className="text-xs text-gray-500 line-through">
+                                    MRP: ₹{mrpTotal.toFixed(2)}
+                                  </div>
+                                  <div className="text-xs text-gray-400">
+                                    {item.quantity > 1 
+                                      ? `(₹${mrpPerUnit.toFixed(2)} × ${item.quantity})`
+                                      : `(₹${mrpPerUnit.toFixed(2)} per unit)`}
+                                  </div>
+                                </>
                               )}
                               <div className="font-bold text-gray-900">₹{item.total.toFixed(2)}</div>
+                              <div className="text-xs text-gray-400">
+                                {item.quantity > 1 
+                                  ? `(₹${sellingPricePerUnit.toFixed(2)} × ${item.quantity})`
+                                  : `(₹${sellingPricePerUnit.toFixed(2)} per unit)`}
+                              </div>
                               {totalSavings > 0 && (
                                 <div className="text-xs text-green-600 font-medium">
                                   You save: ₹{totalSavings.toFixed(2)}
+                                  <span className="text-gray-500">
+                                    {item.quantity > 1 
+                                      ? ` (₹${(totalSavings / item.quantity).toFixed(2)} per unit)`
+                                      : ` (₹${totalSavings.toFixed(2)} per unit)`}
+                                  </span>
                                 </div>
                               )}
                             </div>
@@ -2145,6 +2511,77 @@ const SaleForm = () => {
                 </div>
               </div>
 
+              {/* Discount Section */}
+              <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6 border border-white/50">
+                <h2 className="text-xl font-bold text-gray-900 mb-4">Additional Discount</h2>
+                <div className="space-y-4">
+                  <div className="flex gap-4 items-end">
+                    <div className="flex-1">
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Discount Type</label>
+                      <select
+                        value={discountType}
+                        onChange={(e) => {
+                          setDiscountType(e.target.value as 'percentage' | 'fixed')
+                          setDiscountValue(0) // Reset value when changing type
+                        }}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      >
+                        <option value="percentage">Percentage (%)</option>
+                        <option value="fixed">Fixed Amount (₹)</option>
+                      </select>
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Discount {discountType === 'percentage' ? '(%)' : '(₹)'}
+                      </label>
+                      <input
+                        type="number"
+                        value={discountValue || ''}
+                        onChange={(e) => {
+                          const value = parseFloat(e.target.value) || 0
+                          if (discountType === 'percentage') {
+                            setDiscountValue(Math.max(0, Math.min(100, value))) // Limit to 0-100%
+                          } else {
+                            const subtotal = getSubtotal()
+                            setDiscountValue(Math.max(0, Math.min(subtotal, value))) // Limit to 0-subtotal
+                          }
+                        }}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        placeholder="0"
+                        min="0"
+                        max={discountType === 'percentage' ? 100 : getSubtotal()}
+                        step={discountType === 'percentage' ? '0.01' : '0.01'}
+                      />
+                    </div>
+                    {discountValue > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDiscountValue(0)
+                        }}
+                        className="px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors"
+                        title="Clear discount"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  {discountValue > 0 && (
+                    <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm font-semibold text-blue-700">Discount Amount:</span>
+                        <span className="text-lg font-bold text-blue-600">-₹{getDiscountAmount().toFixed(2)}</span>
+                      </div>
+                      {discountType === 'percentage' && (
+                        <div className="mt-1 text-xs text-blue-600">
+                          {discountValue}% of ₹{getSubtotal().toFixed(2)} = ₹{getDiscountAmount().toFixed(2)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Payment Details */}
               <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6 border border-white/50">
                 <h2 className="text-xl font-bold text-gray-900 mb-4">Payment Details</h2>
@@ -2210,11 +2647,11 @@ const SaleForm = () => {
                   <button
                     type="button"
                     onClick={() => {
-                      const grandTotal = getSubtotal()
+                      const grandTotal = getGrandTotal()
                       // Exclude credit payments from calculation
                       const nonCreditPayments = paymentMethods.filter(p => p.method !== 'credit')
                       const currentTotal = nonCreditPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
-                      const remaining = Math.max(0, grandTotal - creditApplied - currentTotal)
+                      const remaining = Math.max(0, grandTotal - currentTotal)
                       
                       // Add new payment method with remaining amount or 0
                       setPaymentMethods([
@@ -2228,34 +2665,113 @@ const SaleForm = () => {
                   </button>
                   
                   {paymentMethods.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const grandTotal = getSubtotal()
-                        // Exclude credit payments and last payment method from calculation
-                        const nonCreditPayments = paymentMethods.filter(p => p.method !== 'credit')
-                        const otherPayments = nonCreditPayments.slice(0, -1)
-                        const otherTotal = otherPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
-                        const remaining = Math.max(0, grandTotal - creditApplied - otherTotal)
-                        const updated = [...paymentMethods]
-                        // Find the last non-credit payment method
-                        const lastNonCreditIndex = updated.map((p, i) => ({ p, i })).filter(({ p }) => p.method !== 'credit').pop()?.i
-                        if (lastNonCreditIndex !== undefined) {
-                          updated[lastNonCreditIndex] = { ...updated[lastNonCreditIndex], amount: remaining }
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const grandTotal = getGrandTotal()
+                          // Exclude credit payments and last payment method from calculation
+                          const nonCreditPayments = paymentMethods.filter(p => p.method !== 'credit')
+                          const otherPayments = nonCreditPayments.slice(0, -1)
+                          const otherTotal = otherPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
+                          const remaining = Math.max(0, grandTotal - otherTotal)
+                          const updated = [...paymentMethods]
+                          // Find the last non-credit payment method
+                          const lastNonCreditIndex = updated.map((p, i) => ({ p, i })).filter(({ p }) => p.method !== 'credit').pop()?.i
+                          if (lastNonCreditIndex !== undefined) {
+                            updated[lastNonCreditIndex] = { ...updated[lastNonCreditIndex], amount: remaining }
+                            setPaymentMethods(updated)
+                          }
+                        }}
+                        className="flex-1 px-4 py-2 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition-colors flex items-center justify-center gap-2 text-sm font-medium"
+                      >
+                        Auto-fill Remaining Amount
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const grandTotal = getGrandTotal()
+                          // Exclude credit payments from calculation
+                          const nonCreditPayments = paymentMethods.filter(p => p.method !== 'credit')
+                          const currentTotal = nonCreditPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
+                          const amountDue = Math.max(0, grandTotal - currentTotal - creditApplied)
+                          
+                          // Round up to nearest whole number
+                          const roundedAmount = Math.ceil(amountDue)
+                          const roundingAdjustment = roundedAmount - amountDue
+                          
+                          // Apply rounded amount to the last non-credit payment method, or add a new one
+                          const updated = [...paymentMethods]
+                          const lastNonCreditIndex = updated.map((p, i) => ({ p, i })).filter(({ p }) => p.method !== 'credit').pop()?.i
+                          
+                          if (lastNonCreditIndex !== undefined) {
+                            // Update existing payment method
+                            updated[lastNonCreditIndex] = { ...updated[lastNonCreditIndex], amount: roundedAmount }
+                          } else {
+                            // Add new payment method with rounded amount
+                            updated.push({ method: 'cash', amount: roundedAmount })
+                          }
+                          
                           setPaymentMethods(updated)
-                        }
-                      }}
-                      className="w-full px-4 py-2 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition-colors flex items-center justify-center gap-2 text-sm font-medium"
-                    >
-                      Auto-fill Remaining Amount
-                    </button>
+                          
+                          // If there's a rounding adjustment, show a brief notification
+                          if (roundingAdjustment > 0) {
+                            console.log(`[Round Up] Amount due: ₹${amountDue.toFixed(2)}, Rounded to: ₹${roundedAmount.toFixed(2)}, Adjustment: ₹${roundingAdjustment.toFixed(2)}`)
+                          }
+                        }}
+                        className="flex-1 px-4 py-2 bg-green-50 text-green-600 rounded-xl hover:bg-green-100 transition-colors flex items-center justify-center gap-2 text-sm font-medium"
+                        title="Round up amount due to nearest whole number"
+                      >
+                        Round Up
+                      </button>
+                    </div>
                   )}
                   
                   <div className="pt-4 border-t border-gray-200">
                     <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm font-semibold text-gray-700">Grand Total:</span>
-                      <span className="text-lg font-bold text-gray-900">₹{getSubtotal().toFixed(2)}</span>
+                      <span className="text-sm font-semibold text-gray-700">Subtotal:</span>
+                      <div className="text-right">
+                        {getSubtotalRounding() > 0 ? (
+                          <>
+                            <div className="text-xs text-gray-500 line-through">₹{getSubtotal().toFixed(2)}</div>
+                            <span className="text-lg font-bold text-gray-900">₹{getRoundedSubtotal().toFixed(2)}</span>
+                          </>
+                        ) : (
+                          <span className="text-lg font-bold text-gray-900">₹{getSubtotal().toFixed(2)}</span>
+                        )}
+                      </div>
                     </div>
+                    {getSubtotalRounding() > 0 && (
+                      <div className="flex justify-between items-center mb-2 text-yellow-600 text-xs">
+                        <span className="font-semibold">Rounding Adjustment:</span>
+                        <span className="font-bold">+₹{getSubtotalRounding().toFixed(2)}</span>
+                      </div>
+                    )}
+                    {getDiscountAmount() > 0 && (
+                      <div className="flex justify-between items-center mb-2 text-blue-600">
+                        <span className="text-sm font-semibold">Discount:</span>
+                        <span className="text-lg font-bold">-₹{getDiscountAmount().toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm font-semibold text-gray-700">Grand Total:</span>
+                      <div className="text-right">
+                        {getGrandTotalRounding() > 0 ? (
+                          <>
+                            <div className="text-xs text-gray-500 line-through">₹{getGrandTotalBeforeRounding().toFixed(2)}</div>
+                            <span className="text-lg font-bold text-gray-900">₹{getGrandTotal().toFixed(2)}</span>
+                          </>
+                        ) : (
+                          <span className="text-lg font-bold text-gray-900">₹{getGrandTotal().toFixed(2)}</span>
+                        )}
+                      </div>
+                    </div>
+                    {getGrandTotalRounding() > 0 && (
+                      <div className="flex justify-between items-center mb-2 text-yellow-600 text-xs">
+                        <span className="font-semibold">Rounding Adjustment:</span>
+                        <span className="font-bold">+₹{getGrandTotalRounding().toFixed(2)}</span>
+                      </div>
+                    )}
                     {customerId && customerCreditBalance > 0 && (
                       <div className="mb-3 p-3 bg-green-50 rounded-lg border border-green-200">
                         <div className="flex justify-between items-center mb-2">
@@ -2266,7 +2782,7 @@ const SaleForm = () => {
                           <button
                             type="button"
                             onClick={() => {
-                              const grandTotal = getSubtotal()
+                              const grandTotal = getGrandTotal()
                               const maxCredit = Math.min(customerCreditBalance, grandTotal)
                               setCreditApplied(maxCredit)
                             }}
@@ -2288,12 +2804,13 @@ const SaleForm = () => {
                             type="number"
                             value={creditApplied}
                             onChange={(e) => {
-                              const value = Math.max(0, Math.min(parseFloat(e.target.value) || 0, Math.min(customerCreditBalance, getSubtotal())))
+                              const grandTotal = getGrandTotal()
+                              const value = Math.max(0, Math.min(parseFloat(e.target.value) || 0, Math.min(customerCreditBalance, grandTotal)))
                               setCreditApplied(value)
                             }}
                             className="w-full px-2 py-1 text-sm border border-green-300 rounded focus:ring-2 focus:ring-green-500 outline-none"
                             min="0"
-                            max={Math.min(customerCreditBalance, getSubtotal())}
+                            max={Math.min(customerCreditBalance, getGrandTotal())}
                             step="0.01"
                             placeholder="0.00"
                           />
@@ -2317,10 +2834,35 @@ const SaleForm = () => {
                         <>
                           <div className="flex justify-between items-center mb-2">
                             <span className="text-sm font-semibold text-gray-700">Total Paid:</span>
-                            <span className="text-lg font-bold text-blue-600">
-                              ₹{actualPaymentTotal.toFixed(2)}
-                            </span>
+                            <div className="text-right">
+                              {(() => {
+                                const roundedTotalPaid = roundUp(actualPaymentTotal)
+                                const roundingAdjustment = roundedTotalPaid - actualPaymentTotal
+                                if (roundingAdjustment > 0 && actualPaymentTotal > 0) {
+                                  return (
+                                    <>
+                                      <div className="text-xs text-gray-500 line-through">₹{actualPaymentTotal.toFixed(2)}</div>
+                                      <span className="text-lg font-bold text-blue-600">₹{roundedTotalPaid.toFixed(2)}</span>
+                                    </>
+                                  )
+                                }
+                                return <span className="text-lg font-bold text-blue-600">₹{actualPaymentTotal.toFixed(2)}</span>
+                              })()}
+                            </div>
                           </div>
+                          {(() => {
+                            const roundedTotalPaid = roundUp(actualPaymentTotal)
+                            const roundingAdjustment = roundedTotalPaid - actualPaymentTotal
+                            if (roundingAdjustment > 0 && actualPaymentTotal > 0) {
+                              return (
+                                <div className="flex justify-between items-center mb-2 text-yellow-600 text-xs">
+                                  <span className="font-semibold">Rounding Adjustment:</span>
+                                  <span className="font-bold">+₹{roundingAdjustment.toFixed(2)}</span>
+                                </div>
+                              )
+                            }
+                            return null
+                          })()}
                           {creditPaymentTotal > 0 && (
                             <div className="flex justify-between items-center mb-2 bg-green-50 p-2 rounded">
                               <span className="text-sm font-semibold text-green-700">Credit Allocated:</span>
@@ -2333,21 +2875,31 @@ const SaleForm = () => {
                               <span className="text-sm font-bold text-green-600">-₹{creditApplied.toFixed(2)}</span>
                             </div>
                           )}
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="text-sm font-semibold text-gray-700">Amount Due:</span>
-                            <span className="text-lg font-bold text-gray-900">
-                              ₹{Math.max(0, getSubtotal() - creditApplied - actualPaymentTotal).toFixed(2)}
-                            </span>
-                          </div>
+                          {(() => {
+                            const amountDue = Math.max(0, getGrandTotal() - actualPaymentTotal - creditApplied)
+                            const roundedAmount = Math.ceil(amountDue)
+                            const roundingAdjustment = roundedAmount - amountDue
+                            
+                            return (
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="text-sm font-semibold text-gray-700">Amount Due:</span>
+                                <span className="text-lg font-bold text-gray-900">
+                                  ₹{amountDue.toFixed(2)}
+                                </span>
+                              </div>
+                            )
+                          })()}
                         </>
                       )
                     })()}
                     {(() => {
                       // Separate credit payments from actual payments
                       const nonCreditPayments = paymentMethods.filter(p => p.method !== 'credit')
-                      const paymentTotal = nonCreditPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
-                      const totalWithCredit = getSubtotal() - creditApplied
-                      const returnAmount = Math.max(0, paymentTotal - totalWithCredit)
+                      const paymentTotalBeforeRounding = nonCreditPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
+                      const paymentTotal = roundUp(paymentTotalBeforeRounding) // Round up total paid
+                      const grandTotal = getGrandTotal() // Already rounded
+                      const amountDue = Math.max(0, grandTotal - paymentTotal - creditApplied)
+                      const returnAmount = Math.max(0, paymentTotal - grandTotal)
                       
                       if (returnAmount > 0) {
                         return (
@@ -2356,11 +2908,22 @@ const SaleForm = () => {
                             <span className="text-lg font-bold text-green-600">₹{returnAmount.toFixed(2)}</span>
                           </div>
                         )
-                      } else if (paymentTotal < totalWithCredit - 0.01) {
+                      } else if (paymentTotalBeforeRounding !== paymentTotal && paymentTotal > 0) {
+                        // Show rounding adjustment when payment is rounded up
+                        const roundingAdjustment = paymentTotal - paymentTotalBeforeRounding
+                        return (
+                          <div className="flex justify-between items-center bg-yellow-50 p-2 rounded-lg border border-yellow-200">
+                            <span className="text-xs font-semibold text-yellow-700">Payment Rounding Adjustment:</span>
+                            <span className="text-sm font-bold text-yellow-600">
+                              +₹{roundingAdjustment.toFixed(2)} (Rounded to ₹{paymentTotal.toFixed(2)})
+                            </span>
+                          </div>
+                        )
+                      } else if (paymentTotal + creditApplied < grandTotal - 0.01) {
                         return (
                           <div className="flex justify-between items-center bg-red-50 p-3 rounded-lg border border-red-200">
                             <span className="text-sm font-semibold text-red-700">Balance Due:</span>
-                            <span className="text-lg font-bold text-red-600">₹{(totalWithCredit - paymentTotal).toFixed(2)}</span>
+                            <span className="text-lg font-bold text-red-600">₹{(grandTotal - paymentTotal).toFixed(2)}</span>
                           </div>
                         )
                       }
@@ -2378,9 +2941,15 @@ const SaleForm = () => {
                     <span>Subtotal:</span>
                     <span className="font-bold">₹{getSubtotal().toFixed(2)}</span>
                   </div>
+                  {getDiscountAmount() > 0 && (
+                    <div className="flex justify-between text-lg text-blue-200">
+                      <span>Discount:</span>
+                      <span className="font-bold">-₹{getDiscountAmount().toFixed(2)}</span>
+                    </div>
+                  )}
                   <div className="border-t border-white/30 pt-3 flex justify-between text-xl font-bold">
                     <span>Total:</span>
-                    <span>₹{getSubtotal().toFixed(2)}</span>
+                    <span>₹{getGrandTotal().toFixed(2)}</span>
                   </div>
                 </div>
                 {errors.payment && (
@@ -2390,11 +2959,37 @@ const SaleForm = () => {
                   type="submit"
                   disabled={(() => {
                     if (saleItems.length === 0) return true
-                    const paymentTotal = paymentMethods.reduce((sum, p) => sum + (p.amount || 0), 0)
-                    const grandTotal = getSubtotal()
-                    const totalWithCredit = grandTotal - creditApplied
-                    // Allow overpayment (for return), but require minimum payment equal to grand total (after credit)
-                    return paymentTotal < totalWithCredit - 0.01
+                    
+                    // Check if this is a return-only transaction
+                    const hasReturnItems = saleItems.some(item => item.sale_type === 'return')
+                    const hasSaleItems = saleItems.some(item => item.sale_type === 'sale')
+                    const isReturnOnly = hasReturnItems && !hasSaleItems
+                    
+                    const nonCreditPayments = paymentMethods.filter(p => p.method !== 'credit')
+                    const creditPayments = paymentMethods.filter(p => p.method === 'credit')
+                    const paymentTotal = nonCreditPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
+                    const creditPaymentTotal = creditPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
+                    const grandTotal = getGrandTotal()
+                    
+                    // For return-only transactions: credit payment should cover the return amount
+                    // Since returns create credit, credit payment should be >= grand total
+                    if (isReturnOnly) {
+                      // For returns, credit payment should cover the return amount
+                      // Allow small rounding differences (up to 0.05 for rounding adjustments)
+                      // If credit payment is very close to grand total (within 0.05), allow it
+                      const difference = Math.abs(grandTotal - creditPaymentTotal)
+                      return difference > 0.05 // Allow up to 0.05 difference for rounding
+                    }
+                    
+                    // For regular sales or mixed transactions: payment + credit applied + credit payment should cover grand total
+                    // Allow overpayment (for returns), but require minimum coverage equal to grand total
+                    const totalCoverage = paymentTotal + creditApplied + creditPaymentTotal
+                    // For mixed transactions with returns, be more lenient with rounding
+                    if (hasReturnItems) {
+                      const difference = Math.abs(grandTotal - totalCoverage)
+                      return difference > 0.05 // Allow up to 0.05 difference for rounding
+                    }
+                    return totalCoverage < grandTotal - 0.01
                   })()}
                   className="w-full mt-6 py-3 bg-white text-blue-600 font-bold rounded-xl hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >

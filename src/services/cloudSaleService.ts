@@ -170,15 +170,52 @@ export const cloudSaleService = {
     }
 
     // Fallback to local creation
+    // Generate unique ID with better collision avoidance
+    let uniqueId = Math.floor(performance.now() * 1000) + Math.floor(Math.random() * 10000000) + Math.floor(Math.random() * 1000)
+    
     const newSale: Sale = {
       ...saleData,
-      id: Date.now(),
+      id: uniqueId,
       archived: false,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
-    await put(STORES.SALES, newSale)
-    return newSale
+    
+    // Retry logic for constraint errors with exponential backoff
+    let retryCount = 0
+    const maxRetries = 5
+    
+    while (retryCount < maxRetries) {
+      try {
+        await put(STORES.SALES, newSale)
+        console.log(`[CloudSaleService] ✅ Successfully saved sale with ID ${newSale.id} (attempt ${retryCount + 1})`)
+        return newSale
+      } catch (error: any) {
+        console.error(`[CloudSaleService] Error saving sale to IndexedDB (attempt ${retryCount + 1}):`, error)
+        
+        // If it's a constraint error, try with a different ID
+        if (error.message && (error.message.includes('Constraint') || error.message.includes('constraint'))) {
+          retryCount++
+          if (retryCount < maxRetries) {
+            // Generate a new unique ID with more randomness
+            uniqueId = Math.floor(performance.now() * 1000) + Math.floor(Math.random() * 10000000) + Math.floor(Math.random() * 1000) + retryCount
+            newSale.id = uniqueId
+            console.log(`[CloudSaleService] Retrying with new ID: ${uniqueId}`)
+            // Small delay to avoid rapid retries
+            await new Promise(resolve => setTimeout(resolve, 10 * retryCount))
+          } else {
+            console.error(`[CloudSaleService] ❌ Failed to save sale after ${maxRetries} retries`)
+            throw new Error(`Failed to create sale: ConstraintError after ${maxRetries} retries. Please try again.`)
+          }
+        } else {
+          // Not a constraint error, throw immediately
+          throw error
+        }
+      }
+    }
+    
+    // Should never reach here, but TypeScript needs it
+    throw new Error('Failed to create sale after retries')
   },
 
   /**

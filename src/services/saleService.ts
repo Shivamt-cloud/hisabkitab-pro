@@ -32,9 +32,13 @@ export const saleService = {
       invoiceNumber = await generateInvoiceNumber(sale.company_id, existingInvoiceNumbers)
     }
     
+    // Generate unique ID with timestamp + random + counter to avoid collisions
+    // Use performance.now() for microsecond precision and add random component
+    const uniqueId = Math.floor(performance.now() * 1000) + Math.floor(Math.random() * 10000000) + Math.floor(Math.random() * 1000)
+    
     const newSale: Sale = {
       ...sale,
-      id: Date.now(),
+      id: uniqueId,
       invoice_number: invoiceNumber,
       archived: false,
       created_at: new Date().toISOString(),
@@ -63,7 +67,8 @@ export const saleService = {
       }
     }
     
-    // Process each item: update stock and purchase item inventory based on sale_type
+    // Process each item: ONLY link to purchase items, DON'T update inventory yet
+    // We'll update inventory AFTER the sale is successfully saved
     const updatedSaleItems: SaleItem[] = []
     
     for (const item of sale.items) {
@@ -73,25 +78,21 @@ export const saleService = {
       let updatedItem: SaleItem = { ...item }
       
       if (item.sale_type === 'return') {
-        // For returns: add back to purchase items and product stock
-        // Try to find the original purchase item if purchase_item_id is provided
+        // For returns: Just link to purchase items (inventory update happens after sale is saved)
         if (item.purchase_id && item.purchase_item_id) {
           const purchase = allPurchases.find(p => p.id === item.purchase_id)
           if (purchase) {
             const purchaseItem = purchase.items.find(pi => pi.id === item.purchase_item_id)
             if (purchaseItem) {
-              // Add back to the specific purchase item
-              const currentSoldQty = purchaseItem.sold_quantity || 0
-              const newSoldQty = Math.max(0, currentSoldQty - item.quantity)
-              purchaseItem.sold_quantity = newSoldQty
-              
-              // Update the purchase in the database (directly update to avoid stock recalculation)
-              purchase.updated_at = new Date().toISOString()
-              await put(STORES.PURCHASES, purchase)
+              // Link the return to this purchase item
+              updatedItem.purchase_id = purchase.id
+              updatedItem.purchase_item_id = purchaseItem.id
+              updatedItem.purchase_item_article = purchaseItem.article
+              updatedItem.purchase_item_barcode = purchaseItem.barcode
             }
           }
         } else {
-          // If no specific purchase item, add to the most recent purchase item for this product (LIFO for returns)
+          // If no specific purchase item, find the most recent purchase item for this product (LIFO for returns)
           const productPurchases = allPurchases
             .filter(p => p.items.some(pi => pi.product_id === item.product_id))
             .sort((a, b) => new Date(b.purchase_date).getTime() - new Date(a.purchase_date).getTime())
@@ -106,42 +107,24 @@ export const saleService = {
                 return bSold - aSold
               })
             
-            let remainingQty = item.quantity
+            // Link the return to the first purchase item with sold quantity
             for (const purchaseItem of purchaseItems) {
-              if (remainingQty <= 0) break
-              
               const currentSoldQty = purchaseItem.sold_quantity || 0
               if (currentSoldQty > 0) {
-                const qtyToReturn = Math.min(remainingQty, currentSoldQty)
-                purchaseItem.sold_quantity = currentSoldQty - qtyToReturn
-                remainingQty -= qtyToReturn
-                
-                // Link the return to this purchase item
                 if (!updatedItem.purchase_id) {
                   updatedItem.purchase_id = purchase.id
                   updatedItem.purchase_item_id = purchaseItem.id
                   updatedItem.purchase_item_article = purchaseItem.article
                   updatedItem.purchase_item_barcode = purchaseItem.barcode
                 }
+                break
               }
             }
-            
-            if (remainingQty > 0) {
-              // Update the purchase in the database (directly update to avoid stock recalculation)
-              purchase.updated_at = new Date().toISOString()
-              await put(STORES.PURCHASES, purchase)
-            }
+            if (updatedItem.purchase_id) break
           }
         }
-        
-        // Add back to product stock
-        await productService.updateStock(item.product_id, item.quantity, 'add')
       } else {
-        // For sales: deduct from purchase items
-        // If purchase_item_id is provided, deduct from that specific item
-        // Otherwise, use FIFO (First In First Out)
-        let remainingQty = item.quantity
-        
+        // For sales: Just link to purchase items (inventory update happens after sale is saved)
         console.log(`[SaleService] Processing sale for product ${item.product_id}, quantity: ${item.quantity}`)
         console.log(`[SaleService] Purchase item info: purchase_id=${item.purchase_id}, purchase_item_id=${item.purchase_item_id}, article=${item.purchase_item_article}`)
         
@@ -149,51 +132,28 @@ export const saleService = {
         if (item.purchase_id && item.purchase_item_id) {
           const purchase = allPurchases.find(p => p.id === item.purchase_id)
           if (purchase) {
-            const purchaseItemIndex = purchase.items.findIndex(pi => pi.id === item.purchase_item_id)
-            if (purchaseItemIndex >= 0) {
-              const purchaseItem = purchase.items[purchaseItemIndex]
-              if (purchaseItem.product_id === item.product_id) {
-                const soldQty = purchaseItem.sold_quantity || 0
-                const availableQty = purchaseItem.quantity - soldQty
-                const qtyToSell = Math.min(remainingQty, availableQty)
-                
-                console.log(`[SaleService] Deducting ${qtyToSell} from specific purchase item (ID: ${purchaseItem.id}, Article: ${purchaseItem.article}), available: ${availableQty}, current sold: ${soldQty}`)
-                
-                purchaseItem.sold_quantity = soldQty + qtyToSell
-                remainingQty -= qtyToSell
-                
-                console.log(`[SaleService] Updated purchase item sold_quantity from ${soldQty} to ${purchaseItem.sold_quantity}`)
-                
-                // Update the purchase in the database
-                purchase.updated_at = new Date().toISOString()
-                await put(STORES.PURCHASES, purchase)
-                console.log(`[SaleService] Purchase ${purchase.id} saved successfully`)
-                
-                // Link the sale item to this purchase item
-                updatedItem.purchase_id = purchase.id
-                updatedItem.purchase_item_id = purchaseItem.id
-                updatedItem.purchase_item_article = purchaseItem.article
-                updatedItem.purchase_item_barcode = purchaseItem.barcode
-              }
+            const purchaseItem = purchase.items.find(pi => pi.id === item.purchase_item_id)
+            if (purchaseItem && purchaseItem.product_id === item.product_id) {
+              // Link the sale item to this purchase item
+              updatedItem.purchase_id = purchase.id
+              updatedItem.purchase_item_id = purchaseItem.id
+              updatedItem.purchase_item_article = purchaseItem.article
+              updatedItem.purchase_item_barcode = purchaseItem.barcode
+              console.log(`[SaleService] Linked to specific purchase item (ID: ${purchaseItem.id}, Article: ${purchaseItem.article})`)
             }
           }
         }
         
-        // If we still have remaining quantity or no specific purchase item, use FIFO
-        if (remainingQty > 0 || !item.purchase_item_id) {
+        // If we still don't have a purchase item link, use FIFO to find one
+        if (!updatedItem.purchase_item_id) {
           const productPurchases = allPurchases
             .filter(p => p.items.some(pi => pi.product_id === item.product_id))
             .sort((a, b) => new Date(a.purchase_date).getTime() - new Date(b.purchase_date).getTime()) // FIFO: oldest first
           
-          console.log(`[SaleService] Using FIFO for remaining ${remainingQty} units. Found ${productPurchases.length} purchases with this product`)
+          console.log(`[SaleService] Using FIFO to find purchase item. Found ${productPurchases.length} purchases with this product`)
           
           for (const purchase of productPurchases) {
-            if (remainingQty <= 0) break
-            
-            console.log(`[SaleService] Checking purchase ${purchase.id}, date: ${purchase.purchase_date}`)
-            
-            // Get purchase items for this product with available quantity info
-            // If we have article info, prioritize matching by article
+            // Get purchase items for this product with available quantity
             const purchaseItemsWithInfo = purchase.items
               .map((pi, idx) => {
                 if (pi.product_id !== item.product_id) return null
@@ -215,70 +175,20 @@ export const saleService = {
                 return b.availableQty - a.availableQty
               })
             
-            console.log(`[SaleService] Found ${purchaseItemsWithInfo.length} purchase items with available quantity`)
-            
-            let purchaseUpdated = false
-            
-            for (const { item: purchaseItem, availableQty, originalIndex } of purchaseItemsWithInfo) {
-              if (remainingQty <= 0) break
-              
-              const qtyToSell = Math.min(remainingQty, availableQty)
-              
-              console.log(`[SaleService] Selling ${qtyToSell} from purchase item (ID: ${purchaseItem.id}, Article: ${purchaseItem.article}), available: ${availableQty}, current sold: ${purchaseItem.sold_quantity || 0}`)
-              
-              // Update sold_quantity for the ACTUAL purchase item in the purchase.items array
+            // Link to the first available purchase item
+            if (purchaseItemsWithInfo.length > 0) {
+              const { item: purchaseItem, originalIndex } = purchaseItemsWithInfo[0]
               const actualItem = purchase.items[originalIndex]
-              if (actualItem && actualItem.product_id === item.product_id) {
-                const oldSoldQty = actualItem.sold_quantity || 0
-                actualItem.sold_quantity = oldSoldQty + qtyToSell
-                purchaseUpdated = true
-                
-                console.log(`[SaleService] Updated purchase item sold_quantity from ${oldSoldQty} to ${actualItem.sold_quantity}`)
-                
-                // Link the sale item to the first purchase item (primary allocation)
-                if (!updatedItem.purchase_id && qtyToSell > 0) {
-                  updatedItem.purchase_id = purchase.id
-                  updatedItem.purchase_item_id = actualItem.id
-                  updatedItem.purchase_item_article = actualItem.article
-                  updatedItem.purchase_item_barcode = actualItem.barcode
-                }
+              if (actualItem) {
+                updatedItem.purchase_id = purchase.id
+                updatedItem.purchase_item_id = actualItem.id
+                updatedItem.purchase_item_article = actualItem.article
+                updatedItem.purchase_item_barcode = actualItem.barcode
+                console.log(`[SaleService] Linked to purchase item (ID: ${actualItem.id}, Article: ${actualItem.article}) via FIFO`)
+                break
               }
-              
-              remainingQty -= qtyToSell
-            }
-            
-            // Update the purchase in the database if it was modified
-            if (purchaseUpdated) {
-              console.log(`[SaleService] Saving updated purchase ${purchase.id} to database`)
-              purchase.updated_at = new Date().toISOString()
-              await put(STORES.PURCHASES, purchase)
-              console.log(`[SaleService] Purchase ${purchase.id} saved successfully`)
             }
           }
-        }
-        
-        if (remainingQty > 0) {
-          console.warn(`[SaleService] Warning: Only ${item.quantity - remainingQty} units available for product ${item.product_id}, but trying to sell ${item.quantity}`)
-        } else {
-          console.log(`[SaleService] Successfully allocated all ${item.quantity} units for product ${item.product_id}`)
-        }
-        
-        if (remainingQty > 0) {
-          console.warn(`Warning: Only ${item.quantity - remainingQty} units available for product ${item.product_id}, but trying to sell ${item.quantity}`)
-        }
-        
-        // Deduct from product stock
-        await productService.updateStock(item.product_id, item.quantity, 'subtract')
-        
-        // If stock reaches zero, mark as sold/archived
-        const updatedProduct = await productService.getById(item.product_id, true)
-        if (updatedProduct && updatedProduct.stock_quantity <= 0) {
-          await productService.update(item.product_id, {
-            status: 'sold',
-            barcode_status: 'used',
-            sold_date: new Date().toISOString(),
-            sale_id: newSale.id,
-          })
         }
       }
       
@@ -345,8 +255,228 @@ export const saleService = {
       }
     }
     
-    // Use cloud service which handles both cloud and local storage
-    return await cloudSaleService.create(newSale)
+    // Save sale FIRST before updating inventory
+    // This ensures we have a valid sale ID and can handle errors properly
+    let savedSale: Sale
+    try {
+      savedSale = await cloudSaleService.create(newSale)
+      console.log(`[SaleService] ✅ Sale ${savedSale.id} created successfully`)
+    } catch (error: any) {
+      console.error(`[SaleService] ❌ Error creating sale:`, error)
+      // No inventory changes were made yet, so no rollback needed
+      throw new Error(`Failed to create sale: ${error.message || error}`)
+    }
+    
+    // Now that sale is saved, apply inventory updates
+    try {
+      // Reload purchases to get latest state
+      const latestPurchases = await purchaseService.getAll(undefined, sale.company_id)
+      
+      for (const item of savedSale.items) {
+        console.log(`[SaleService] Processing inventory update for item: product ${item.product_id}, quantity ${item.quantity}, type ${item.sale_type}`)
+        
+        if (item.sale_type === 'return') {
+          // For returns: add back to purchase items and product stock
+          if (item.purchase_id && item.purchase_item_id) {
+            const purchase = latestPurchases.find(p => p.id === item.purchase_id)
+            if (purchase) {
+              const purchaseItemIndex = purchase.items.findIndex(pi => pi.id === item.purchase_item_id)
+              const purchaseItem = purchase.items[purchaseItemIndex]
+              if (purchaseItem) {
+                const currentSoldQty = purchaseItem.sold_quantity || 0
+                
+                // Create a NEW purchase object with updated items array
+                const updatedItems = [...purchase.items]
+                updatedItems[purchaseItemIndex] = {
+                  ...purchaseItem,
+                  sold_quantity: Math.max(0, currentSoldQty - item.quantity)
+                }
+                
+                const updatedPurchase: Purchase = {
+                  ...purchase,
+                  items: updatedItems,
+                  updated_at: new Date().toISOString()
+                }
+                
+                // Use purchaseService.update to ensure sync to cloud
+                // Extract only the fields that changed (items and updated_at)
+                const { id, ...purchaseUpdateData } = updatedPurchase
+                await purchaseService.update(purchase.id, purchaseUpdateData)
+                console.log(`[SaleService] Updated purchase item ${purchaseItem.id} sold_quantity: ${currentSoldQty} -> ${updatedItems[purchaseItemIndex].sold_quantity}`)
+              }
+            }
+          }
+          // Add back to product stock
+          await productService.updateStock(item.product_id, item.quantity, 'add')
+          console.log(`[SaleService] Added ${item.quantity} back to product ${item.product_id} stock`)
+        } else {
+        // For sales: deduct from purchase items and product stock
+        let remainingQty = item.quantity
+        
+        if (item.purchase_id && item.purchase_item_id) {
+          // Deduct from specific purchase item
+          const purchase = latestPurchases.find(p => p.id === item.purchase_id)
+          if (purchase) {
+            const purchaseItemIndex = purchase.items.findIndex(pi => pi.id === item.purchase_item_id)
+            const purchaseItem = purchase.items[purchaseItemIndex]
+            if (purchaseItem && purchaseItem.product_id === item.product_id) {
+              const soldQty = purchaseItem.sold_quantity || 0
+              const availableQty = purchaseItem.quantity - soldQty
+              const qtyToSell = Math.min(remainingQty, availableQty)
+              
+              console.log(`[SaleService] BEFORE UPDATE - Purchase ${purchase.id}, Item ${purchaseItem.id}:`, {
+                barcode: purchaseItem.barcode,
+                article: purchaseItem.article,
+                quantity: purchaseItem.quantity,
+                sold_quantity: purchaseItem.sold_quantity,
+                availableQty,
+                qtyToSell
+              })
+              
+              // Create a NEW purchase object with updated items array to ensure IndexedDB detects the change
+              const updatedItems = [...purchase.items]
+              updatedItems[purchaseItemIndex] = {
+                ...purchaseItem,
+                sold_quantity: soldQty + qtyToSell
+              }
+              
+              const updatedPurchase: Purchase = {
+                ...purchase,
+                items: updatedItems,
+                updated_at: new Date().toISOString()
+              }
+              
+              remainingQty -= qtyToSell
+              
+              const updatedItem = updatedItems[purchaseItemIndex]
+              if (updatedItem) {
+                console.log(`[SaleService] AFTER UPDATE (before save) - Purchase ${updatedPurchase.id}, Item ${updatedItem.id}:`, {
+                  barcode: updatedItem.barcode,
+                  article: updatedItem.article,
+                  quantity: updatedItem.quantity,
+                  sold_quantity: updatedItem.sold_quantity,
+                  remaining: updatedItem.quantity - (updatedItem.sold_quantity || 0)
+                })
+              }
+              
+              // Save the updated purchase using purchaseService.update to ensure sync to cloud
+              // Extract only the fields that changed (items and updated_at)
+              const { id, ...purchaseUpdateData } = updatedPurchase
+              await purchaseService.update(purchase.id, purchaseUpdateData)
+              console.log(`[SaleService] 💾 Saved purchase ${updatedPurchase.id} to IndexedDB and cloud`)
+              
+              // Verify the save worked by reading it back
+              const verifyPurchase = await purchaseService.getById(purchase.id)
+              if (verifyPurchase) {
+                const verifyItem = verifyPurchase.items.find(pi => pi.id === item.purchase_item_id)
+                console.log(`[SaleService] VERIFIED - Purchase ${purchase.id}, Item ${item.purchase_item_id}:`, {
+                  barcode: verifyItem?.barcode,
+                  article: verifyItem?.article,
+                  quantity: verifyItem?.quantity,
+                  sold_quantity: verifyItem?.sold_quantity,
+                  remaining: verifyItem ? verifyItem.quantity - (verifyItem.sold_quantity || 0) : 'N/A',
+                  match: verifyItem?.sold_quantity === (soldQty + qtyToSell) ? '✅ MATCH' : '❌ MISMATCH'
+                })
+                
+                if (verifyItem?.sold_quantity !== (soldQty + qtyToSell)) {
+                  console.error(`[SaleService] ❌ CRITICAL: sold_quantity mismatch! Expected ${soldQty + qtyToSell}, got ${verifyItem?.sold_quantity}`)
+                }
+              } else {
+                console.error(`[SaleService] ❌ CRITICAL: Could not verify purchase ${purchase.id} after save!`)
+              }
+              
+              if (updatedItem) {
+                console.log(`[SaleService] ✅ Updated purchase item ${updatedItem.id} sold_quantity: ${soldQty} -> ${updatedItem.sold_quantity}`)
+              }
+            } else {
+              console.warn(`[SaleService] ⚠️ Purchase item not found: purchase_id=${item.purchase_id}, purchase_item_id=${item.purchase_item_id}, product_id=${item.product_id}`)
+            }
+          } else {
+            console.warn(`[SaleService] ⚠️ Purchase not found: purchase_id=${item.purchase_id}`)
+          }
+        }
+          
+          // If still have remaining quantity, use FIFO
+          if (remainingQty > 0) {
+            const productPurchases = latestPurchases
+              .filter(p => p.items.some(pi => pi.product_id === item.product_id))
+              .sort((a, b) => new Date(a.purchase_date).getTime() - new Date(b.purchase_date).getTime())
+            
+            for (const purchase of productPurchases) {
+              if (remainingQty <= 0) break
+              
+              // Create updated items array
+              const updatedItems = [...purchase.items]
+              let purchaseUpdated = false
+              
+              for (let i = 0; i < updatedItems.length; i++) {
+                if (remainingQty <= 0) break
+                const purchaseItem = updatedItems[i]
+                if (purchaseItem.product_id !== item.product_id) continue
+                
+                const soldQty = purchaseItem.sold_quantity || 0
+                const availableQty = purchaseItem.quantity - soldQty
+                const qtyToSell = Math.min(remainingQty, availableQty)
+                
+                if (qtyToSell > 0) {
+                  // Update the item in the new array
+                  updatedItems[i] = {
+                    ...purchaseItem,
+                    sold_quantity: soldQty + qtyToSell
+                  }
+                  remainingQty -= qtyToSell
+                  purchaseUpdated = true
+                  console.log(`[SaleService] Updated purchase item ${purchaseItem.id} sold_quantity: ${soldQty} -> ${updatedItems[i].sold_quantity} (FIFO)`)
+                }
+              }
+              
+              // Only save if we made changes
+              if (purchaseUpdated) {
+                const updatedPurchase: Purchase = {
+                  ...purchase,
+                  items: updatedItems,
+                  updated_at: new Date().toISOString()
+                }
+                // Use purchaseService.update to ensure sync to cloud
+                // Extract only the fields that changed (items and updated_at)
+                const { id, ...purchaseUpdateData } = updatedPurchase
+                await purchaseService.update(purchase.id, purchaseUpdateData)
+                console.log(`[SaleService] 💾 Saved purchase ${updatedPurchase.id} to IndexedDB and cloud (FIFO)`)
+              }
+            }
+          }
+          
+          // Deduct from product stock
+          const productBefore = await productService.getById(item.product_id, true)
+          const stockBefore = productBefore?.stock_quantity || 0
+          await productService.updateStock(item.product_id, item.quantity, 'subtract')
+          const productAfter = await productService.getById(item.product_id, true)
+          const stockAfter = productAfter?.stock_quantity || 0
+          console.log(`[SaleService] Updated product ${item.product_id} stock: ${stockBefore} -> ${stockAfter} (deducted ${item.quantity})`)
+          
+          // If stock reaches zero, mark as sold/archived
+          if (stockAfter <= 0) {
+            await productService.update(item.product_id, {
+              status: 'sold',
+              barcode_status: 'used',
+              sold_date: new Date().toISOString(),
+              sale_id: savedSale.id,
+            })
+            console.log(`[SaleService] Marked product ${item.product_id} as sold (stock reached zero)`)
+          }
+        }
+      }
+      
+      console.log(`[SaleService] ✅ Inventory updated successfully for sale ${savedSale.id}`)
+    } catch (inventoryError: any) {
+      console.error(`[SaleService] ❌ Error updating inventory for sale ${savedSale.id}:`, inventoryError)
+      // Sale is already saved, but inventory update failed
+      // This is a partial failure - sale exists but inventory might be inconsistent
+      // In production, you might want to mark the sale as needing review
+      throw new Error(`Sale created but inventory update failed: ${inventoryError.message || inventoryError}`)
+    }
+    
+    return savedSale
   },
 
   // Update sale (updates cloud and local)

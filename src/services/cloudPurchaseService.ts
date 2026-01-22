@@ -56,9 +56,19 @@ export const cloudPurchaseService = {
       }
 
       // Sync to local storage for offline access
+      // IMPORTANT: This overwrites local data with cloud data, so ensure cloud is up-to-date
       if (data) {
         for (const purchase of data) {
-          await put(STORES.PURCHASES, purchase as Purchase)
+          // Deep clone to avoid reference issues
+          const purchaseClone = JSON.parse(JSON.stringify(purchase)) as Purchase
+          // Ensure all purchase items have sold_quantity initialized
+          if (purchaseClone.items) {
+            purchaseClone.items = purchaseClone.items.map(item => ({
+              ...item,
+              sold_quantity: item.sold_quantity !== undefined ? item.sold_quantity : 0
+            }))
+          }
+          await put(STORES.PURCHASES, purchaseClone)
         }
       }
 
