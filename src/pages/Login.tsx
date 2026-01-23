@@ -761,15 +761,22 @@ Please review and process this registration request.
               </div>
 
               {/* Register Button */}
-              <button
-                type="button"
-                onClick={handleDirectRegistration}
-                disabled={isLoading || isGoogleLoading}
-                className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white font-bold text-xl py-5 px-8 rounded-2xl hover:from-green-700 hover:to-emerald-700 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-3 relative overflow-hidden group"
-              >
-                <UserPlus className="w-6 h-6 relative z-10" />
-                <span className="relative z-10">Create New Account</span>
-              </button>
+              <div className="w-full">
+                <button
+                  type="button"
+                  onClick={handleDirectRegistration}
+                  disabled={isLoading || isGoogleLoading}
+                  className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white font-bold text-xl py-5 px-8 rounded-2xl hover:from-green-700 hover:to-emerald-700 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-3 relative overflow-hidden group"
+                >
+                  <UserPlus className="w-6 h-6 relative z-10" />
+                  <span className="relative z-10">Fill Registration Form</span>
+                </button>
+                <div className="mt-3 bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
+                  <p className="text-sm text-gray-700 font-medium">
+                    Fill the form below with your details and we will connect with you within 24 hours via email.
+                  </p>
+                </div>
+              </div>
 
               {/* Contact & Footer - Enhanced */}
               <div className="text-center mt-10 w-full space-y-3">
@@ -890,7 +897,7 @@ Please review and process this registration request.
               <div>
                 <h3 className="text-2xl font-bold">Complete Your Registration</h3>
                 <p className="text-blue-100 text-sm mt-1">
-                  Please provide your business details to complete registration
+                  Please provide your business details below. We will connect with you within 24 hours via email.
                 </p>
               </div>
               <button
@@ -906,6 +913,21 @@ Please review and process this registration request.
 
             {/* Modal Body */}
             <form onSubmit={handleRegistrationSubmit} className="p-6 space-y-6">
+              {/* Information Message */}
+              <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+                <div className="flex items-start gap-3">
+                  <CheckCircle className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-bold text-green-900 mb-1">
+                      Registration Process
+                    </p>
+                    <p className="text-sm text-green-800">
+                      Please fill out all the required details below. Once submitted, we will review your information and connect with you within 24 hours via email to complete your account setup.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {/* Mandatory Pricing Country Selection */}
               <div className="bg-blue-50 rounded-xl p-4 border-2 border-blue-200">
                 <div className="flex items-start gap-3">
