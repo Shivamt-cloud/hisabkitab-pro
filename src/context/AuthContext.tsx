@@ -60,16 +60,91 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false)
   }, [])
 
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     setIsLoading(true)
     
     // Simulate API call delay
     await new Promise(resolve => setTimeout(resolve, 500))
     
-    // Verify login using user service
+    // First, check if user exists (before password check)
+    let userExists: { password?: string } | undefined
+    try {
+      userExists = await userService.getByEmail(email)
+    } catch (error) {
+      console.error('Error checking if user exists:', error)
+      setIsLoading(false)
+      return { success: false, error: 'Unable to verify user. Please check your connection and try again.' }
+    }
+    
+    // If user doesn't exist, return early with clear message
+    if (!userExists) {
+      setIsLoading(false)
+      // Check if there's a typo by listing some similar emails
+      try {
+        const allUsers = await userService.getAll()
+        const similarEmails = allUsers
+          .filter(u => u.email.toLowerCase().includes(email.split('@')[0]?.toLowerCase() || ''))
+          .slice(0, 3)
+          .map(u => u.email)
+        const suggestion = similarEmails.length > 0 
+          ? ` Did you mean: ${similarEmails.join(', ')}?`
+          : ''
+        return { success: false, error: `User not found with email "${email}".${suggestion} Please check your email address.` }
+      } catch {
+        return { success: false, error: `User not found with email "${email}". Please check your email address.` }
+      }
+    }
+    
+    // User exists, now check password
+    if (!userExists.password) {
+      setIsLoading(false)
+      return { success: false, error: 'Password not set for this user. Please contact administrator to set a password.' }
+    }
+    
+    if (userExists.password !== password) {
+      setIsLoading(false)
+      return { success: false, error: 'Invalid password. Please check your password and try again.' }
+    }
+    
+    // Password is correct, verify login
     const foundUser = await userService.verifyLogin(email, password)
+    
+    if (!foundUser) {
+      // This shouldn't happen if password matched, but handle it anyway
+      setIsLoading(false)
+      return { success: false, error: 'Login verification failed. Please try again.' }
+    }
 
     if (foundUser) {
+      // Check subscription expiry FIRST (before device limit check)
+      if (foundUser.role !== 'admin' && foundUser.company_id) {
+        try {
+          const company = await companyService.getById(foundUser.company_id)
+          if (company) {
+            // Check if subscription is expired
+            const endDate = company.subscription_end_date || company.valid_to
+            if (endDate) {
+              const today = new Date()
+              today.setHours(0, 0, 0, 0)
+              const expiryDate = new Date(endDate)
+              expiryDate.setHours(0, 0, 0, 0)
+              
+              if (expiryDate < today) {
+                const daysExpired = Math.ceil((today.getTime() - expiryDate.getTime()) / (1000 * 60 * 60 * 24))
+                setIsLoading(false)
+                return { 
+                  success: false, 
+                  error: `SUBSCRIPTION_EXPIRED:${daysExpired}:${company.subscription_tier || 'basic'}` 
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Error checking subscription expiry:', error)
+          // Continue with login if check fails (fail open)
+        }
+      }
+      
       // Device registration and limit checking (only for non-admin users with company)
       if (foundUser.role !== 'admin' && foundUser.company_id) {
         try {
@@ -95,9 +170,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 // Check if device limit is reached
                 if (currentDeviceCount >= deviceLimit) {
                   console.error(`Device limit reached for company ${foundUser.company_id}. Current: ${currentDeviceCount}, Limit: ${deviceLimit}`)
-                  setIsLoading(false)
-                  // Block login - device limit exceeded
-                  return false
+                  
+                  // Get list of registered devices to show in error message
+                  try {
+                    const companyDevices = await cloudDeviceService.getCompanyDevices(foundUser.company_id)
+                    const deviceList = companyDevices
+                      .slice(0, 3) // Show up to 3 devices
+                      .map(d => d.device_name || d.device_type || 'Unknown Device')
+                      .join(', ')
+                    
+                    setIsLoading(false)
+                    return { 
+                      success: false, 
+                      error: `Device limit reached. Your plan allows ${deviceLimit} device(s), but ${currentDeviceCount} device(s) are already registered.${deviceList ? ` Registered devices: ${deviceList}${companyDevices.length > 3 ? '...' : ''}` : ''} Please remove an old device from System Settings or upgrade your plan.` 
+                    }
+                  } catch (error) {
+                    console.error('Error fetching device list:', error)
+                    setIsLoading(false)
+                    return { 
+                      success: false, 
+                      error: `Device limit reached. Your plan allows ${deviceLimit} device(s), but ${currentDeviceCount} device(s) are already registered. Please remove a device from System Settings or upgrade your plan.` 
+                    }
+                  }
                 }
               }
               
@@ -164,11 +258,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       )
       
       setIsLoading(false)
-      return true
+      return { success: true }
     }
 
     setIsLoading(false)
-    return false
+    return { success: false, error: 'Login failed. Please try again.' }
   }
 
   const logout = async () => {

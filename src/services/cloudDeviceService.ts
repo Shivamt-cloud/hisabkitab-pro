@@ -29,6 +29,10 @@ export const cloudDeviceService = {
 
       if (error) {
         console.error('Error fetching devices from cloud:', error)
+        // Handle 406 (Not Acceptable) or other Supabase errors - fallback to local
+        if (error.code === '406' || (error as any).status === 406) {
+          console.warn('Supabase returned 406 (Not Acceptable). Using local storage fallback.')
+        }
         // Fallback to local storage
         const allDevices = await getAll<Device>(STORES.USER_DEVICES)
         return allDevices.filter(d => d.user_id === userId && d.is_active)
@@ -71,6 +75,10 @@ export const cloudDeviceService = {
 
       if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
         console.error('Error checking device registration:', error)
+        // Handle 406 (Not Acceptable) or other Supabase errors - fallback to local
+        if (error.code === '406' || (error as any).status === 406) {
+          console.warn('Supabase returned 406 (Not Acceptable). Using local storage fallback.')
+        }
         // Fallback to local storage
         const allDevices = await getAll<Device>(STORES.USER_DEVICES)
         return allDevices.some(d => d.user_id === userId && d.device_id === deviceId && d.is_active)
@@ -266,9 +274,10 @@ export const cloudDeviceService = {
       const userIds = users.map(u => u.id)
 
       // Count all active devices for all users in the company
-      const { count, error: devicesError } = await supabase!
+      // Use regular select instead of count to avoid 406 errors
+      const { data: devices, error: devicesError } = await supabase!
         .from('user_devices')
-        .select('*', { count: 'exact', head: true })
+        .select('id')
         .in('user_id', userIds)
         .eq('is_active', true)
 
@@ -279,7 +288,7 @@ export const cloudDeviceService = {
         return allDevices.filter(d => userIds.includes(d.user_id) && d.is_active).length
       }
 
-      return count || 0
+      return devices?.length || 0
     } catch (error) {
       console.error('Error in cloudDeviceService.getActiveDeviceCountForCompany:', error)
       // Fallback to local storage
@@ -287,6 +296,75 @@ export const cloudDeviceService = {
       const allUsers = await getAll<{ id: string; company_id?: number }>(STORES.USERS)
       const companyUserIds = allUsers.filter(u => u.company_id === companyId).map(u => u.id)
       return allDevices.filter(d => companyUserIds.includes(d.user_id) && d.is_active).length
+    }
+  },
+
+  /**
+   * Get all active devices for a company (all users in the company)
+   */
+  getCompanyDevices: async (companyId: number): Promise<Device[]> => {
+    // If Supabase not available or offline, use local storage
+    if (!isSupabaseAvailable() || !isOnline()) {
+      const allDevices = await getAll<Device>(STORES.USER_DEVICES)
+      const allUsers = await getAll<{ id: string; company_id?: number }>(STORES.USERS)
+      const companyUserIds = allUsers.filter(u => u.company_id === companyId).map(u => u.id)
+      return allDevices.filter(d => companyUserIds.includes(d.user_id) && d.is_active)
+    }
+
+    try {
+      // Get all users in the company
+      const { data: users, error: usersError } = await supabase!
+        .from('users')
+        .select('id')
+        .eq('company_id', companyId)
+
+      if (usersError) {
+        console.error('Error fetching users for company:', usersError)
+        // Fallback to local storage
+        const allDevices = await getAll<Device>(STORES.USER_DEVICES)
+        const allUsers = await getAll<{ id: string; company_id?: number }>(STORES.USERS)
+        const companyUserIds = allUsers.filter(u => u.company_id === companyId).map(u => u.id)
+        return allDevices.filter(d => companyUserIds.includes(d.user_id) && d.is_active)
+      }
+
+      if (!users || users.length === 0) {
+        return []
+      }
+
+      const userIds = users.map(u => u.id)
+
+      // Get all active devices for all users in the company
+      const { data: devices, error: devicesError } = await supabase!
+        .from('user_devices')
+        .select('*')
+        .in('user_id', userIds)
+        .eq('is_active', true)
+        .order('last_accessed', { ascending: true }) // Oldest first
+
+      if (devicesError) {
+        console.error('Error fetching devices for company:', devicesError)
+        // Fallback to local storage
+        const allDevices = await getAll<Device>(STORES.USER_DEVICES)
+        return allDevices.filter(d => userIds.includes(d.user_id) && d.is_active)
+          .sort((a, b) => new Date(a.last_accessed).getTime() - new Date(b.last_accessed).getTime())
+      }
+
+      // Sync to local storage
+      if (devices) {
+        for (const device of devices) {
+          await put(STORES.USER_DEVICES, device as Device)
+        }
+      }
+
+      return (devices as Device[]) || []
+    } catch (error) {
+      console.error('Error in cloudDeviceService.getCompanyDevices:', error)
+      // Fallback to local storage
+      const allDevices = await getAll<Device>(STORES.USER_DEVICES)
+      const allUsers = await getAll<{ id: string; company_id?: number }>(STORES.USERS)
+      const companyUserIds = allUsers.filter(u => u.company_id === companyId).map(u => u.id)
+      return allDevices.filter(d => companyUserIds.includes(d.user_id) && d.is_active)
+        .sort((a, b) => new Date(a.last_accessed).getTime() - new Date(b.last_accessed).getTime())
     }
   },
 }

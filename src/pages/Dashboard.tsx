@@ -138,12 +138,12 @@ const Dashboard = () => {
               endDate: undefined,
               status: 'active',
             })
-          } else if (company.subscription_tier || company.subscription_start_date || company.subscription_end_date) {
+          } else if (company.subscription_tier || company.subscription_start_date || company.subscription_end_date || company.valid_to) {
             setSubscriptionInfo({
               tier: company.subscription_tier,
-              startDate: company.subscription_start_date,
-              endDate: company.subscription_end_date,
-              status: company.subscription_status,
+              startDate: company.subscription_start_date || company.valid_from,
+              endDate: company.subscription_end_date || company.valid_to,
+              status: company.subscription_status || (company.valid_to && new Date(company.valid_to) >= new Date() ? 'active' : 'expired'),
             })
           } else {
             setSubscriptionInfo(null)
@@ -849,6 +849,18 @@ const Dashboard = () => {
                               {subscriptionInfo.tier ? (subscriptionInfo.tier === 'premium' ? '♾️ Premium Plan - Unlimited' : subscriptionInfo.tier === 'standard' ? '📱📱📱 Standard Plan' : '📱 Basic Plan') : 'N/A'}
                             </p>
                           </div>
+                          {subscriptionInfo.status && (
+                            <div>
+                              <p className="text-gray-500 text-xs mb-1">Status</p>
+                              <p className={`font-semibold capitalize ${
+                                subscriptionInfo.status === 'active' ? 'text-green-600' : 
+                                subscriptionInfo.status === 'expired' ? 'text-red-600' : 
+                                'text-gray-900'
+                              }`}>
+                                {subscriptionInfo.status}
+                              </p>
+                            </div>
+                          )}
                           {subscriptionInfo.startDate && (
                             <div>
                               <p className="text-gray-500 text-xs mb-1">Start Date</p>
@@ -860,35 +872,38 @@ const Dashboard = () => {
                           {subscriptionInfo.endDate && (
                             <div>
                               <p className="text-gray-500 text-xs mb-1">End Date</p>
-                              <p className="text-gray-900 text-sm">
+                              <p className="text-gray-900 text-sm font-semibold">
                                 {new Date(subscriptionInfo.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
                               </p>
                             </div>
                           )}
                           {subscriptionInfo.endDate && subscriptionDaysRemaining !== null && (
-                            <div>
-                              <p className="text-gray-500 text-xs mb-1">Days Remaining</p>
-                              <p className="text-gray-900 font-bold text-lg">
+                            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-3 border border-blue-200">
+                              <p className="text-gray-500 text-xs mb-2 font-semibold">Days Remaining</p>
+                              <p className={`font-bold text-xl ${
+                                subscriptionDaysRemaining <= 7 ? 'text-red-600' :
+                                subscriptionDaysRemaining <= 30 ? 'text-orange-600' :
+                                'text-green-600'
+                              }`}>
                                 {subscriptionDaysRemaining > 0 ? (
-                                  <span>{subscriptionDaysRemaining} day{subscriptionDaysRemaining !== 1 ? 's' : ''}</span>
+                                  <span>{subscriptionDaysRemaining} day{subscriptionDaysRemaining !== 1 ? 's' : ''} remaining</span>
                                 ) : subscriptionDaysRemaining === 0 ? (
-                                  <span className="text-red-600">Expires Today</span>
+                                  <span className="text-red-600">⚠️ Expires Today</span>
                                 ) : (
-                                  <span className="text-red-600">Expired {Math.abs(subscriptionDaysRemaining)} day{Math.abs(subscriptionDaysRemaining) !== 1 ? 's' : ''} ago</span>
+                                  <span className="text-red-600">❌ Expired {Math.abs(subscriptionDaysRemaining)} day{Math.abs(subscriptionDaysRemaining) !== 1 ? 's' : ''} ago</span>
                                 )}
                               </p>
+                              {subscriptionDaysRemaining > 0 && subscriptionDaysRemaining <= 30 && (
+                                <p className="text-orange-600 text-xs mt-1 font-medium">
+                                  ⚠️ Renew soon to avoid service interruption
+                                </p>
+                              )}
                             </div>
                           )}
                           {subscriptionInfo.tier === 'premium' && !subscriptionInfo.endDate && (
                             <div>
-                              <p className="text-gray-500 text-xs mb-1">Status</p>
-                              <p className="text-gray-900 font-semibold">Unlimited Access</p>
-                            </div>
-                          )}
-                          {subscriptionInfo.status && subscriptionInfo.tier !== 'premium' && (
-                            <div>
-                              <p className="text-gray-500 text-xs mb-1">Status</p>
-                              <p className="text-gray-900 font-semibold capitalize">{subscriptionInfo.status}</p>
+                              <p className="text-gray-500 text-xs mb-1">Access</p>
+                              <p className="text-gray-900 font-semibold text-green-600">Unlimited</p>
                             </div>
                           )}
                         </div>

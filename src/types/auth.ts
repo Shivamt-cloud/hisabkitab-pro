@@ -12,7 +12,7 @@ export interface User {
 
 export interface AuthContextType {
   user: User | null
-  login: (email: string, password: string) => Promise<boolean>
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>
   logout: () => void
   hasPermission: (permission: string) => boolean
   isLoading: boolean
