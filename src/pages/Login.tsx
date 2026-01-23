@@ -2,7 +2,7 @@ import { useState, FormEvent, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { LogIn, Mail, Lock, AlertCircle, User, Package, ShoppingCart, TrendingUp, Users, BarChart3, Shield, CheckCircle, MessageCircle, Globe, X, Building2, Phone, MapPin, FileText, UserPlus } from 'lucide-react'
-import { detectCountry, getCountryPricing, formatPrice, type CountryPricing } from '../utils/pricing'
+import { COUNTRY_OPTIONS, detectCountry, formatPrice, getCountryPricing, getSavedCountry, isSupportedCountryCode, saveCountry, type CountryPricing } from '../utils/pricing'
 import { calculateTierPrice, getTierPricing } from '../utils/tierPricing'
 import { getMaxUsersForPlan } from '../utils/planUserLimits'
 import { SubscriptionTier } from '../types/device'
@@ -42,15 +42,28 @@ const Login = () => {
     subscription_tier: 'basic' as SubscriptionTier,
   })
   const [isSubmittingForm, setIsSubmittingForm] = useState(false)
+  const [subscriptionExpired, setSubscriptionExpired] = useState<{ daysExpired: number; currentTier: SubscriptionTier } | null>(null)
   const { login } = useAuth()
   const navigate = useNavigate()
 
   useEffect(() => {
-    // Detect user's country on component mount
-    const detectedCountry = detectCountry()
-    setSelectedCountry(detectedCountry)
-    setPricing(getCountryPricing(detectedCountry))
+    // Prefer saved country (user override), otherwise detect
+    const saved = getSavedCountry()
+    const initialCountry = isSupportedCountryCode(saved) ? (saved as string) : detectCountry()
+    setSelectedCountry(initialCountry)
+    setPricing(getCountryPricing(initialCountry))
   }, [])
+
+  const applyCountrySelection = (country: string) => {
+    setSelectedCountry(country)
+    setPricing(getCountryPricing(country))
+    saveCountry(country)
+    // Default business country if empty (user can still change)
+    setRegistrationFormData(prev => ({
+      ...prev,
+      country: prev.country || getCountryPricing(country).countryName,
+    }))
+  }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -58,14 +71,26 @@ const Login = () => {
     setIsLoading(true)
 
     try {
-      const success = await login(email, password)
-      if (success) {
+      const result = await login(email, password)
+      if (result.success) {
         navigate('/')
       } else {
-        setError('Invalid email or password')
+        // Check if subscription is expired
+        if (result.error?.startsWith('SUBSCRIPTION_EXPIRED:')) {
+          const parts = result.error.split(':')
+          const daysExpired = parseInt(parts[1]) || 0
+          const currentTier = (parts[2] || 'basic') as SubscriptionTier
+          setSubscriptionExpired({ daysExpired, currentTier })
+          setError('')
+        } else {
+          setError(result.error || 'Invalid email or password')
+          setSubscriptionExpired(null)
+        }
       }
     } catch (err) {
+      console.error('Login error:', err)
       setError('An error occurred. Please try again.')
+      setSubscriptionExpired(null)
     } finally {
       setIsLoading(false)
     }
@@ -96,16 +121,16 @@ const Login = () => {
       
       if (existingUser && existingUser.company_id) {
         // User exists and has a company - proceed with login
-        const success = await login(email, '') // For Google users, we might use empty password or token-based auth
+        const result = await login(email, '') // For Google users, we might use empty password or token-based auth
         
-        if (success) {
+        if (result.success) {
           // Close email input dialog
           setShowEmailInput(false)
           setGoogleEmail('')
           // Navigate to home page
           navigate('/')
         } else {
-          setError('Unable to sign in. Please contact support or use email/password login.')
+          setError(result.error || 'Unable to sign in. Please contact support or use email/password login.')
         }
       } else {
         // User doesn't exist OR exists but has no company - show registration form
@@ -139,7 +164,7 @@ const Login = () => {
       city: '',
       state: '',
       pincode: '',
-      country: '',
+      country: getCountryPricing(selectedCountry).countryName,
       phone: '',
       gstin: '',
       website: '',
@@ -291,20 +316,15 @@ Please review and process this registration request.
                 <select
                   value={selectedCountry}
                   onChange={(e) => {
-                    const country = e.target.value
-                    setSelectedCountry(country)
-                    setPricing(getCountryPricing(country))
+                    applyCountrySelection(e.target.value)
                   }}
                   className="w-full bg-white/15 backdrop-blur-md border-2 border-white/30 rounded-xl px-4 py-3 text-white font-semibold focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none transition-all hover:bg-white/20 hover:border-white/40 cursor-pointer shadow-lg"
                 >
-                  <option value="IN" className="bg-gray-800">India (₹)</option>
-                  <option value="US" className="bg-gray-800">United States ($)</option>
-                  <option value="GB" className="bg-gray-800">United Kingdom (£)</option>
-                  <option value="AU" className="bg-gray-800">Australia (A$)</option>
-                  <option value="CA" className="bg-gray-800">Canada (C$)</option>
-                  <option value="EU" className="bg-gray-800">Europe (€)</option>
-                  <option value="AE" className="bg-gray-800">UAE (AED)</option>
-                  <option value="SG" className="bg-gray-800">Singapore (S$)</option>
+                  {COUNTRY_OPTIONS.map((c) => (
+                    <option key={c.code} value={c.code} className="bg-gray-800">
+                      {c.name} ({c.currencySymbol})
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -358,27 +378,30 @@ Please review and process this registration request.
                     
                     {/* Plan Details with Device Limits and Pricing */}
                     <div className="mt-4 space-y-2">
-                      <div className="bg-white/15 backdrop-blur-sm rounded-lg p-3 border border-white/20">
-                        <div className="text-xs font-bold text-white/90 mb-1 flex items-center justify-between">
-                          <span>📱 Basic Plan - 1 Device Access</span>
-                          <span className="font-extrabold">{formatPrice(calculateTierPrice(pricing.yearlyPrice, 'basic'), pricing.currencySymbol)}/Year</span>
-                        </div>
-                        <div className="text-xs text-white/80">Supports: Mobile, Laptop, Desktop, Tablet</div>
-                      </div>
-                      <div className="bg-white/10 backdrop-blur-sm rounded-lg p-3 border border-white/15">
-                        <div className="text-xs font-bold text-white/85 mb-1 flex items-center justify-between">
-                          <span>📱📱📱 Standard Plan - 3 Devices Access</span>
-                          <span className="font-extrabold">{formatPrice(calculateTierPrice(pricing.yearlyPrice, 'standard'), pricing.currencySymbol)}/Year</span>
-                        </div>
-                        <div className="text-xs text-white/75">Supports: Mobile, Laptop, Desktop, Tablet</div>
-                      </div>
-                      <div className="bg-white/10 backdrop-blur-sm rounded-lg p-3 border border-white/15">
-                        <div className="text-xs font-bold text-white/85 mb-1 flex items-center justify-between">
-                          <span>♾️ Premium Plan - Unlimited Devices</span>
-                          <span className="font-extrabold">{formatPrice(calculateTierPrice(pricing.yearlyPrice, 'premium'), pricing.currencySymbol)}/Year</span>
-                        </div>
-                        <div className="text-xs text-white/75">Supports: Mobile, Laptop, Desktop, Tablet (All Types)</div>
-                      </div>
+                      {(['basic', 'standard', 'premium'] as SubscriptionTier[]).map((tier) => {
+                        const tierPrice = calculateTierPrice(pricing.yearlyPrice, tier)
+                        const tierOriginalPrice = calculateTierPrice(pricing.originalPrice || pricing.yearlyPrice * 2, tier)
+                        const tierName = tier === 'basic' ? '📱 Basic Plan - 1 Device Access' : 
+                                        tier === 'standard' ? '📱📱📱 Standard Plan - 3 Devices Access' : 
+                                        '♾️ Premium Plan - Unlimited Devices'
+                        const tierDescription = tier === 'premium' ? 'Supports: Mobile, Laptop, Desktop, Tablet (All Types)' : 
+                                               'Supports: Mobile, Laptop, Desktop, Tablet'
+                        
+                        return (
+                          <div key={tier} className={`${tier === 'basic' ? 'bg-white/15' : 'bg-white/10'} backdrop-blur-sm rounded-lg p-3 border ${tier === 'basic' ? 'border-white/20' : 'border-white/15'}`}>
+                            <div className={`text-xs font-bold ${tier === 'basic' ? 'text-white/90' : 'text-white/85'} mb-1 flex items-center justify-between`}>
+                              <span>{tierName}</span>
+                              <div className="text-right">
+                                <div className="line-through opacity-60 text-xs mb-0.5">
+                                  {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
+                                </div>
+                                <span className="font-extrabold">{formatPrice(tierPrice, pricing.currencySymbol)}/Year</span>
+                              </div>
+                            </div>
+                            <div className={`text-xs ${tier === 'basic' ? 'text-white/80' : 'text-white/75'}`}>{tierDescription}</div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 </div>
@@ -536,6 +559,26 @@ Please review and process this registration request.
           <div className="text-center mb-8 lg:hidden">
             <h1 className="text-4xl font-extrabold text-white mb-2">HisabKitab-Pro</h1>
             <p className="text-blue-100 text-lg mb-4">Inventory Management System</p>
+            <div className="max-w-sm mx-auto mb-4 text-left">
+              <label className="block text-white text-sm font-bold mb-2 flex items-center justify-center gap-2 uppercase tracking-wider">
+                <Globe className="w-4 h-4 text-blue-200" />
+                Select Country for Pricing <span className="text-red-200">*</span>
+              </label>
+              <p className="text-blue-100/90 text-xs mb-2 text-center">
+                If prices aren’t correct for your region, please select your country.
+              </p>
+              <select
+                value={selectedCountry}
+                onChange={(e) => applyCountrySelection(e.target.value)}
+                className="w-full bg-white/15 backdrop-blur-md border-2 border-white/30 rounded-xl px-4 py-3 text-white font-semibold focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none transition-all hover:bg-white/20 hover:border-white/40 cursor-pointer shadow-lg"
+              >
+                {COUNTRY_OPTIONS.map((c) => (
+                  <option key={c.code} value={c.code} className="bg-gray-800">
+                    {c.name} ({c.currencySymbol})
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="relative inline-block mb-2">
               {/* Mobile Badges */}
               <div className="absolute -top-2 -right-2 z-20 animate-bounce">
@@ -863,6 +906,33 @@ Please review and process this registration request.
 
             {/* Modal Body */}
             <form onSubmit={handleRegistrationSubmit} className="p-6 space-y-6">
+              {/* Mandatory Pricing Country Selection */}
+              <div className="bg-blue-50 rounded-xl p-4 border-2 border-blue-200">
+                <div className="flex items-start gap-3">
+                  <Globe className="w-5 h-5 text-blue-700 mt-0.5 flex-shrink-0" />
+                  <div className="w-full">
+                    <p className="text-sm font-bold text-blue-900 mb-1">
+                      Select your country for correct pricing <span className="text-red-600">*</span>
+                    </p>
+                    <p className="text-xs text-blue-800 mb-3">
+                      If prices aren’t visible correctly for your region, select your country once. We’ll use this selection across devices/pages.
+                    </p>
+                    <select
+                      required
+                      value={selectedCountry}
+                      onChange={(e) => applyCountrySelection(e.target.value)}
+                      className="w-full px-4 py-3 border-2 border-blue-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                    >
+                      {COUNTRY_OPTIONS.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.name} ({c.currencySymbol})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
               {/* User Info Message */}
               {registrationMode === 'google' && (
                 <div className="bg-yellow-50 rounded-xl p-4 border-2 border-yellow-200">
@@ -1065,14 +1135,18 @@ Please review and process this registration request.
                 <label className="block text-sm font-bold text-gray-700 mb-2">
                   Country <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="text"
+                <select
                   required
                   value={registrationFormData.country}
                   onChange={(e) => setRegistrationFormData({ ...registrationFormData, country: e.target.value })}
-                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  placeholder="Country"
-                />
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                >
+                  {COUNTRY_OPTIONS.map((c) => (
+                    <option key={c.code} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Phone */}
@@ -1147,6 +1221,7 @@ Please review and process this registration request.
                   {(['basic', 'standard', 'premium'] as SubscriptionTier[]).map((tier) => {
                     const tierInfo = getTierPricing(tier)
                     const tierPrice = calculateTierPrice(pricing.yearlyPrice, tier)
+                    const tierOriginalPrice = calculateTierPrice(pricing.originalPrice || pricing.yearlyPrice * 2, tier)
                     const maxUsers = getMaxUsersForPlan(tier)
                     const isSelected = registrationFormData.subscription_tier === tier
                     
@@ -1164,9 +1239,17 @@ Please review and process this registration request.
                           <h4 className="font-bold text-gray-900">{tierInfo.name}</h4>
                           {isSelected && <CheckCircle className="w-5 h-5 text-blue-600" />}
                         </div>
-                        <div className="text-2xl font-extrabold text-gray-900 mb-1">
-                          {formatPrice(tierPrice, pricing.currencySymbol)}
-                          <span className="text-sm font-normal">/Year</span>
+                        <div className="mb-2">
+                          <div className="text-xs text-gray-500 line-through mb-1">
+                            {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
+                          </div>
+                          <div className="text-2xl font-extrabold text-gray-900">
+                            {formatPrice(tierPrice, pricing.currencySymbol)}
+                            <span className="text-sm font-normal">/Year</span>
+                          </div>
+                          <div className="inline-block mt-1 bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                            50% OFF
+                          </div>
                         </div>
                         <div className="text-xs text-gray-600 mb-2">
                           Max Users: {maxUsers === 'unlimited' ? 'Unlimited' : maxUsers}
@@ -1211,6 +1294,149 @@ Please review and process this registration request.
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Subscription Expired Modal */}
+      {subscriptionExpired && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-gradient-to-r from-red-600 to-orange-600 text-white p-6 rounded-t-3xl flex items-center justify-between z-10">
+              <div>
+                <h3 className="text-2xl font-bold">Subscription Expired</h3>
+                <p className="text-red-100 text-sm mt-1">
+                  Your subscription expired {subscriptionExpired.daysExpired} day{subscriptionExpired.daysExpired !== 1 ? 's' : ''} ago. Please renew to continue.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setSubscriptionExpired(null)
+                  setError('')
+                }}
+                className="text-white hover:bg-white/20 rounded-full p-2 transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6">
+              {/* Warning Message */}
+              <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 mb-6">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-6 h-6 text-red-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-bold text-red-900 mb-1">
+                      Access Suspended
+                    </p>
+                    <p className="text-sm text-red-800">
+                      Your subscription has expired. Please recharge your plan to regain access to all features.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Plan Selection */}
+              <div>
+                <h4 className="text-lg font-bold text-gray-900 mb-4">Select a Plan to Renew</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {(['basic', 'standard', 'premium'] as SubscriptionTier[]).map((tier) => {
+                    const tierInfo = getTierPricing(tier)
+                    const tierPrice = calculateTierPrice(pricing.yearlyPrice, tier)
+                    const tierOriginalPrice = calculateTierPrice(pricing.originalPrice || pricing.yearlyPrice * 2, tier)
+                    const maxUsers = getMaxUsersForPlan(tier)
+                    const isCurrentTier = subscriptionExpired.currentTier === tier
+                    
+                    return (
+                      <div
+                        key={tier}
+                        className={`border-2 rounded-xl p-5 cursor-pointer transition-all ${
+                          isCurrentTier
+                            ? 'border-blue-500 bg-blue-50 shadow-lg ring-2 ring-blue-200'
+                            : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <h5 className="font-bold text-gray-900 text-lg">{tierInfo.name}</h5>
+                          {isCurrentTier && (
+                            <span className="bg-blue-600 text-white text-xs font-bold px-2 py-1 rounded-full">
+                              Current
+                            </span>
+                          )}
+                        </div>
+                        <div className="mb-2">
+                          <div className="text-sm text-gray-500 line-through mb-1">
+                            {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
+                          </div>
+                          <div className="text-3xl font-extrabold text-gray-900">
+                            {formatPrice(tierPrice, pricing.currencySymbol)}
+                            <span className="text-sm font-normal">/Year</span>
+                          </div>
+                          <div className="inline-block mt-1 bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                            50% OFF
+                          </div>
+                        </div>
+                        <div className="space-y-2 text-sm text-gray-600 mb-4">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="w-4 h-4 text-green-600" />
+                            <span>Devices: {tierInfo.deviceLimit === 'unlimited' ? 'Unlimited' : tierInfo.deviceLimit}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="w-4 h-4 text-green-600" />
+                            <span>Users: {maxUsers === 'unlimited' ? 'Unlimited' : maxUsers}</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            // Open email to contact for renewal
+                            const emailSubject = encodeURIComponent(`Subscription Renewal Request - ${tierInfo.name}`)
+                            const emailBody = encodeURIComponent(`
+Subscription Renewal Request
+
+Current Plan: ${subscriptionExpired.currentTier}
+Requested Plan: ${tierInfo.name}
+Price: ${formatPrice(tierPrice, pricing.currencySymbol)}/Year
+
+Please process this renewal request to restore access to the system.
+
+Thank you!
+                            `)
+                            window.location.href = `mailto:hisabkitabpro@gmail.com?subject=${emailSubject}&body=${emailBody}`
+                          }}
+                          className={`w-full py-3 px-4 rounded-lg font-semibold transition-all ${
+                            isCurrentTier
+                              ? 'bg-blue-600 text-white hover:bg-blue-700'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                        >
+                          {isCurrentTier ? 'Renew This Plan' : 'Select This Plan'}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Contact Information */}
+              <div className="mt-6 bg-blue-50 rounded-xl p-4 border border-blue-200">
+                <div className="flex items-center gap-2 text-blue-900 mb-2">
+                  <MessageCircle className="w-5 h-5" />
+                  <span className="font-bold">Need Help?</span>
+                </div>
+                <p className="text-sm text-blue-800 mb-2">
+                  Contact us for assistance with renewal or to discuss custom plans:
+                </p>
+                <a 
+                  href="mailto:hisabkitabpro@gmail.com" 
+                  className="text-blue-600 hover:text-blue-700 text-sm font-semibold transition-colors flex items-center gap-2 hover:underline"
+                >
+                  <Mail className="w-4 h-4" />
+                  hisabkitabpro@gmail.com
+                </a>
+              </div>
+            </div>
           </div>
         </div>
       )}
