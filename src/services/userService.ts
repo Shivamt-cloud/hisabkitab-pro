@@ -46,8 +46,11 @@ export interface UserWithPassword extends User {
 export const userService = {
   // Get all users (from cloud, with local fallback)
   getAll: async (): Promise<UserWithPassword[]> => {
+    // First sync from cloud (if available)
+    const users = await cloudUserService.getAll()
+    // Then ensure admin user exists (after sync, so it doesn't get overwritten)
     await initializeUsers()
-    // Use cloud service which handles fallback to local
+    // Return users (admin will be included now)
     return await cloudUserService.getAll()
   },
 
@@ -58,6 +61,8 @@ export const userService = {
 
   // Get user by email (from cloud, with local fallback)
   getByEmail: async (email: string): Promise<UserWithPassword | undefined> => {
+    // Ensure admin user exists first
+    await initializeUsers()
     return await cloudUserService.getByEmail(email)
   },
 
@@ -117,8 +122,9 @@ export const userService = {
 
   // Verify login credentials
   verifyLogin: async (email: string, password: string): Promise<User | null> => {
-    // Ensure users are initialized before verifying
+    // Ensure admin user exists (this will create/update it after any Supabase sync)
     await initializeUsers()
+    // Get user (will check cloud first, then local)
     const user = await userService.getByEmail(email)
     
     // Debug logging
