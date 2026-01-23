@@ -17,26 +17,38 @@ const isValidUrl = (url: string): boolean => {
   }
 }
 
-// Debug logging (only in development or when not configured)
+// Debug logging (always log in production to help diagnose issues)
 if (typeof window !== 'undefined') {
   const hasUrl = !!supabaseUrl
   const hasKey = !!supabaseAnonKey
   const urlValid = isValidUrl(supabaseUrl)
   
+  // Always log configuration status for debugging
+  console.log('🔍 Supabase Configuration Check:')
+  console.log('VITE_SUPABASE_URL:', hasUrl ? (urlValid ? '✅ Valid URL' : '❌ Invalid URL format') : '❌ Missing')
+  if (hasUrl) {
+    console.log('  URL value:', supabaseUrl.substring(0, 30) + '...' + (urlValid ? '' : ' (INVALID)'))
+  }
+  console.log('VITE_SUPABASE_ANON_KEY:', hasKey ? '✅ Set (' + supabaseAnonKey.substring(0, 20) + '...)' : '❌ Missing')
+  
   if (!hasUrl || !hasKey || !urlValid) {
-    console.warn('⚠️ Supabase Configuration Check:')
-    console.warn('VITE_SUPABASE_URL:', hasUrl ? (urlValid ? '✅ Valid URL' : '❌ Invalid URL format') : '❌ Missing')
+    console.error('⚠️ Supabase Configuration Error:')
+    if (!hasUrl) {
+      console.error('  ❌ VITE_SUPABASE_URL is missing!')
+      console.error('  → Add it in Netlify: Site Settings → Environment Variables')
+    }
+    if (!hasKey) {
+      console.error('  ❌ VITE_SUPABASE_ANON_KEY is missing!')
+      console.error('  → Add it in Netlify: Site Settings → Environment Variables')
+    }
     if (hasUrl && !urlValid) {
-      console.warn('  Current value:', JSON.stringify(supabaseUrl))
-      console.warn('  Expected format: https://xxxxx.supabase.co')
+      console.error('  ❌ VITE_SUPABASE_URL has invalid format!')
+      console.error('  Current value:', JSON.stringify(supabaseUrl))
+      console.error('  Expected format: https://xxxxx.supabase.co')
     }
-    console.warn('VITE_SUPABASE_ANON_KEY:', hasKey ? '✅ Set' : '❌ Missing')
-    if (hasUrl && hasKey && !urlValid) {
-      console.warn('⚠️ URL format issue detected. Please check:')
-      console.warn('  1. No extra spaces before/after the URL')
-      console.warn('  2. URL starts with https://')
-      console.warn('  3. URL ends with .supabase.co')
-    }
+    console.error('⚠️ IMPORTANT: After adding variables in Netlify, trigger a new deployment!')
+  } else {
+    console.log('✅ Supabase configuration looks good!')
   }
 }
 
@@ -56,6 +68,25 @@ if (!isConfigured) {
 export const supabase = isConfigured
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null
+
+// Log connection status
+if (typeof window !== 'undefined') {
+  if (isConfigured) {
+    console.log('✅ Supabase client created successfully')
+    // Test connection (async, don't block)
+    if (supabase) {
+      supabase.from('users').select('count').limit(1)
+        .then(() => {
+          console.log('✅ Supabase connection test: SUCCESS')
+        })
+        .catch((error: any) => {
+          console.error('❌ Supabase connection test: FAILED', error)
+        })
+    }
+  } else {
+    console.error('❌ Supabase client NOT created - configuration missing or invalid')
+  }
+}
 
 // Check if Supabase is available
 export const isSupabaseAvailable = (): boolean => {
