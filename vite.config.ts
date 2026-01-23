@@ -111,6 +111,7 @@ export default defineConfig({
     host: true, // Listen on all network interfaces
     port: 5173, // Port number
   },
-  base: './', // Use relative paths for Electron
+  // Use relative paths for Electron, absolute for web deployment
+  base: process.env.NODE_ENV === 'production' && !process.env.ELECTRON ? '/' : './',
 })
 
