@@ -75,7 +75,7 @@ if (typeof window !== 'undefined') {
     console.log('✅ Supabase client created successfully')
     // Test connection (async, don't block)
     if (supabase) {
-      supabase.from('users').select('count').limit(1)
+      Promise.resolve(supabase.from('users').select('count').limit(1))
         .then(() => {
           console.log('✅ Supabase connection test: SUCCESS')
         })
