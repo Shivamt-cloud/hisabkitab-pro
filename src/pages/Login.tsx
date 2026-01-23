@@ -771,9 +771,15 @@ Please review and process this registration request.
                   <UserPlus className="w-6 h-6 relative z-10" />
                   <span className="relative z-10">Fill Registration Form</span>
                 </button>
-                <div className="mt-3 bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
-                  <p className="text-sm text-gray-700 font-medium">
-                    Fill the form below with your details and we will connect with you within 24 hours via email.
+                <div className="mt-4 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 border-2 border-blue-200 rounded-xl p-4 text-center shadow-sm">
+                  <div className="flex items-center justify-center gap-2 mb-2">
+                    <MessageCircle className="w-5 h-5 text-blue-600" />
+                    <p className="text-base font-bold text-gray-800">
+                      Quick Registration Process
+                    </p>
+                  </div>
+                  <p className="text-sm text-gray-700 leading-relaxed">
+                    Complete the registration form above with your business details, and our team will reach out to you within <span className="font-bold text-blue-600">24 hours</span> via email to activate your account and get you started! 🚀
                   </p>
                 </div>
               </div>
@@ -897,7 +903,7 @@ Please review and process this registration request.
               <div>
                 <h3 className="text-2xl font-bold">Complete Your Registration</h3>
                 <p className="text-blue-100 text-sm mt-1">
-                  Please provide your business details below. We will connect with you within 24 hours via email.
+                  Fill in your business details and our team will activate your account within <span className="font-bold">24 hours</span> via email.
                 </p>
               </div>
               <button
@@ -914,15 +920,17 @@ Please review and process this registration request.
             {/* Modal Body */}
             <form onSubmit={handleRegistrationSubmit} className="p-6 space-y-6">
               {/* Information Message */}
-              <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+              <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 rounded-xl p-5 shadow-sm">
                 <div className="flex items-start gap-3">
-                  <CheckCircle className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
+                  <div className="p-2 bg-green-500 rounded-full flex-shrink-0">
+                    <CheckCircle className="w-5 h-5 text-white" />
+                  </div>
                   <div>
-                    <p className="text-sm font-bold text-green-900 mb-1">
-                      Registration Process
+                    <p className="text-base font-bold text-green-900 mb-2 flex items-center gap-2">
+                      <span>✨ Quick & Easy Registration</span>
                     </p>
-                    <p className="text-sm text-green-800">
-                      Please fill out all the required details below. Once submitted, we will review your information and connect with you within 24 hours via email to complete your account setup.
+                    <p className="text-sm text-green-800 leading-relaxed">
+                      Simply fill out all the required details below. Once you submit the form, our team will review your information and <span className="font-bold text-green-900">activate your account within 24 hours</span>. You'll receive a confirmation email with your login credentials and next steps to get started! 🎉
                     </p>
                   </div>
                 </div>
