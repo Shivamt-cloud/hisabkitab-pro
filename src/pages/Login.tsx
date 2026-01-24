@@ -326,6 +326,39 @@ Please review and process this registration request.
                     </option>
                   ))}
                 </select>
+
+                {/* 1 Month Free Trial Button - Same functionality as Fill Registration Form */}
+                <div className="relative mt-4 pt-4">
+                  {/* FREE Badge - Positioned above button */}
+                  <div className="absolute -top-1 left-1/2 transform -translate-x-1/2 z-30 animate-bounce">
+                    <div className="bg-gradient-to-r from-yellow-300 via-yellow-400 to-amber-400 text-yellow-900 text-sm font-black px-5 py-2 rounded-full shadow-2xl border-3 border-yellow-200 flex items-center gap-2">
+                      <span className="text-lg">✨</span>
+                      <span>FREE FOR 1 MONTH</span>
+                      <span className="text-lg">✨</span>
+                    </div>
+                  </div>
+                  
+                  {/* Animated Glow Background */}
+                  <div className="absolute inset-0 top-3 bg-gradient-to-r from-pink-500 via-rose-500 to-red-500 rounded-2xl blur-lg opacity-80 animate-pulse"></div>
+                  
+                  <button
+                    type="button"
+                    onClick={handleDirectRegistration}
+                    className="relative w-full mt-3 bg-gradient-to-r from-pink-600 via-rose-500 to-red-500 text-white font-bold text-lg py-4 px-6 rounded-2xl hover:from-pink-700 hover:via-rose-600 hover:to-red-600 transition-all duration-300 shadow-2xl hover:shadow-pink-500/50 transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3 border-2 border-white/40 overflow-hidden group"
+                  >
+                    {/* Shimmer Effect */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
+                    
+                    <div className="relative z-10 flex items-center gap-3">
+                      <span className="text-3xl">🎁</span>
+                      <div className="text-left">
+                        <div className="text-lg font-extrabold tracking-wide drop-shadow-lg">Start Your FREE Trial Now!</div>
+                        <div className="text-xs font-semibold text-white/90">No Credit Card Required • Full Access • Cancel Anytime</div>
+                      </div>
+                      <span className="text-3xl">🚀</span>
+                    </div>
+                  </button>
+                </div>
               </div>
 
               {/* Special Pricing Display with Effects */}
@@ -377,7 +410,7 @@ Please review and process this registration request.
                     </div>
                     
                     {/* Plan Details with Device Limits and Pricing */}
-                    <div className="mt-4 space-y-2">
+                                    <div className="mt-4 space-y-2">
                       {(['basic', 'standard', 'premium'] as SubscriptionTier[]).map((tier) => {
                         const tierPrice = calculateTierPrice(pricing.yearlyPrice, tier)
                         const tierOriginalPrice = calculateTierPrice(pricing.originalPrice || pricing.yearlyPrice * 2, tier)
