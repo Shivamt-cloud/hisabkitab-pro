@@ -611,6 +611,34 @@ Please review and process this registration request.
                   </option>
                 ))}
               </select>
+
+              {/* Mobile - 1 Month Free Trial Button */}
+              <div className="relative mt-4 pt-3">
+                {/* FREE Badge - Positioned above button */}
+                <div className="absolute -top-0 left-1/2 transform -translate-x-1/2 z-30 animate-bounce">
+                  <div className="bg-gradient-to-r from-yellow-300 via-yellow-400 to-amber-400 text-yellow-900 text-xs font-black px-3 py-1.5 rounded-full shadow-2xl border-2 border-yellow-200 flex items-center gap-1">
+                    <span>✨</span>
+                    <span>FREE FOR 1 MONTH</span>
+                    <span>✨</span>
+                  </div>
+                </div>
+                
+                {/* Animated Glow Background */}
+                <div className="absolute inset-0 top-2 bg-gradient-to-r from-pink-500 via-rose-500 to-red-500 rounded-xl blur-md opacity-80 animate-pulse"></div>
+                
+                <button
+                  type="button"
+                  onClick={handleDirectRegistration}
+                  className="relative w-full mt-2 bg-gradient-to-r from-pink-600 via-rose-500 to-red-500 text-white font-bold text-sm py-3 px-4 rounded-xl hover:from-pink-700 hover:via-rose-600 hover:to-red-600 transition-all duration-300 shadow-2xl transform active:scale-[0.98] flex items-center justify-center gap-2 border-2 border-white/40 overflow-hidden"
+                >
+                  <span className="text-xl">🎁</span>
+                  <div className="text-left">
+                    <div className="text-sm font-extrabold">Start FREE Trial Now!</div>
+                    <div className="text-xs text-white/90">No Card Required</div>
+                  </div>
+                  <span className="text-xl">🚀</span>
+                </button>
+              </div>
             </div>
             <div className="relative inline-block mb-2">
               {/* Mobile Badges */}
