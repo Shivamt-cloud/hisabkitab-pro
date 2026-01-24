@@ -12,7 +12,7 @@ import { UserRole } from '../types/auth'
 import { PermissionModule, PermissionAction, PERMISSION_MODULES, ModulePermission } from '../types/permissions'
 import { Home, Save, Building2, FileText, Percent, Settings, RotateCcw, Download, Upload, Plus, Edit, Trash2, Users, Eye, EyeOff, X, Shield, UserCog, UserCheck, Lock, Unlock, UserPlus, Mail, CheckCircle, Clock, AlertCircle, Smartphone } from 'lucide-react'
 import { registrationRequestService, RegistrationRequest } from '../services/registrationRequestService'
-import { generateMailtoLink, getEmailTemplateForStatus } from '../utils/registrationEmailTemplates'
+import { generateMailtoLink, getEmailTemplateForStatus, registrationEmailTemplates, generateUserCreatedMailtoLink, UserCreatedEmailData } from '../utils/registrationEmailTemplates'
 import { cloudDeviceService } from '../services/cloudDeviceService'
 import { Device } from '../types/device'
 import { getMaxUsersForPlan, canCreateUser } from '../utils/planUserLimits'
@@ -430,7 +430,34 @@ const SystemSettings = () => {
         
         const newUser = await userService.create(userData as Omit<UserWithPassword, 'id'>)
         userId = newUser.id
-        alert('User created successfully!')
+        
+        // Send user creation email with credentials
+        if (newUser.company_id) {
+          const userCompany = companies.find(c => c.id === newUser.company_id)
+          if (userCompany) {
+            // Extract just the name part (before @ if company code is included)
+            const userNameOnly = newUser.name.split('@')[0].trim()
+            const emailData: UserCreatedEmailData = {
+              userName: userNameOnly,
+              userEmail: newUser.email,
+              userPassword: trimmedPassword, // Use the password that was set
+              userRole: newUser.role,
+              companyName: userCompany.name,
+              companyCode: userCompany.unique_code,
+              companyAddress: userCompany.address,
+              companyPhone: userCompany.phone,
+              companyEmail: userCompany.email,
+              subscriptionTier: userCompany.subscription_tier,
+              loginUrl: window.location.origin, // Current app URL
+            }
+            
+            // Open email client with user credentials
+            const mailtoLink = generateUserCreatedMailtoLink(emailData)
+            window.open(mailtoLink, '_blank')
+          }
+        }
+        
+        alert('User created successfully! Email with login credentials has been opened.')
       }
       
       // Save custom permissions if enabled
@@ -1685,7 +1712,7 @@ const SystemSettings = () => {
                     </form>
                   ) : null}
 
-                  <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
@@ -1735,6 +1762,39 @@ const SystemSettings = () => {
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                               <div className="flex items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    console.log('Email button clicked for user:', usr.name)
+                                    const userCompany = usr.company_id ? companies.find(c => c.id === usr.company_id) : null
+                                    // Extract just the name part (before @ if company code is included)
+                                    const userNameOnly = usr.name.split('@')[0].trim()
+                                    const emailData: UserCreatedEmailData = {
+                                      userName: userNameOnly,
+                                      userEmail: usr.email,
+                                      userPassword: '[Password not available - Please contact admin or reset password]',
+                                      userRole: usr.role,
+                                      companyName: userCompany?.name || 'All Companies (Admin)',
+                                      companyCode: userCompany?.unique_code,
+                                      companyAddress: userCompany?.address,
+                                      companyPhone: userCompany?.phone,
+                                      companyEmail: userCompany?.email,
+                                      subscriptionTier: userCompany?.subscription_tier,
+                                      loginUrl: window.location.origin,
+                                    }
+                                    const mailtoLink = generateUserCreatedMailtoLink(emailData)
+                                    window.open(mailtoLink, '_blank')
+                                  }}
+                                  className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white px-4 py-2.5 rounded-lg transition-all flex items-center gap-2 text-sm font-bold shadow-lg border-2 border-emerald-400 min-w-[110px] justify-center z-10 relative"
+                                  style={{ 
+                                    backgroundColor: '#059669',
+                                    boxShadow: '0 4px 6px -1px rgba(5, 150, 105, 0.3), 0 2px 4px -2px rgba(5, 150, 105, 0.3)'
+                                  }}
+                                  title="Send User Credentials Email"
+                                >
+                                  <Mail className="w-5 h-5 flex-shrink-0" />
+                                  <span className="font-bold whitespace-nowrap">Email</span>
+                                </button>
                                 <button
                                   onClick={() => handleEditUser(usr)}
                                   className="text-blue-600 hover:text-blue-900 p-1 hover:bg-blue-50 rounded transition-colors"
@@ -1787,12 +1847,13 @@ const SystemSettings = () => {
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Status</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Flags</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Free Trial</th>
                           <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
                         {registrationRequests.map((req) => {
-                          const getStatusBadge = (status: RegistrationRequest['status']) => {
+                          const getStatusBadge = (status: RegistrationRequest['status'], isFreeTrial?: boolean) => {
                             const statusConfig = {
                               pending: { bg: 'bg-gray-100', text: 'text-gray-800', label: 'Pending' },
                               under_review: { bg: 'bg-yellow-100', text: 'text-yellow-800', label: 'Under Review' },
@@ -1807,9 +1868,10 @@ const SystemSettings = () => {
                               activation_rejected: { bg: 'bg-red-100', text: 'text-red-800', label: 'Activation Rejected' },
                             }
                             const config = statusConfig[status] || statusConfig.pending
+                            const displayLabel = isFreeTrial && status !== 'activation_rejected' ? 'Registered Under Trial' : config.label
                             return (
                               <span className={`px-2 py-1 ${config.bg} ${config.text} rounded-full text-xs font-semibold`}>
-                                {config.label}
+                                {displayLabel}
                               </span>
                             )
                           }
@@ -1827,9 +1889,19 @@ const SystemSettings = () => {
                                 <div className="text-sm font-medium text-gray-900">{req.business_name}</div>
                                 <div className="text-xs text-gray-500">{req.business_type}</div>
                                 <div className="text-xs text-gray-500">{req.city}, {req.state}</div>
+                                {req.is_free_trial ? (
+                                  <div className="text-xs font-semibold text-amber-700 mt-1 flex items-center gap-1">
+                                    <span>🎁</span>
+                                    <span>Plan: Free 1 Month Trial</span>
+                                  </div>
+                                ) : req.subscription_tier ? (
+                                  <div className="text-xs text-gray-600 mt-1">
+                                    Plan: {req.subscription_tier === 'basic' ? 'Basic' : req.subscription_tier === 'standard' ? 'Standard' : 'Premium'}
+                                  </div>
+                                ) : null}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap">
-                                {getStatusBadge(req.status)}
+                                {getStatusBadge(req.status, req.is_free_trial)}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <div className="flex flex-col gap-1">
@@ -1886,11 +1958,34 @@ const SystemSettings = () => {
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                 {new Date(req.created_at).toLocaleDateString()}
                               </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                {req.is_free_trial ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-yellow-100 to-amber-100 text-amber-800 rounded-full text-xs font-bold border border-amber-300">
+                                    <span>✨</span>
+                                    <span>1 Month Free Trial</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400 text-xs">—</span>
+                                )}
+                              </td>
                               <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                 <div className="flex items-center justify-end gap-2">
                                   <select
-                                    value={statusUpdates[req.id] || req.status}
-                                    onChange={(e) => handleStatusChange(req.id, e.target.value as RegistrationRequest['status'])}
+                                    value={(statusUpdates[req.id] && statusUpdates[req.id] !== ('free_trial_email' as any)) ? statusUpdates[req.id] : req.status}
+                                    onChange={(e) => {
+                                      const value = e.target.value
+                                      if (value === 'free_trial_email') {
+                                        // Immediately send email when selected
+                                        const template = registrationEmailTemplates.free_trial(req)
+                                        const subject = encodeURIComponent(template.subject)
+                                        const body = encodeURIComponent(template.body)
+                                        window.open(`mailto:${req.email}?subject=${subject}&body=${body}`, '_blank')
+                                        // Reset dropdown to current status
+                                        e.target.value = req.status
+                                      } else {
+                                        handleStatusChange(req.id, value as RegistrationRequest['status'])
+                                      }
+                                    }}
                                     className="text-xs border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                                   >
                                     {(() => {
@@ -1908,11 +2003,23 @@ const SystemSettings = () => {
                                         activation_rejected: 'Activation Rejected',
                                       }
                                       const allStatuses: RegistrationRequest['status'][] = ['pending', 'under_review', 'query_initiated', 'query_completed', 'registration_accepted', 'agreement_pending', 'agreement_accepted', 'payment_pending', 'payment_completed', 'activation_completed', 'activation_rejected']
-                                      return allStatuses.map((status) => (
+                                      
+                                      const options = allStatuses.map((status) => (
                                         <option key={status} value={status}>
                                           {statusLabels[status]}
                                         </option>
                                       ))
+                                      
+                                      // Add "1 Month Free Trial" email option for free trial registrations
+                                      if (req.is_free_trial) {
+                                        options.push(
+                                          <option key="free_trial_email" value="free_trial_email" className="bg-amber-50 font-bold">
+                                            🎁 Send 1 Month Free Trial Email
+                                          </option>
+                                        )
+                                      }
+                                      
+                                      return options
                                     })()}
                                   </select>
                                   {(statusUpdates[req.id] && statusUpdates[req.id] !== req.status) && (
@@ -1932,15 +2039,29 @@ const SystemSettings = () => {
                                   >
                                     <Mail className="w-4 h-4" />
                                   </button>
-                                  {req.status === 'activation_completed' && req.company_activated && (
+                                  {req.is_free_trial && (
+                                    <button
+                                      onClick={() => {
+                                        const template = registrationEmailTemplates.free_trial(req)
+                                        const subject = encodeURIComponent(template.subject)
+                                        const body = encodeURIComponent(template.body)
+                                        window.open(`mailto:${req.email}?subject=${subject}&body=${body}`, '_blank')
+                                      }}
+                                      className="text-amber-600 hover:text-amber-900 p-1 hover:bg-amber-50 rounded transition-colors"
+                                      title="Send Free Trial Email"
+                                    >
+                                      <span className="text-xs font-bold">🎁</span>
+                                    </button>
+                                  )}
+                                  {(req.status === 'activation_completed' && req.company_activated) || (req.is_free_trial && req.status !== 'activation_rejected') ? (
                                     <button
                                       onClick={() => handlePopulateFromRegistrationRequest(req)}
                                       className="text-green-600 hover:text-green-900 p-1 hover:bg-green-50 rounded transition-colors"
-                                      title="Create Company & User"
+                                      title={req.is_free_trial ? "Add Company for Free Trial" : "Create Company & User"}
                                     >
                                       <Plus className="w-4 h-4" />
                                     </button>
-                                  )}
+                                  ) : null}
                                 </div>
                               </td>
                             </tr>

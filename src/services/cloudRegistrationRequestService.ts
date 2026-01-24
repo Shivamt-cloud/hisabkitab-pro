@@ -94,6 +94,7 @@ export const cloudRegistrationRequestService = {
       payment_done: false,
       company_activated: false,
       company_rejected: false,
+      is_free_trial: requestData.is_free_trial || false,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
@@ -130,6 +131,7 @@ export const cloudRegistrationRequestService = {
             payment_done: false,
             company_activated: false,
             company_rejected: false,
+            is_free_trial: newRequest.is_free_trial || false,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           }])

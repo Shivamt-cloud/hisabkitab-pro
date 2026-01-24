@@ -31,6 +31,7 @@ export interface RegistrationRequest {
   payment_done?: boolean
   company_activated?: boolean
   company_rejected?: boolean
+  is_free_trial?: boolean // Indicates if user registered via 1 Month Free Trial button
   created_at: string
   updated_at: string
 }

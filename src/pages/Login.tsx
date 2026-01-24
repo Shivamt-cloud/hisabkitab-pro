@@ -22,6 +22,7 @@ const Login = () => {
   const [isCheckingEmail, setIsCheckingEmail] = useState(false)
   const [showRegistrationForm, setShowRegistrationForm] = useState(false)
   const [registrationMode, setRegistrationMode] = useState<'google' | 'direct'>('direct')
+  const [isFreeTrialRegistration, setIsFreeTrialRegistration] = useState(false) // Track if registration is from free trial button
   const [googleUserEmail, setGoogleUserEmail] = useState('')
   const [googleUserName, setGoogleUserName] = useState('')
   const [registrationFormData, setRegistrationFormData] = useState({
@@ -150,8 +151,9 @@ const Login = () => {
     }
   }
 
-  const handleDirectRegistration = () => {
+  const handleDirectRegistration = (isFreeTrial?: boolean) => {
     setRegistrationMode('direct')
+    setIsFreeTrialRegistration(isFreeTrial ?? false) // Set free trial flag
     setGoogleUserEmail('')
     setGoogleUserName('')
     setRegistrationFormData({
@@ -203,6 +205,7 @@ const Login = () => {
           website: registrationFormData.website || undefined,
           description: registrationFormData.description || undefined,
           subscription_tier: registrationFormData.subscription_tier || 'basic',
+          is_free_trial: isFreeTrialRegistration, // Include free trial flag
         })
 
         console.log('Registration request saved successfully to database')
@@ -256,6 +259,7 @@ Please review and process this registration request.
 
       // Reset form
       setShowRegistrationForm(false)
+      setIsFreeTrialRegistration(false) // Reset free trial flag
       setRegistrationFormData({
         email: '',
         name: '',
@@ -343,7 +347,7 @@ Please review and process this registration request.
                   
                   <button
                     type="button"
-                    onClick={handleDirectRegistration}
+                    onClick={() => handleDirectRegistration(true)}
                     className="relative w-full mt-3 bg-gradient-to-r from-pink-600 via-rose-500 to-red-500 text-white font-bold text-lg py-4 px-6 rounded-2xl hover:from-pink-700 hover:via-rose-600 hover:to-red-600 transition-all duration-300 shadow-2xl hover:shadow-pink-500/50 transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3 border-2 border-white/40 overflow-hidden group"
                   >
                     {/* Shimmer Effect */}
@@ -628,7 +632,7 @@ Please review and process this registration request.
                 
                 <button
                   type="button"
-                  onClick={handleDirectRegistration}
+                  onClick={() => handleDirectRegistration(true)}
                   className="relative w-full mt-2 bg-gradient-to-r from-pink-600 via-rose-500 to-red-500 text-white font-bold text-sm py-3 px-4 rounded-xl hover:from-pink-700 hover:via-rose-600 hover:to-red-600 transition-all duration-300 shadow-2xl transform active:scale-[0.98] flex items-center justify-center gap-2 border-2 border-white/40 overflow-hidden"
                 >
                   <span className="text-xl">🎁</span>
@@ -825,7 +829,7 @@ Please review and process this registration request.
               <div className="w-full">
                 <button
                   type="button"
-                  onClick={handleDirectRegistration}
+                  onClick={() => handleDirectRegistration(false)}
                   disabled={isLoading || isGoogleLoading}
                   className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white font-bold text-xl py-5 px-8 rounded-2xl hover:from-green-700 hover:to-emerald-700 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-3 relative overflow-hidden group"
                 >
