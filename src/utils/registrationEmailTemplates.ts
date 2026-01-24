@@ -1521,5 +1521,9 @@ export function generateUserCreatedMailtoLink(data: UserCreatedEmailData): strin
   const subject = encodeURIComponent(template.subject)
   const body = encodeURIComponent(template.body)
   
-  return `mailto:${data.userEmail}?subject=${subject}&body=${body}`
+  // Use company email as recipient (the email registered during registration form)
+  // Fallback to user email if company email is not available
+  const recipientEmail = data.companyEmail || data.userEmail
+  
+  return `mailto:${recipientEmail}?subject=${subject}&body=${body}`
 }
