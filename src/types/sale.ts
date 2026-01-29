@@ -42,7 +42,8 @@ export interface Sale {
   return_amount?: number // Amount to return to customer when payment exceeds grand total
   credit_applied?: number // Amount of customer credit applied to this sale
   credit_added?: number // Amount of credit added to customer from returns
-  notes?: string
+  notes?: string // Customer-facing notes (shown on invoice)
+  internal_remarks?: string // Internal remarks (NOT shown to customers, only in reports)
   company_id?: number
   created_by: number
   archived: boolean

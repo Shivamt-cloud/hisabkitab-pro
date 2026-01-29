@@ -15,9 +15,6 @@ export interface LicenseStatus {
  */
 export async function checkLicenseValidity(): Promise<LicenseStatus> {
   try {
-    // Add a small delay to ensure database is initialized
-    await new Promise(resolve => setTimeout(resolve, 100))
-    
     const companySettings = await settingsService.getCompany()
     
     // If no validity dates set, license is valid (unrestricted)

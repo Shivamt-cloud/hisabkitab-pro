@@ -38,6 +38,7 @@ const SaleForm = () => {
   const [creditApplied, setCreditApplied] = useState<number>(0) // Amount of credit applied to this sale
   const [discountType, setDiscountType] = useState<'percentage' | 'fixed'>('percentage') // Discount type: percentage or fixed amount
   const [discountValue, setDiscountValue] = useState<number>(0) // Discount value (percentage or fixed amount)
+  const [internalRemarks, setInternalRemarks] = useState<string>('') // Internal remarks (not shown to customers)
 
   // Separate function to load customers (can be called independently)
   const loadCustomers = async () => {
@@ -355,7 +356,7 @@ const SaleForm = () => {
     setCreditApplied(0)
   }, [customerId])
 
-  // NEW SIMPLIFIED SEARCH: Direct search in purchase history by article/barcode only
+  // NEW SIMPLIFIED SEARCH: Direct search in purchase history by article/barcode/product name
   // This searches purchases directly - simple, fast, and accurate
   const searchPurchaseItems = useMemo(() => {
     if (!searchQuery.trim()) {
@@ -365,8 +366,8 @@ const SaleForm = () => {
     const query = searchQuery.trim()
     const queryLower = query.toLowerCase()
     
-    // Strip prefixes (Article_, Barcode_, etc.)
-    const prefixPattern = /^(article|barcode)[_:\s-]+/i
+    // Strip prefixes (Article_, Barcode_, Product_, etc.)
+    const prefixPattern = /^(article|barcode|product)[_:\s-]+/i
     const normalizedQuery = prefixPattern.test(query) ? query.replace(prefixPattern, '').trim() : query
     const normalizedQueryLower = normalizedQuery.toLowerCase()
     
@@ -375,7 +376,7 @@ const SaleForm = () => {
       item: PurchaseItem
       product: Product | undefined
       availableStock: number
-      matchType: 'article' | 'barcode' | 'both'
+      matchType: 'article' | 'barcode' | 'product' | 'both' | 'all'
       isExactMatch: boolean
     }> = []
     
@@ -386,7 +387,28 @@ const SaleForm = () => {
         
         let matchesArticle = false
         let matchesBarcode = false
+        let matchesProduct = false
         let isExactMatch = false
+        
+        // Find product first (needed for product name matching)
+        const product = availableProducts.find(p => p.id === item.product_id)
+        const productName = product?.name || item.product_name || ''
+        const productNameLower = productName.toLowerCase()
+        
+        // Check product name
+        if (productName) {
+          // Exact match
+          if (productNameLower === queryLower || 
+              productName === query) {
+            matchesProduct = true
+            isExactMatch = true
+          }
+          // Contains match
+          else if (productNameLower.includes(queryLower) || 
+                   queryLower.includes(productNameLower)) {
+            matchesProduct = true
+          }
+        }
         
         // Check article
         if (item.article) {
@@ -433,20 +455,40 @@ const SaleForm = () => {
           }
         }
         
-        if (matchesArticle || matchesBarcode) {
-          // Find product
-          const product = availableProducts.find(p => p.id === item.product_id)
-          
+        if (matchesArticle || matchesBarcode || matchesProduct) {
           // Calculate available stock
           const soldQty = item.sold_quantity || 0
           const availableStock = item.quantity - soldQty
+          
+          // Determine match type
+          let matchType: 'article' | 'barcode' | 'product' | 'both' | 'all'
+          const matchCount = [matchesArticle, matchesBarcode, matchesProduct].filter(Boolean).length
+          if (matchCount === 3) {
+            matchType = 'all'
+          } else if (matchCount === 2) {
+            if (matchesArticle && matchesBarcode) {
+              matchType = 'both'
+            } else if (matchesArticle && matchesProduct) {
+              matchType = 'article' // Prioritize article over product
+            } else {
+              matchType = 'barcode' // Prioritize barcode over product
+            }
+          } else {
+            if (matchesArticle) {
+              matchType = 'article'
+            } else if (matchesBarcode) {
+              matchType = 'barcode'
+            } else {
+              matchType = 'product'
+            }
+          }
           
           matchingItems.push({
             purchase,
             item,
             product,
             availableStock,
-            matchType: matchesArticle && matchesBarcode ? 'both' : (matchesArticle ? 'article' : 'barcode'),
+            matchType,
             isExactMatch
           })
         }
@@ -1185,8 +1227,8 @@ const SaleForm = () => {
   const getProductDisplayInfo = (product: Product, searchQuery: string) => {
     let query = searchQuery.trim()
     
-    // Strip common prefixes from search query (Article_, Barcode_, etc.)
-    const prefixPattern = /^(article|barcode)[_:\s-]+/i
+    // Strip common prefixes from search query (Article_, Barcode_, Product_, etc.)
+    const prefixPattern = /^(article|barcode|product)[_:\s-]+/i
     const hadPrefix = prefixPattern.test(query)
     if (hadPrefix) {
       query = query.replace(prefixPattern, '').trim()
@@ -1842,6 +1884,7 @@ const SaleForm = () => {
       payment_methods: finalPaymentMethods.map(p => ({ method: p.method, amount: p.amount })), // Multiple payment methods (including credit)
       return_amount: returnAmount > 0 ? returnAmount : undefined, // Store return amount if any
       credit_applied: creditApplied > 0 ? creditApplied : undefined, // Store credit applied if any
+      internal_remarks: internalRemarks.trim() || undefined, // Internal remarks (not shown to customers)
       sale_date: new Date().toISOString(),
       company_id: getCurrentCompanyId() || undefined,
       created_by: parseInt(user?.id || '1')
@@ -1896,7 +1939,7 @@ const SaleForm = () => {
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search by article or barcode from purchase history..."
+                    placeholder="Search by product name, article, or barcode from purchase history..."
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                   />
                 </div>
@@ -1907,14 +1950,14 @@ const SaleForm = () => {
                     <div className="text-center py-12">
                       <Search className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                       <p className="text-gray-500 mb-2 font-medium">Search purchase history to add items to sale</p>
-                      <p className="text-xs text-gray-400">Search by article or barcode from purchase history</p>
+                      <p className="text-xs text-gray-400">Search by product name, article, or barcode from purchase history</p>
                     </div>
                   ) : purchases.length === 0 ? (
                     <p className="text-center text-gray-500 py-8">No purchases found. Please add purchases first.</p>
                   ) : searchPurchaseItems.length === 0 ? (
                     <div className="text-center py-8">
                       <p className="text-gray-500 mb-2">No items found matching "{searchQuery}"</p>
-                      <p className="text-xs text-gray-400">Try searching by article or barcode from purchase history</p>
+                      <p className="text-xs text-gray-400">Try searching by product name, article, or barcode from purchase history</p>
                       <p className="text-xs text-gray-400 mt-2">
                         Total purchases: {purchases.length} | 
                         Total purchase items: {purchases.reduce((sum, p) => sum + p.items.length, 0)}
@@ -2955,6 +2998,24 @@ const SaleForm = () => {
                 {errors.payment && (
                   <p className="text-red-200 text-sm mt-2 bg-red-500/20 p-2 rounded">{errors.payment}</p>
                 )}
+                
+                {/* Internal Remarks - Not shown to customers */}
+                <div className="mt-6 p-4 bg-gray-50 rounded-xl border border-gray-300">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Internal Remarks <span className="text-xs text-gray-500 font-normal">(Not visible to customers)</span>
+                  </label>
+                  <textarea
+                    value={internalRemarks}
+                    onChange={(e) => setInternalRemarks(e.target.value)}
+                    rows={3}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none bg-white text-gray-900 placeholder:text-gray-400"
+                    placeholder="Add internal notes, comments, or remarks for this sale (only visible in reports, not shown to customers)..."
+                  />
+                  <p className="text-xs text-gray-500 mt-2">
+                    These remarks are for internal use only and will not appear on invoices or customer-facing documents.
+                  </p>
+                </div>
+                
                 <button
                   type="submit"
                   disabled={(() => {

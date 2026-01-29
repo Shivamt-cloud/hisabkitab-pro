@@ -744,6 +744,7 @@ const SystemSettings = () => {
     }
   }
 
+
   const handleReset = async () => {
     if (window.confirm('Are you sure you want to reset all settings to default values?')) {
       await settingsService.resetToDefaults(user?.id ? parseInt(user.id) : undefined)

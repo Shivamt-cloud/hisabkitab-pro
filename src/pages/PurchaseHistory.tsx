@@ -22,6 +22,7 @@ const PurchaseHistory = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
   const [selectedSupplier, setSelectedSupplier] = useState<string>('all')
+  const [selectedProduct, setSelectedProduct] = useState<string>('all')
   const [selectedDate, setSelectedDate] = useState<string>('') // Specific date filter
   const [groupBySupplier, setGroupBySupplier] = useState<boolean>(true) // Group by supplier
   const [selectedPurchaseIds, setSelectedPurchaseIds] = useState<Set<number>>(new Set())
@@ -304,6 +305,13 @@ const PurchaseHistory = () => {
       )
     }
     
+    // Apply product filter
+    if (selectedProduct !== 'all') {
+      filtered = filtered.filter(purchase => 
+        purchase.items.some(item => item.product_name === selectedProduct)
+      )
+    }
+    
     // Apply type filter
     if (filterType !== 'all') {
       filtered = filtered.filter(p => p.type === filterType)
@@ -337,7 +345,7 @@ const PurchaseHistory = () => {
     )
     
     return filtered
-  }, [allPurchases, debouncedSearchQuery, selectedSupplier, filterType, timePeriod, customStartDate, customEndDate, selectedDate])
+  }, [allPurchases, debouncedSearchQuery, selectedSupplier, selectedProduct, filterType, timePeriod, customStartDate, customEndDate, selectedDate])
   
   // Group purchases by supplier
   const groupedPurchases = useMemo(() => {
@@ -409,6 +417,14 @@ const PurchaseHistory = () => {
       .map(p => (p as any).supplier_name)
       .filter((name): name is string => !!name && name !== 'N/A')
     return [...new Set(suppliers)].sort()
+  }
+
+  // Get unique products for filter dropdown
+  const getUniqueProducts = (): string[] => {
+    const products = allPurchases
+      .flatMap(p => p.items.map(item => item.product_name))
+      .filter((name): name is string => !!name && name.trim() !== '')
+    return [...new Set(products)].sort()
   }
 
   const exportToExcel = () => {
@@ -693,6 +709,20 @@ const PurchaseHistory = () => {
               </div>
               
               <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-gray-700">Product:</span>
+                <select
+                  value={selectedProduct}
+                  onChange={(e) => setSelectedProduct(e.target.value)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                >
+                  <option value="all">All Products</option>
+                  {allPurchases.length > 0 && getUniqueProducts().map(product => (
+                    <option key={product} value={product}>{product}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-gray-700">Type:</span>
                 <div className="flex gap-2">
                   <button
@@ -863,12 +893,13 @@ const PurchaseHistory = () => {
 
           {/* Results Count and Bulk Actions */}
           <div className="mb-4 space-y-2">
-            {(searchQuery || selectedSupplier !== 'all' || filterType !== 'all' || timePeriod !== 'all') && (
+            {(searchQuery || selectedSupplier !== 'all' || selectedProduct !== 'all' || filterType !== 'all' || timePeriod !== 'all') && (
               <div className="px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-sm text-blue-900">
                   Showing <span className="font-bold">{purchases.length}</span> of <span className="font-bold">{allPurchases.length}</span> purchases
                   {searchQuery && <span> matching "{searchQuery}"</span>}
                   {selectedSupplier !== 'all' && <span> from {selectedSupplier}</span>}
+                  {selectedProduct !== 'all' && <span> for {selectedProduct}</span>}
                 </p>
               </div>
             )}
@@ -911,16 +942,17 @@ const PurchaseHistory = () => {
               <div className="p-12 text-center">
                 <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">No purchases found</h3>
-                <p className="text-gray-600 mb-6">
-                  {searchQuery || selectedSupplier !== 'all' || filterType !== 'all' || timePeriod !== 'all'
+                  <p className="text-gray-600 mb-6">
+                  {searchQuery || selectedSupplier !== 'all' || selectedProduct !== 'all' || filterType !== 'all' || timePeriod !== 'all'
                     ? 'Try adjusting your search or filters'
                     : 'Get started by creating your first purchase'}
                 </p>
-                {(searchQuery || selectedSupplier !== 'all') && (
+                {(searchQuery || selectedSupplier !== 'all' || selectedProduct !== 'all') && (
                   <button
                     onClick={() => {
                       setSearchQuery('')
                       setSelectedSupplier('all')
+                      setSelectedProduct('all')
                       setFilterType('all')
                       setTimePeriod('all')
                     }}
@@ -947,7 +979,7 @@ const PurchaseHistory = () => {
                 )}
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto -mx-4 sm:mx-0">
                 {groupBySupplier ? (
                   // Grouped by supplier view
                   <div>
@@ -971,11 +1003,11 @@ const PurchaseHistory = () => {
                         </div>
                       </div>
                       
-                      <table className="w-full">
+                      <table className="w-full min-w-[800px]">
                         <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
                           <tr>
                             {hasPermission('purchases:delete') && (
-                              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-12">
+                              <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-10 sm:w-12">
                                 <input
                                   type="checkbox"
                                   checked={supplierPurchases.length > 0 && supplierPurchases.every(p => selectedPurchaseIds.has(p.id))}
@@ -987,24 +1019,25 @@ const PurchaseHistory = () => {
                                 />
                               </th>
                             )}
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date</th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Type</th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Invoice</th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Items</th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Available Qty</th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Articles</th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Barcodes</th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Amount</th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Status</th>
-                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Last Modified</th>
-                            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
+                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date</th>
+                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden sm:table-cell">Type</th>
+                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Invoice</th>
+                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden md:table-cell">Products</th>
+                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Items</th>
+                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Available Qty</th>
+                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden xl:table-cell">Articles</th>
+                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden xl:table-cell">Barcodes</th>
+                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Amount</th>
+                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden md:table-cell">Status</th>
+                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Last Modified</th>
+                            <th className="px-2 sm:px-4 md:px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200 bg-white">
                           {supplierPurchases.map((purchase) => (
                             <tr key={purchase.id} className={`hover:bg-gray-50 transition-colors ${selectedPurchaseIds.has(purchase.id) ? 'bg-blue-50' : ''}`}>
                               {hasPermission('purchases:delete') && (
-                                <td className="px-6 py-4 whitespace-nowrap">
+                                <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
                                   <input
                                     type="checkbox"
                                     checked={selectedPurchaseIds.has(purchase.id)}
@@ -1014,8 +1047,8 @@ const PurchaseHistory = () => {
                                   />
                                 </td>
                               )}
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="text-sm text-gray-900">
+                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
+                                <div className="text-xs sm:text-sm text-gray-900">
                                   {new Date(purchase.purchase_date).toLocaleDateString('en-IN', {
                                     day: '2-digit',
                                     month: 'short',
@@ -1023,8 +1056,8 @@ const PurchaseHistory = () => {
                                   })}
                                 </div>
                               </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden sm:table-cell">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                                   purchase.type === 'gst'
                                     ? 'bg-indigo-100 text-indigo-700'
                                     : 'bg-green-100 text-green-700'
@@ -1032,19 +1065,67 @@ const PurchaseHistory = () => {
                                   {purchase.type === 'gst' ? 'GST' : 'Simple'}
                                 </span>
                               </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="text-sm font-medium text-gray-900">
+                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
+                                <div className="text-xs sm:text-sm font-medium text-gray-900">
                                   {purchase.type === 'gst' 
                                     ? (purchase as any).invoice_number 
                                     : (purchase as any).invoice_number || 'N/A'}
                                 </div>
+                                <div className="sm:hidden mt-1">
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                    purchase.type === 'gst'
+                                      ? 'bg-indigo-100 text-indigo-700'
+                                      : 'bg-green-100 text-green-700'
+                                  }`}>
+                                    {purchase.type === 'gst' ? 'GST' : 'Simple'}
+                                  </span>
+                                </div>
                               </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="text-sm text-gray-900">
+                              <td className="px-2 sm:px-4 md:px-6 py-3 hidden md:table-cell">
+                                <div className="text-xs sm:text-sm text-gray-900">
+                                  {(() => {
+                                    const productNames = purchase.items
+                                      .map(item => item.product_name)
+                                      .filter((name): name is string => !!name && name.trim() !== '')
+                                    const uniqueProducts = [...new Set(productNames)]
+                                    
+                                    if (uniqueProducts.length === 0) {
+                                      return <span className="text-gray-400 italic text-xs">No products</span>
+                                    }
+                                    
+                                    if (uniqueProducts.length <= 2) {
+                                      return (
+                                        <div className="space-y-1">
+                                          {uniqueProducts.map((product, idx) => (
+                                            <div key={idx} className="text-xs bg-purple-50 px-2 py-1 rounded border border-purple-200 text-purple-900 font-medium">
+                                              {product}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )
+                                    }
+                                    
+                                    return (
+                                      <div className="space-y-1">
+                                        {uniqueProducts.slice(0, 2).map((product, idx) => (
+                                          <div key={idx} className="text-xs bg-purple-50 px-2 py-1 rounded border border-purple-200 text-purple-900 font-medium">
+                                            {product}
+                                          </div>
+                                        ))}
+                                        <div className="text-xs text-gray-500 font-medium">
+                                          +{uniqueProducts.length - 2} more
+                                        </div>
+                                      </div>
+                                    )
+                                  })()}
+                                </div>
+                              </td>
+                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden lg:table-cell">
+                                <div className="text-xs sm:text-sm text-gray-900">
                                   {purchase.items.length} item{purchase.items.length !== 1 ? 's' : ''}
                                 </div>
                               </td>
-                              <td className="px-6 py-4">
+                              <td className="px-2 sm:px-4 md:px-6 py-3">
                                 <div className="text-sm text-gray-900">
                                   {(() => {
                                     const totalQuantity = purchase.items.reduce((sum, item) => sum + item.quantity, 0)
@@ -1111,8 +1192,8 @@ const PurchaseHistory = () => {
                                   })()}
                                 </div>
                               </td>
-                              <td className="px-6 py-4">
-                                <div className="text-sm text-gray-900">
+                              <td className="px-2 sm:px-4 md:px-6 py-3 hidden xl:table-cell">
+                                <div className="text-xs sm:text-sm text-gray-900">
                                   {(() => {
                                     const articles = purchase.items
                                       .map(item => item.article)
@@ -1150,8 +1231,8 @@ const PurchaseHistory = () => {
                                   })()}
                                 </div>
                               </td>
-                              <td className="px-6 py-4">
-                                <div className="text-sm text-gray-900">
+                              <td className="px-2 sm:px-4 md:px-6 py-3 hidden xl:table-cell">
+                                <div className="text-xs sm:text-sm text-gray-900">
                                   {(() => {
                                     const barcodes = purchase.items
                                       .map(item => item.barcode)
@@ -1189,8 +1270,8 @@ const PurchaseHistory = () => {
                                   })()}
                                 </div>
                               </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="text-sm font-bold text-gray-900">
+                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
+                                <div className="text-xs sm:text-sm font-bold text-gray-900">
                                   ₹{purchase.type === 'gst' 
                                     ? (purchase as any).grand_total.toFixed(2)
                                     : (purchase as any).total_amount.toFixed(2)}
@@ -1201,8 +1282,8 @@ const PurchaseHistory = () => {
                                   </div>
                                 )}
                               </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden md:table-cell">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                                   purchase.payment_status === 'paid'
                                     ? 'bg-green-100 text-green-700'
                                     : purchase.payment_status === 'pending'
@@ -1212,8 +1293,8 @@ const PurchaseHistory = () => {
                                   {purchase.payment_status.charAt(0).toUpperCase() + purchase.payment_status.slice(1)}
                                 </span>
                               </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="text-sm text-gray-900">
+                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden lg:table-cell">
+                                <div className="text-xs sm:text-sm text-gray-900">
                                   {(purchase as any).updated_at 
                                     ? new Date((purchase as any).updated_at).toLocaleDateString('en-IN', {
                                         day: '2-digit',
@@ -1233,25 +1314,18 @@ const PurchaseHistory = () => {
                                     ? new Date((purchase as any).updated_at).toLocaleTimeString('en-IN', {
                                         hour: '2-digit',
                                         minute: '2-digit',
-                                        second: '2-digit',
                                         hour12: true
                                       })
                                     : purchase.created_at
                                     ? new Date(purchase.created_at).toLocaleTimeString('en-IN', {
                                         hour: '2-digit',
                                         minute: '2-digit',
-                                        second: '2-digit',
                                         hour12: true
                                       })
                                     : ''}
                                 </div>
-                                {(purchase as any).updated_at && (
-                                  <div className="text-xs text-blue-600 font-medium mt-0.5">
-                                    Modified
-                                  </div>
-                                )}
                               </td>
-                              <td className="px-6 py-4 text-right whitespace-nowrap">
+                              <td className="px-2 sm:px-4 md:px-6 py-3 text-right whitespace-nowrap">
                                 <div className="flex items-center justify-end gap-2">
                                   {hasPermission('purchases:update') && (
                                     <button
@@ -1314,11 +1388,11 @@ const PurchaseHistory = () => {
                 ) : (
                   // Regular table view (not grouped)
                   <div>
-                    <table className="w-full">
+                    <table className="w-full min-w-[800px]">
                     <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
                       <tr>
                         {hasPermission('purchases:delete') && (
-                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-12">
+                          <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-10 sm:w-12">
                             <input
                               type="checkbox"
                               checked={purchases.length > 0 && selectedPurchaseIds.size === purchases.length}
@@ -1328,25 +1402,26 @@ const PurchaseHistory = () => {
                             />
                           </th>
                         )}
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Type</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Invoice</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Supplier</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Items</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Available Qty</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Articles</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Barcodes</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Amount</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Status</th>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Last Modified</th>
-                        <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
+                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date</th>
+                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden sm:table-cell">Type</th>
+                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Invoice</th>
+                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden md:table-cell">Supplier</th>
+                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden md:table-cell">Products</th>
+                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Items</th>
+                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Available Qty</th>
+                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden xl:table-cell">Articles</th>
+                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden xl:table-cell">Barcodes</th>
+                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Amount</th>
+                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden md:table-cell">Status</th>
+                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Last Modified</th>
+                        <th className="px-2 sm:px-4 md:px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {purchases.map((purchase) => (
                       <tr key={purchase.id} className={`hover:bg-gray-50 transition-colors ${selectedPurchaseIds.has(purchase.id) ? 'bg-blue-50' : ''}`}>
                         {hasPermission('purchases:delete') && (
-                          <td className="px-6 py-4 whitespace-nowrap">
+                          <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
                             <input
                               type="checkbox"
                               checked={selectedPurchaseIds.has(purchase.id)}
@@ -1356,8 +1431,8 @@ const PurchaseHistory = () => {
                             />
                           </td>
                         )}
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
+                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
+                          <div className="text-xs sm:text-sm text-gray-900">
                             {new Date(purchase.purchase_date).toLocaleDateString('en-IN', {
                               day: '2-digit',
                               month: 'short',
@@ -1365,8 +1440,8 @@ const PurchaseHistory = () => {
                             })}
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden sm:table-cell">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                             purchase.type === 'gst'
                               ? 'bg-indigo-100 text-indigo-700'
                               : 'bg-green-100 text-green-700'
@@ -1374,15 +1449,24 @@ const PurchaseHistory = () => {
                             {purchase.type === 'gst' ? 'GST' : 'Simple'}
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900">
+                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
+                          <div className="text-xs sm:text-sm font-medium text-gray-900">
                             {purchase.type === 'gst' 
                               ? (purchase as any).invoice_number 
                               : (purchase as any).invoice_number || 'N/A'}
                           </div>
+                          <div className="sm:hidden mt-1">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                              purchase.type === 'gst'
+                                ? 'bg-indigo-100 text-indigo-700'
+                                : 'bg-green-100 text-green-700'
+                            }`}>
+                              {purchase.type === 'gst' ? 'GST' : 'Simple'}
+                            </span>
+                          </div>
                         </td>
-                        <td className="px-6 py-4">
-                          <div className="text-sm text-gray-900">
+                        <td className="px-2 sm:px-4 md:px-6 py-3 hidden md:table-cell">
+                          <div className="text-xs sm:text-sm text-gray-900">
                             {purchase.type === 'gst'
                               ? (purchase as any).supplier_name || 'N/A'
                               : (purchase as any).supplier_name || 'N/A'}
@@ -1393,13 +1477,52 @@ const PurchaseHistory = () => {
                             </div>
                           )}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
+                        <td className="px-2 sm:px-4 md:px-6 py-3 hidden md:table-cell">
+                          <div className="text-xs sm:text-sm text-gray-900">
+                            {(() => {
+                              const productNames = purchase.items
+                                .map(item => item.product_name)
+                                .filter((name): name is string => !!name && name.trim() !== '')
+                              const uniqueProducts = [...new Set(productNames)]
+                              
+                              if (uniqueProducts.length === 0) {
+                                return <span className="text-gray-400 italic text-xs">No products</span>
+                              }
+                              
+                              if (uniqueProducts.length <= 2) {
+                                return (
+                                  <div className="space-y-1">
+                                    {uniqueProducts.map((product, idx) => (
+                                      <div key={idx} className="text-xs bg-purple-50 px-2 py-1 rounded border border-purple-200 text-purple-900 font-medium">
+                                        {product}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )
+                              }
+                              
+                              return (
+                                <div className="space-y-1">
+                                  {uniqueProducts.slice(0, 2).map((product, idx) => (
+                                    <div key={idx} className="text-xs bg-purple-50 px-2 py-1 rounded border border-purple-200 text-purple-900 font-medium">
+                                      {product}
+                                    </div>
+                                  ))}
+                                  <div className="text-xs text-gray-500 font-medium">
+                                    +{uniqueProducts.length - 2} more
+                                  </div>
+                                </div>
+                              )
+                            })()}
+                          </div>
+                        </td>
+                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden lg:table-cell">
+                          <div className="text-xs sm:text-sm text-gray-900">
                             {purchase.items.length} item{purchase.items.length !== 1 ? 's' : ''}
                           </div>
                         </td>
-                        <td className="px-6 py-4">
-                          <div className="text-sm text-gray-900">
+                        <td className="px-2 sm:px-4 md:px-6 py-3">
+                          <div className="text-xs sm:text-sm text-gray-900">
                             {(() => {
                               // Calculate total available quantity for all items in this purchase
                               const totalQuantity = purchase.items.reduce((sum, item) => sum + item.quantity, 0)
@@ -1466,8 +1589,8 @@ const PurchaseHistory = () => {
                             })()}
                           </div>
                         </td>
-                        <td className="px-6 py-4">
-                          <div className="text-sm text-gray-900">
+                        <td className="px-2 sm:px-4 md:px-6 py-3 hidden xl:table-cell">
+                          <div className="text-xs sm:text-sm text-gray-900">
                             {(() => {
                               const articles = purchase.items
                                 .map(item => item.article)
@@ -1505,8 +1628,8 @@ const PurchaseHistory = () => {
                             })()}
                           </div>
                         </td>
-                        <td className="px-6 py-4">
-                          <div className="text-sm text-gray-900">
+                        <td className="px-2 sm:px-4 md:px-6 py-3 hidden xl:table-cell">
+                          <div className="text-xs sm:text-sm text-gray-900">
                             {(() => {
                               const barcodes = purchase.items
                                 .map(item => item.barcode)
@@ -1544,8 +1667,8 @@ const PurchaseHistory = () => {
                             })()}
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-bold text-gray-900">
+                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
+                          <div className="text-xs sm:text-sm font-bold text-gray-900">
                             ₹{purchase.type === 'gst' 
                               ? (purchase as any).grand_total.toFixed(2)
                               : (purchase as any).total_amount.toFixed(2)}
@@ -1556,8 +1679,8 @@ const PurchaseHistory = () => {
                             </div>
                           )}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden md:table-cell">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                             purchase.payment_status === 'paid'
                               ? 'bg-green-100 text-green-700'
                               : purchase.payment_status === 'pending'
@@ -1567,8 +1690,8 @@ const PurchaseHistory = () => {
                             {purchase.payment_status.charAt(0).toUpperCase() + purchase.payment_status.slice(1)}
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
+                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden lg:table-cell">
+                          <div className="text-xs sm:text-sm text-gray-900">
                             {(purchase as any).updated_at 
                               ? new Date((purchase as any).updated_at).toLocaleDateString('en-IN', {
                                   day: '2-digit',
@@ -1588,25 +1711,18 @@ const PurchaseHistory = () => {
                               ? new Date((purchase as any).updated_at).toLocaleTimeString('en-IN', {
                                   hour: '2-digit',
                                   minute: '2-digit',
-                                  second: '2-digit',
                                   hour12: true
                                 })
                               : purchase.created_at
                               ? new Date(purchase.created_at).toLocaleTimeString('en-IN', {
                                   hour: '2-digit',
                                   minute: '2-digit',
-                                  second: '2-digit',
                                   hour12: true
                                 })
                               : ''}
                           </div>
-                          {(purchase as any).updated_at && (
-                            <div className="text-xs text-blue-600 font-medium mt-0.5">
-                              Modified
-                            </div>
-                          )}
                         </td>
-                        <td className="px-6 py-4 text-right whitespace-nowrap">
+                        <td className="px-2 sm:px-4 md:px-6 py-3 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-2">
                             {hasPermission('purchases:update') && (
                               <button

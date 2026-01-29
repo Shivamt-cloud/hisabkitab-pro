@@ -36,8 +36,16 @@ import {
   Calendar,
   AlertCircle,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Barcode,
+  ReceiptText,
+  ExternalLink,
+  Wrench,
+  Heart,
+  Calculator,
+  Wifi,
 } from 'lucide-react'
+import SubscriptionRechargeModal from '../components/SubscriptionRechargeModal'
 
 interface ReportSummary {
   title: string
@@ -52,9 +60,35 @@ interface ReportSummary {
 
 type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
 
+// Footer apps: 12+ FreeToolHub tools (direct links) + BlessedBump + FreeToolHub main. Add new tools here.
+const FOOTER_APPS: Array<{ name: string; url: string; color: string; icon: 'calculator' | 'trending' | 'dollar' | 'wifi' | 'heart' | 'wrench' | 'filetext' }> = [
+  // FreeToolHub – professional & finance
+  { name: 'Loan Calculator', url: 'https://freetoolhub.in/tools/loan-calculator', color: 'from-emerald-500 to-teal-600', icon: 'calculator' },
+  { name: 'Investment Calculator', url: 'https://freetoolhub.in/tools/investment-calculator', color: 'from-green-500 to-emerald-600', icon: 'trending' },
+  { name: 'Currency Converter', url: 'https://freetoolhub.in/tools/currency-converter', color: 'from-amber-500 to-orange-600', icon: 'dollar' },
+  { name: 'Tax Calculator', url: 'https://freetoolhub.in/tools/tax-calculator', color: 'from-lime-500 to-green-600', icon: 'dollar' },
+  { name: 'Mortgage Calculator', url: 'https://freetoolhub.in/tools/mortgage-calculator', color: 'from-teal-500 to-cyan-600', icon: 'calculator' },
+  { name: 'Budget Planner', url: 'https://freetoolhub.in/tools/budget-planner', color: 'from-sky-500 to-blue-600', icon: 'dollar' },
+  { name: 'Salary Calculator', url: 'https://freetoolhub.in/tools/salary-calculator', color: 'from-violet-500 to-purple-600', icon: 'dollar' },
+  { name: 'Retirement Planner', url: 'https://freetoolhub.in/tools/retirement-calculator', color: 'from-fuchsia-500 to-pink-600', icon: 'trending' },
+  // FreeToolHub – PDF, dev, utilities
+  { name: 'PDF Merger', url: 'https://freetoolhub.in/tools/pdf-merger', color: 'from-red-500 to-rose-600', icon: 'filetext' },
+  { name: 'JSON Formatter', url: 'https://freetoolhub.in/tools/json-formatter', color: 'from-slate-600 to-gray-700', icon: 'wrench' },
+  { name: 'Smart Calculator', url: 'https://freetoolhub.in/tools/calculator', color: 'from-indigo-500 to-blue-600', icon: 'calculator' },
+  { name: 'Internet Speed Test', url: 'https://freetoolhub.in/tools/internet-speed-test', color: 'from-cyan-500 to-blue-600', icon: 'wifi' },
+  { name: 'Grade Calculator', url: 'https://freetoolhub.in/tools/grade-calculator', color: 'from-amber-600 to-orange-600', icon: 'calculator' },
+  { name: 'Age Calculator', url: 'https://freetoolhub.in/tools/age-calculator', color: 'from-rose-500 to-red-600', icon: 'calculator' },
+  // BlessedBump + FreeToolHub main
+  { name: 'BlessedBump', url: 'https://blessedbump.in/calculator', color: 'from-pink-500 to-rose-600', icon: 'heart' },
+  { name: 'FreeToolHub', url: 'https://freetoolhub.in', color: 'from-blue-500 to-indigo-600', icon: 'wrench' },
+]
+const FOOTER_ROTATION_INTERVAL_MS = 5000 // Switch to next set of apps every 5 seconds
+const FOOTER_APPS_VISIBLE = 4 // How many app cards to show at a time (rest rotate in)
+
 const Dashboard = () => {
   const { hasPermission, user, getCurrentCompanyId, currentCompanyId } = useAuth()
   const navigate = useNavigate()
+  const [footerRotationIndex, setFooterRotationIndex] = useState(0)
   const [reports, setReports] = useState<ReportSummary[]>([])
   const [currentTime, setCurrentTime] = useState(new Date())
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('all')
@@ -77,6 +111,7 @@ const Dashboard = () => {
     status?: 'active' | 'expired' | 'cancelled'
   } | null>(null)
   const [showSubscriptionDetails, setShowSubscriptionDetails] = useState(false)
+  const [showRechargeModal, setShowRechargeModal] = useState(false)
 
   const loadCompanyName = async () => {
     try {
@@ -196,24 +231,35 @@ const Dashboard = () => {
     return () => clearInterval(timer)
   }, [])
 
-  // Load notifications and generate alerts
+  // Rotate footer apps every N seconds so all tools get advertised
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setFooterRotationIndex((i) => (i + 1) % FOOTER_APPS.length)
+    }, FOOTER_ROTATION_INTERVAL_MS)
+    return () => clearInterval(timer)
+  }, [])
+
+  // Load notifications and generate alerts (scoped to current company)
   useEffect(() => {
     const loadNotifications = async () => {
       try {
-        await notificationService.generateStockAlerts()
-        await notificationService.generatePaymentAlerts()
-        const count = await notificationService.getUnreadCount(user?.id)
+        const companyId = getCurrentCompanyId?.() ?? null
+        if (companyId != null) {
+          await notificationService.generateStockAlerts(companyId)
+          await notificationService.generatePaymentAlerts(companyId)
+        }
+        const count = await notificationService.getUnreadCount(user?.id, getCurrentCompanyId?.() ?? null)
         setUnreadNotifications(count)
       } catch (error) {
         console.error('Error loading notifications:', error)
       }
     }
-    
+
     loadNotifications()
     // Refresh notifications every 5 minutes
     const interval = setInterval(loadNotifications, 300000)
     return () => clearInterval(interval)
-  }, [user?.id])
+  }, [user?.id, currentCompanyId])
 
   const getDateRange = (): { startDate?: string; endDate?: string } => {
     const now = new Date()
@@ -764,6 +810,30 @@ const Dashboard = () => {
     return diffDays
   }, [subscriptionInfo?.endDate, currentTime])
 
+  // Client-side auto-renew prompt:
+  // When expiring very soon (<= 3 days) or expired, open recharge modal once per day.
+  useEffect(() => {
+    try {
+      if (!subscriptionInfo?.endDate) return
+      if (showRechargeModal) return
+      if (subscriptionDaysRemaining === null) return
+      if (subscriptionDaysRemaining > 3) return
+
+      const companyId = getCurrentCompanyId?.() || user?.company_id || 'unknown'
+      const key = `hisabkitab:autoRenewPrompt:${companyId}`
+      const today = new Date().toISOString().slice(0, 10)
+      const last = localStorage.getItem(key)
+      if (last === today) return
+
+      localStorage.setItem(key, today)
+      setShowSubscriptionDetails(true)
+      setShowRechargeModal(true)
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subscriptionInfo?.endDate, subscriptionDaysRemaining])
+
   // Check if subscription is expiring soon (within 30 days)
   const isSubscriptionExpiringSoon = subscriptionDaysRemaining !== null && subscriptionDaysRemaining <= 30 && subscriptionDaysRemaining > 0
 
@@ -843,6 +913,30 @@ const Dashboard = () => {
                     {showSubscriptionDetails && (
                       <div className="mt-2 bg-white rounded-lg shadow-xl p-4 border border-gray-200">
                         <div className="space-y-3">
+                          {/* Recharge Button */}
+                          <button
+                            onClick={() => setShowRechargeModal(true)}
+                            className={`w-full px-4 py-2.5 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
+                              subscriptionDaysRemaining !== null && subscriptionDaysRemaining <= 30
+                                ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white hover:from-orange-600 hover:to-red-600'
+                                : 'bg-gradient-to-r from-blue-600 to-indigo-700 text-white hover:from-blue-700 hover:to-indigo-800'
+                            }`}
+                          >
+                            <CreditCard className="w-4 h-4" />
+                            {subscriptionDaysRemaining !== null && subscriptionDaysRemaining <= 0
+                              ? 'Activate Subscription'
+                              : subscriptionDaysRemaining !== null && subscriptionDaysRemaining <= 30
+                                ? 'Renew Now'
+                                : 'Recharge'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => navigate('/subscription/payments')}
+                            className="w-full px-4 py-2.5 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-800 hover:bg-gray-50"
+                          >
+                            <ReceiptText className="w-4 h-4" />
+                            Payment History
+                          </button>
                           <div>
                             <p className="text-gray-500 text-xs mb-1">Plan</p>
                             <p className="text-gray-900 font-semibold">
@@ -1338,13 +1432,55 @@ const Dashboard = () => {
                   <span>Audit Logs</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                 </button>
+                <button 
+                  onClick={() => navigate('/settings/barcode-label')}
+                  className="group w-full bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                >
+                  <Barcode className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                  <span>Barcode Label Settings</span>
+                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                </button>
+                <button 
+                  onClick={() => navigate('/settings/receipt-printer')}
+                  className="group w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                >
+                  <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                  <span>Receipt Printer Settings</span>
+                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                </button>
               </div>
             )}
           </section>
 
         </div>
 
-        {/* Additional Info Bar - Welcome Section */}
+        {/* Footer - Apps rotate every 5s so all tools get advertised (add new tools in FOOTER_APPS above) */}
+        <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-4 transition-opacity duration-500">
+          {Array.from({ length: FOOTER_APPS_VISIBLE }, (_, i) => {
+            const app = FOOTER_APPS[(footerRotationIndex + i) % FOOTER_APPS.length]
+            return { app, i }
+          }).map(({ app, i }) => (
+            <a
+              key={i}
+              href={app.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`flex flex-col items-center gap-2 p-4 rounded-2xl bg-gradient-to-r ${app.color} text-white font-semibold shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all duration-200 text-center min-h-[100px] justify-center`}
+            >
+              {app.icon === 'calculator' && <Calculator className="w-8 h-8 flex-shrink-0 opacity-95" />}
+              {app.icon === 'trending' && <TrendingUp className="w-8 h-8 flex-shrink-0 opacity-95" />}
+              {app.icon === 'dollar' && <DollarSign className="w-8 h-8 flex-shrink-0 opacity-95" />}
+              {app.icon === 'wifi' && <Wifi className="w-8 h-8 flex-shrink-0 opacity-95" />}
+              {app.icon === 'heart' && <Heart className="w-8 h-8 flex-shrink-0 opacity-95" />}
+              {app.icon === 'wrench' && <Wrench className="w-8 h-8 flex-shrink-0 opacity-95" />}
+              {app.icon === 'filetext' && <FileText className="w-8 h-8 flex-shrink-0 opacity-95" />}
+              <span className="text-sm leading-tight">{app.name}</span>
+              <ExternalLink className="w-3.5 h-3.5 opacity-80 flex-shrink-0" />
+            </a>
+          ))}
+        </div>
+
+        {/* Additional Info Bar - Welcome Section (footer) */}
         <div className="mt-8 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl shadow-xl p-6 text-white">
           <div className="flex items-center justify-between flex-wrap gap-6">
             <div className="flex-1">
@@ -1400,6 +1536,21 @@ const Dashboard = () => {
           </div>
         </div>
       </main>
+
+      {/* Subscription Recharge Modal */}
+      {subscriptionInfo && (
+        <SubscriptionRechargeModal
+          isOpen={showRechargeModal}
+          onClose={() => setShowRechargeModal(false)}
+          onSuccess={() => {
+            setShowRechargeModal(false)
+            // Reload subscription info by reloading company name
+            loadCompanyName()
+          }}
+          currentTier={(subscriptionInfo.tier as any) || 'basic'}
+          currentEndDate={subscriptionInfo.endDate}
+        />
+      )}
     </div>
   )
 }

@@ -479,6 +479,7 @@ const SalesReports = () => {
             <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Items</th>
             <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Amount</th>
             <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Payment</th>
+            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Remark</th>
             <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
           </tr>
         </thead>
@@ -529,6 +530,16 @@ const SalesReports = () => {
                 }`}>
                   {sale.payment_status.charAt(0).toUpperCase() + sale.payment_status.slice(1)}
                 </span>
+              </td>
+              <td className="px-6 py-4 hidden lg:table-cell">
+                {sale.internal_remarks ? (
+                  <div className="text-xs text-gray-700 bg-yellow-50 px-2 py-1 rounded border border-yellow-200 max-w-xs">
+                    <div className="font-semibold text-yellow-800 mb-1">Internal:</div>
+                    <div className="text-gray-600 whitespace-pre-wrap break-words">{sale.internal_remarks}</div>
+                  </div>
+                ) : (
+                  <span className="text-xs text-gray-400 italic">No remark</span>
+                )}
               </td>
               <td className="px-6 py-4 text-right whitespace-nowrap">
                 <button

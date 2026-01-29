@@ -36,6 +36,9 @@ import OutstandingPayments from './pages/OutstandingPayments'
 import SystemSettings from './pages/SystemSettings'
 import BackupRestore from './pages/BackupRestore'
 import AuditLogs from './pages/AuditLogs'
+import BarcodeLabelSettings from './pages/BarcodeLabelSettings'
+import ReceiptPrinterSettings from './pages/ReceiptPrinterSettings'
+import SubscriptionPayments from './pages/SubscriptionPayments'
 import AnalyticsDashboard from './pages/AnalyticsDashboard'
 import Notifications from './pages/Notifications'
 import IndexedDBInspector from './pages/IndexedDBInspector'
@@ -157,6 +160,14 @@ function App() {
             element={
               <ProtectedRoute requiredPermission="sales:read" requiredRole="admin">
                 <SalesHistory />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/subscription/payments"
+            element={
+              <ProtectedRoute>
+                <SubscriptionPayments />
               </ProtectedRoute>
             }
           />
@@ -445,6 +456,22 @@ function App() {
             element={
               <ProtectedRoute requiredPermission="reports:read">
                 <AuditLogs />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/barcode-label"
+            element={
+              <ProtectedRoute requiredPermission="settings:update">
+                <BarcodeLabelSettings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/receipt-printer"
+            element={
+              <ProtectedRoute requiredPermission="settings:update">
+                <ReceiptPrinterSettings />
               </ProtectedRoute>
             }
           />

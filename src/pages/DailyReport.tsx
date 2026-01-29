@@ -4,6 +4,7 @@ import { saleService } from '../services/saleService'
 import { purchaseService } from '../services/purchaseService'
 import { expenseService } from '../services/expenseService'
 import { salesPersonService } from '../services/salespersonService'
+import { userService } from '../services/userService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { 
   Calendar, 
@@ -33,6 +34,7 @@ const DailyReport = () => {
   const [allPurchases, setAllPurchases] = useState<Purchase[]>([]) // Store all purchases for profit calculation
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([])
+  const [users, setUsers] = useState<Array<{ id: string; name: string }>>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -43,14 +45,17 @@ const DailyReport = () => {
     setLoading(true)
     try {
       // Load all data - we need all purchases to calculate item-wise profit
-      const [allSales, allPurchases, allExpenses, allSalesPersons] = await Promise.all([
+      const [allSales, allPurchases, allExpenses, allSalesPersons, allUsers] = await Promise.all([
         saleService.getAll(true, companyId),
         purchaseService.getAll(undefined, companyId), // Load all purchases to lookup purchase items
         expenseService.getAll(companyId),
-        salesPersonService.getAll(false)
+        salesPersonService.getAll(false),
+        userService.getAll()
       ])
 
       setSalesPersons(allSalesPersons)
+      // Create user map for device/user tracking
+      setUsers(allUsers.map(u => ({ id: u.id, name: u.name })))
 
       // Filter by selected date
       const dateStart = new Date(selectedDate).getTime()
@@ -159,10 +164,34 @@ const DailyReport = () => {
   }, [expenses])
 
   // Get opening and closing balances
+  // Handle multiple entries from different devices - use the latest one (most recent created_at)
   const openingClosing = useMemo(() => {
-    const opening = expenses.find(e => e.expense_type === 'opening')
-    const closing = expenses.find(e => e.expense_type === 'closing')
-    return { opening, closing }
+    const openingExpenses = expenses.filter(e => e.expense_type === 'opening')
+    const closingExpenses = expenses.filter(e => e.expense_type === 'closing')
+    
+    // Get the latest opening balance (most recent created_at)
+    const opening = openingExpenses.length > 0 
+      ? openingExpenses.sort((a, b) => 
+          new Date(b.created_at || b.expense_date).getTime() - 
+          new Date(a.created_at || a.expense_date).getTime()
+        )[0]
+      : undefined
+    
+    // Get the latest closing balance (most recent created_at)
+    // If multiple closing balances exist, use the latest one
+    const closing = closingExpenses.length > 0
+      ? closingExpenses.sort((a, b) => 
+          new Date(b.created_at || b.expense_date).getTime() - 
+          new Date(a.created_at || a.expense_date).getTime()
+        )[0]
+      : undefined
+    
+    // Track if there are multiple entries (for display purposes)
+    const hasMultipleOpening = openingExpenses.length > 1
+    const hasMultipleClosing = closingExpenses.length > 1
+    
+    return { opening, closing, hasMultipleOpening, hasMultipleClosing, 
+             allOpening: openingExpenses, allClosing: closingExpenses }
   }, [expenses])
 
   // Calculate sales by payment method
@@ -244,6 +273,179 @@ const DailyReport = () => {
       difference
     }
   }, [openingClosing, salesByPaymentMethod, expenses])
+
+  // Get user name helper - handles both string and number IDs
+  const getUserName = (userId: number | string | undefined): string => {
+    if (!userId) return 'Unknown Device/User'
+    const userIdStr = userId.toString()
+    const user = users.find(u => u.id === userIdStr || u.id === String(userId))
+    return user?.name || `Device/User ${userIdStr}`
+  }
+
+  // Device/User-wise breakdown
+  const deviceWiseBreakdown = useMemo(() => {
+    const deviceMap = new Map<string, {
+      userName: string
+      sales: Sale[]
+      salesCount: number
+      salesTotal: number
+      salesByPaymentMethod: Map<string, number> // Payment method breakdown for sales
+      expenses: Expense[]
+      expensesCount: number
+      expensesTotal: number
+      expensesByPaymentMethod: Map<string, number> // Payment method breakdown for expenses
+      purchases: Purchase[]
+      purchasesCount: number
+      purchasesTotal: number
+      openingBalance?: Expense // Opening balance entered by this device
+      closingBalance?: Expense // Closing balance entered by this device
+    }>()
+
+    // Process sales by user
+    sales.forEach(sale => {
+      const userId = sale.created_by?.toString() || 'unknown'
+      const userName = getUserName(sale.created_by)
+      
+      if (!deviceMap.has(userId)) {
+        deviceMap.set(userId, {
+          userName,
+          sales: [],
+          salesCount: 0,
+          salesTotal: 0,
+          salesByPaymentMethod: new Map(),
+          expenses: [],
+          expensesCount: 0,
+          expensesTotal: 0,
+          expensesByPaymentMethod: new Map(),
+          purchases: [],
+          purchasesCount: 0,
+          purchasesTotal: 0,
+        })
+      }
+      
+      const device = deviceMap.get(userId)!
+      device.sales.push(sale)
+      device.salesCount++
+      device.salesTotal += sale.grand_total
+      
+      // Track sales by payment method
+      if (sale.payment_methods && sale.payment_methods.length > 0) {
+        sale.payment_methods.forEach(pm => {
+          const existing = device.salesByPaymentMethod.get(pm.method) || 0
+          device.salesByPaymentMethod.set(pm.method, existing + pm.amount)
+        })
+      } else if (sale.payment_method) {
+        const existing = device.salesByPaymentMethod.get(sale.payment_method) || 0
+        device.salesByPaymentMethod.set(sale.payment_method, existing + sale.grand_total)
+      }
+    })
+
+    // Process expenses by user (excluding opening/closing)
+    expenses.forEach(expense => {
+      if (expense.expense_type === 'opening' || expense.expense_type === 'closing') return
+      
+      const userId = expense.created_by?.toString() || 'unknown'
+      const userName = getUserName(expense.created_by)
+      
+      if (!deviceMap.has(userId)) {
+        deviceMap.set(userId, {
+          userName,
+          sales: [],
+          salesCount: 0,
+          salesTotal: 0,
+          salesByPaymentMethod: new Map(),
+          expenses: [],
+          expensesCount: 0,
+          expensesTotal: 0,
+          expensesByPaymentMethod: new Map(),
+          purchases: [],
+          purchasesCount: 0,
+          purchasesTotal: 0,
+        })
+      }
+      
+      const device = deviceMap.get(userId)!
+      device.expenses.push(expense)
+      device.expensesCount++
+      device.expensesTotal += expense.amount
+      
+      // Track expenses by payment method
+      const existing = device.expensesByPaymentMethod.get(expense.payment_method) || 0
+      device.expensesByPaymentMethod.set(expense.payment_method, existing + expense.amount)
+    })
+
+    // Process purchases by user
+    purchases.forEach(purchase => {
+      const userId = purchase.created_by?.toString() || 'unknown'
+      const userName = getUserName(purchase.created_by)
+      
+      if (!deviceMap.has(userId)) {
+        deviceMap.set(userId, {
+          userName,
+          sales: [],
+          salesCount: 0,
+          salesTotal: 0,
+          salesByPaymentMethod: new Map(),
+          expenses: [],
+          expensesCount: 0,
+          expensesTotal: 0,
+          expensesByPaymentMethod: new Map(),
+          purchases: [],
+          purchasesCount: 0,
+          purchasesTotal: 0,
+        })
+      }
+      
+      const device = deviceMap.get(userId)!
+      device.purchases.push(purchase)
+      device.purchasesCount++
+      const purchaseTotal = purchase.type === 'gst' 
+        ? (purchase as any).grand_total 
+        : (purchase as any).total_amount
+      device.purchasesTotal += purchaseTotal || 0
+    })
+
+    // Process opening and closing balances by device
+    expenses.forEach(expense => {
+      if (expense.expense_type === 'opening' || expense.expense_type === 'closing') {
+        const userId = expense.created_by?.toString() || 'unknown'
+        const userName = getUserName(expense.created_by)
+        
+        if (!deviceMap.has(userId)) {
+          deviceMap.set(userId, {
+            userName,
+            sales: [],
+            salesCount: 0,
+            salesTotal: 0,
+            salesByPaymentMethod: new Map(),
+            expenses: [],
+            expensesCount: 0,
+            expensesTotal: 0,
+            expensesByPaymentMethod: new Map(),
+            purchases: [],
+            purchasesCount: 0,
+            purchasesTotal: 0,
+          })
+        }
+        
+        const device = deviceMap.get(userId)!
+        if (expense.expense_type === 'opening') {
+          device.openingBalance = expense
+        } else if (expense.expense_type === 'closing') {
+          device.closingBalance = expense
+        }
+      }
+    })
+
+    // Convert to array and sort by total activity (sales + expenses)
+    return Array.from(deviceMap.values())
+      .map(device => ({
+        ...device,
+        totalActivity: device.salesTotal + device.expensesTotal + device.purchasesTotal,
+        totalTransactions: device.salesCount + device.expensesCount + device.purchasesCount,
+      }))
+      .sort((a, b) => b.totalActivity - a.totalActivity)
+  }, [sales, expenses, purchases, users])
 
   // Calculate totals with item-wise profit calculation
   const totals = useMemo(() => {
@@ -532,6 +734,56 @@ const DailyReport = () => {
         </div>
         ` : ''}
 
+        ${deviceWiseBreakdown.length > 0 ? `
+        <div class="device-breakdown-section">
+          <h2>Device/User-wise Activity Breakdown</h2>
+          <p class="subtitle">See which device/user contributed how much to today's business</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Device/User</th>
+                <th class="text-right">Sales</th>
+                <th class="text-right">Sales Count</th>
+                <th class="text-right">Expenses</th>
+                <th class="text-right">Expense Count</th>
+                <th class="text-right">Purchases</th>
+                <th class="text-right">Purchase Count</th>
+                <th class="text-right">Total Activity</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${deviceWiseBreakdown.map((device, idx) => `
+                <tr ${idx === 0 && device.totalActivity > 0 ? 'class="top-performer"' : ''}>
+                  <td>
+                    ${device.userName}
+                    ${idx === 0 && device.totalActivity > 0 ? '<span class="badge">🏆 Top Performer</span>' : ''}
+                  </td>
+                  <td class="text-right">${formatCurrency(device.salesTotal)}</td>
+                  <td class="text-right">${device.salesCount}</td>
+                  <td class="text-right">${formatCurrency(device.expensesTotal)}</td>
+                  <td class="text-right">${device.expensesCount}</td>
+                  <td class="text-right">${device.purchasesCount > 0 ? formatCurrency(device.purchasesTotal) : '—'}</td>
+                  <td class="text-right">${device.purchasesCount > 0 ? device.purchasesCount : '—'}</td>
+                  <td class="text-right"><strong>${formatCurrency(device.totalActivity)}</strong></td>
+                </tr>
+              `).join('')}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td><strong>Total</strong></td>
+                <td class="text-right"><strong>${formatCurrency(deviceWiseBreakdown.reduce((sum, d) => sum + d.salesTotal, 0))}</strong></td>
+                <td class="text-right"><strong>${deviceWiseBreakdown.reduce((sum, d) => sum + d.salesCount, 0)}</strong></td>
+                <td class="text-right"><strong>${formatCurrency(deviceWiseBreakdown.reduce((sum, d) => sum + d.expensesTotal, 0))}</strong></td>
+                <td class="text-right"><strong>${deviceWiseBreakdown.reduce((sum, d) => sum + d.expensesCount, 0)}</strong></td>
+                <td class="text-right"><strong>${formatCurrency(deviceWiseBreakdown.reduce((sum, d) => sum + d.purchasesTotal, 0))}</strong></td>
+                <td class="text-right"><strong>${deviceWiseBreakdown.reduce((sum, d) => sum + d.purchasesCount, 0)}</strong></td>
+                <td class="text-right"><strong>${formatCurrency(deviceWiseBreakdown.reduce((sum, d) => sum + d.totalActivity, 0))}</strong></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        ` : ''}
+
         <div class="footer">
           <p>Generated on ${new Date().toLocaleString('en-IN')}</p>
           <p>HisabKitab-Pro - Daily Business Report</p>
@@ -596,16 +848,53 @@ const DailyReport = () => {
               font-size: 18px;
               color: #6b7280;
             }
-            .summary-section, .cash-section, .payment-section, .salesperson-section, .expenses-section, .expenses-detail-section {
+            .summary-section, .cash-section, .payment-section, .salesperson-section, .expenses-section, .expenses-detail-section, .device-breakdown-section {
               margin-bottom: 40px;
               page-break-inside: avoid;
             }
-            .summary-section h2, .cash-section h2, .payment-section h2, .salesperson-section h2, .expenses-section h2, .expenses-detail-section h2 {
+            .summary-section h2, .cash-section h2, .payment-section h2, .salesperson-section h2, .expenses-section h2, .expenses-detail-section h2, .device-breakdown-section h2 {
               font-size: 24px;
               color: #1f2937;
               margin-bottom: 20px;
               border-bottom: 2px solid #e5e7eb;
               padding-bottom: 10px;
+            }
+            .device-breakdown-section .subtitle {
+              font-size: 14px;
+              color: #6b7280;
+              margin-bottom: 20px;
+            }
+            .device-breakdown-section table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 20px;
+            }
+            .device-breakdown-section table th {
+              background: #f3f4f6;
+              padding: 12px;
+              text-align: left;
+              font-weight: bold;
+              border: 1px solid #e5e7eb;
+            }
+            .device-breakdown-section table td {
+              padding: 10px 12px;
+              border: 1px solid #e5e7eb;
+            }
+            .device-breakdown-section table tr.top-performer {
+              background: #fef3c7;
+            }
+            .device-breakdown-section .badge {
+              background: #fbbf24;
+              color: #78350f;
+              padding: 2px 8px;
+              border-radius: 12px;
+              font-size: 11px;
+              font-weight: bold;
+              margin-left: 8px;
+            }
+            .device-breakdown-section table tfoot {
+              background: #f9fafb;
+              font-weight: bold;
             }
             .summary-grid {
               display: grid;
@@ -821,6 +1110,12 @@ Generated by HisabKitab-Pro`
                 <div>
                   <h1 className="text-3xl font-bold text-gray-900">Daily Report</h1>
                   <p className="text-sm text-gray-600 mt-1">Comprehensive daily business summary</p>
+                  <p className="text-xs text-blue-600 mt-1 font-semibold flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                    Aggregated from all devices - Real-time sync
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -963,10 +1258,17 @@ Generated by HisabKitab-Pro`
               {/* Opening Balance */}
               {openingClosing.opening && (
                 <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-5 border-2 border-green-200">
-                  <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-                    <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                    Opening Balance (Morning)
-                  </h3>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                      <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                      Opening Balance (Morning)
+                    </h3>
+                    {openingClosing.hasMultipleOpening && (
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-semibold">
+                        {openingClosing.allOpening.length} entries - showing latest
+                      </span>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <p className="text-sm text-gray-600 mb-1">Total Opening Cash</p>
@@ -1230,7 +1532,14 @@ Generated by HisabKitab-Pro`
                     {openingClosing.closing && (
                       <>
                         <div className="flex justify-between items-center py-2 bg-white rounded-lg px-4">
-                          <span className="text-gray-700">Actual Closing Cash:</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-gray-700">Actual Closing Cash:</span>
+                            {openingClosing.hasMultipleClosing && (
+                              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold">
+                                {openingClosing.allClosing.length} entries - showing latest
+                              </span>
+                            )}
+                          </div>
                           <span className="font-bold text-blue-600">₹{cashFlow.closingAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className={`flex justify-between items-center py-3 rounded-lg px-4 border-2 ${
@@ -1274,11 +1583,236 @@ Generated by HisabKitab-Pro`
             </div>
           </div>
 
+          {/* Device/User-wise Breakdown */}
+          {deviceWiseBreakdown.length > 0 && (
+            <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6 border border-white/50 mb-6">
+              <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+                <User className="w-6 h-6 text-purple-600" />
+                Device/User-wise Activity Breakdown
+              </h2>
+              <p className="text-sm text-gray-600 mb-4">
+                See which device/user contributed how much to today's business
+              </p>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {deviceWiseBreakdown.map((device, index) => (
+                  <div 
+                    key={index} 
+                    className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-5 border-2 border-purple-200 shadow-lg"
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                        <div className={`w-3 h-3 rounded-full ${
+                          index === 0 ? 'bg-yellow-400' : 
+                          index === 1 ? 'bg-gray-400' : 
+                          index === 2 ? 'bg-orange-400' : 
+                          'bg-blue-400'
+                        }`}></div>
+                        {device.userName}
+                      </h3>
+                      {index === 0 && device.totalActivity > 0 && (
+                        <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded-full font-bold">
+                          🏆 Top Performer
+                        </span>
+                      )}
+                    </div>
+                    
+                    <div className="space-y-3">
+                      {/* Opening Balance */}
+                      {device.openingBalance && (
+                        <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-3 border-2 border-green-300">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="text-sm font-bold text-green-800">Opening Balance:</span>
+                            <span className="text-lg font-bold text-green-700">
+                              ₹{device.openingBalance.amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                          {device.openingBalance.cash_denominations && (
+                            <div className="mt-2 pt-2 border-t border-green-200">
+                              <p className="text-xs font-semibold text-green-700 mb-1">Cash Breakdown:</p>
+                              <div className="grid grid-cols-2 gap-1 text-xs">
+                                {Object.entries(device.openingBalance.cash_denominations)
+                                  .filter(([_, count]) => count && count > 0)
+                                  .map(([key, count]) => {
+                                    const value = key.includes('notes') 
+                                      ? parseInt(key.replace('notes_', ''))
+                                      : parseInt(key.replace('coins_', ''))
+                                    const label = key.includes('notes') ? `₹${value} notes` : `₹${value} coins`
+                                    return (
+                                      <div key={key} className="flex justify-between bg-white px-2 py-0.5 rounded text-green-800">
+                                        <span>{label}:</span>
+                                        <span className="font-semibold">{count}</span>
+                                      </div>
+                                    )
+                                  })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Closing Balance */}
+                      {device.closingBalance && (
+                        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-3 border-2 border-blue-300">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="text-sm font-bold text-blue-800">Closing Balance:</span>
+                            <span className="text-lg font-bold text-blue-700">
+                              ₹{device.closingBalance.amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                          {device.closingBalance.cash_denominations && (
+                            <div className="mt-2 pt-2 border-t border-blue-200">
+                              <p className="text-xs font-semibold text-blue-700 mb-1">Cash Breakdown:</p>
+                              <div className="grid grid-cols-2 gap-1 text-xs">
+                                {Object.entries(device.closingBalance.cash_denominations)
+                                  .filter(([_, count]) => count && count > 0)
+                                  .map(([key, count]) => {
+                                    const value = key.includes('notes') 
+                                      ? parseInt(key.replace('notes_', ''))
+                                      : parseInt(key.replace('coins_', ''))
+                                    const label = key.includes('notes') ? `₹${value} notes` : `₹${value} coins`
+                                    return (
+                                      <div key={key} className="flex justify-between bg-white px-2 py-0.5 rounded text-blue-800">
+                                        <span>{label}:</span>
+                                        <span className="font-semibold">{count}</span>
+                                      </div>
+                                    )
+                                  })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Sales */}
+                      <div className="bg-white rounded-lg p-3 border border-blue-200">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-sm font-semibold text-gray-700">Sales:</span>
+                          <span className="text-lg font-bold text-blue-600">
+                            ₹{device.salesTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-500 mb-2">
+                          {device.salesCount} transaction{device.salesCount !== 1 ? 's' : ''}
+                        </div>
+                        {/* Sales by Payment Method */}
+                        {device.salesByPaymentMethod.size > 0 && (
+                          <div className="mt-2 pt-2 border-t border-gray-200">
+                            <p className="text-xs font-semibold text-gray-600 mb-1">By Payment Method:</p>
+                            <div className="space-y-1">
+                              {Array.from(device.salesByPaymentMethod.entries())
+                                .sort((a, b) => b[1] - a[1])
+                                .map(([method, amount]) => (
+                                  <div key={method} className="flex justify-between text-xs">
+                                    <span className="text-gray-600 capitalize">{method}:</span>
+                                    <span className="font-semibold text-blue-600">
+                                      ₹{amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                                    </span>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Expenses */}
+                      <div className="bg-white rounded-lg p-3 border border-red-200">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-sm font-semibold text-gray-700">Expenses:</span>
+                          <span className="text-lg font-bold text-red-600">
+                            ₹{device.expensesTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-500 mb-2">
+                          {device.expensesCount} expense{device.expensesCount !== 1 ? 's' : ''}
+                        </div>
+                        {/* Expenses by Payment Method */}
+                        {device.expensesByPaymentMethod.size > 0 && (
+                          <div className="mt-2 pt-2 border-t border-gray-200">
+                            <p className="text-xs font-semibold text-gray-600 mb-1">By Payment Method:</p>
+                            <div className="space-y-1">
+                              {Array.from(device.expensesByPaymentMethod.entries())
+                                .sort((a, b) => b[1] - a[1])
+                                .map(([method, amount]) => (
+                                  <div key={method} className="flex justify-between text-xs">
+                                    <span className="text-gray-600 capitalize">{method}:</span>
+                                    <span className="font-semibold text-red-600">
+                                      ₹{amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                                    </span>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Purchases */}
+                      {device.purchasesCount > 0 && (
+                        <div className="bg-white rounded-lg p-3 border border-green-200">
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="text-sm font-semibold text-gray-700">Purchases:</span>
+                            <span className="text-lg font-bold text-green-600">
+                              ₹{device.purchasesTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {device.purchasesCount} purchase{device.purchasesCount !== 1 ? 's' : ''}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Total Activity */}
+                      <div className="bg-gradient-to-r from-purple-100 to-pink-100 rounded-lg p-3 border-2 border-purple-300 mt-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-bold text-gray-900">Total Activity:</span>
+                          <span className="text-xl font-bold text-purple-700">
+                            ₹{device.totalActivity.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-600 mt-1">
+                          {device.totalTransactions} total transaction{device.totalTransactions !== 1 ? 's' : ''}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              {/* Summary Stats */}
+              <div className="mt-6 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl p-4 border border-gray-200">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Total Devices/Users</p>
+                    <p className="text-2xl font-bold text-gray-900">{deviceWiseBreakdown.length}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Total Sales</p>
+                    <p className="text-2xl font-bold text-blue-600">
+                      ₹{deviceWiseBreakdown.reduce((sum, d) => sum + d.salesTotal, 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Total Expenses</p>
+                    <p className="text-2xl font-bold text-red-600">
+                      ₹{deviceWiseBreakdown.reduce((sum, d) => sum + d.expensesTotal, 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Total Transactions</p>
+                    <p className="text-2xl font-bold text-gray-900">
+                      {deviceWiseBreakdown.reduce((sum, d) => sum + d.totalTransactions, 0)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Final Summary */}
           <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl shadow-xl p-8 border border-white/50 text-white">
             <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
               <FileText className="w-6 h-6" />
-              Final Summary - {new Date(selectedDate).toLocaleDateString('en-IN', { 
+              Final Summary (All Devices) - {new Date(selectedDate).toLocaleDateString('en-IN', { 
                 weekday: 'long', 
                 year: 'numeric', 
                 month: 'long', 

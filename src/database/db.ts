@@ -2,7 +2,7 @@
 // Provides a simple interface to interact with IndexedDB
 
 const DB_NAME = 'hisabkitab_db'
-const DB_VERSION = 13 // Incremented to add USER_DEVICES store
+const DB_VERSION = 15 // Add company_id to notifications for multi-tenant isolation
 
 // Object store names (tables)
 export const STORES = {
@@ -31,6 +31,7 @@ export const STORES = {
   SUPPLIER_CHECKS: 'supplier_checks',
   REGISTRATION_REQUESTS: 'registration_requests',
   USER_DEVICES: 'user_devices',
+  SUBSCRIPTION_PAYMENTS: 'subscription_payments',
 } as const
 
 let dbInstance: IDBDatabase | null = null
@@ -259,11 +260,18 @@ export function initDB(config: DBConfig = {}): Promise<IDBDatabase> {
         }
       }
 
+      // Handle NOTIFICATIONS store - create if needed, or add company_id index for multi-tenant isolation
       if (!db.objectStoreNames.contains(STORES.NOTIFICATIONS)) {
         const notificationsStore = db.createObjectStore(STORES.NOTIFICATIONS, { keyPath: 'id' })
         notificationsStore.createIndex('timestamp', 'timestamp', { unique: false })
         notificationsStore.createIndex('type', 'type', { unique: false })
         notificationsStore.createIndex('priority', 'priority', { unique: false })
+        notificationsStore.createIndex('company_id', 'company_id', { unique: false })
+      } else {
+        const notificationsStore = transaction.objectStore(STORES.NOTIFICATIONS)
+        if (!notificationsStore.indexNames.contains('company_id')) {
+          notificationsStore.createIndex('company_id', 'company_id', { unique: false })
+        }
       }
 
       if (!db.objectStoreNames.contains(STORES.SETTINGS)) {
@@ -414,6 +422,38 @@ export function initDB(config: DBConfig = {}): Promise<IDBDatabase> {
         devicesStore.createIndex('device_id', 'device_id', { unique: false })
         devicesStore.createIndex('is_active', 'is_active', { unique: false })
         devicesStore.createIndex('last_accessed', 'last_accessed', { unique: false })
+      }
+
+      // Handle SUBSCRIPTION_PAYMENTS store
+      if (!db.objectStoreNames.contains(STORES.SUBSCRIPTION_PAYMENTS)) {
+        const paymentsStore = db.createObjectStore(STORES.SUBSCRIPTION_PAYMENTS, { keyPath: 'id' })
+        paymentsStore.createIndex('company_id', 'company_id', { unique: false })
+        paymentsStore.createIndex('user_id', 'user_id', { unique: false })
+        paymentsStore.createIndex('payment_status', 'payment_status', { unique: false })
+        paymentsStore.createIndex('created_at', 'created_at', { unique: false })
+        paymentsStore.createIndex('gateway_order_id', 'gateway_order_id', { unique: false })
+        paymentsStore.createIndex('gateway_payment_id', 'gateway_payment_id', { unique: false })
+      } else {
+        // Store exists, check and create missing indexes
+        const paymentsStore = transaction.objectStore(STORES.SUBSCRIPTION_PAYMENTS)
+        if (!paymentsStore.indexNames.contains('company_id')) {
+          paymentsStore.createIndex('company_id', 'company_id', { unique: false })
+        }
+        if (!paymentsStore.indexNames.contains('user_id')) {
+          paymentsStore.createIndex('user_id', 'user_id', { unique: false })
+        }
+        if (!paymentsStore.indexNames.contains('payment_status')) {
+          paymentsStore.createIndex('payment_status', 'payment_status', { unique: false })
+        }
+        if (!paymentsStore.indexNames.contains('created_at')) {
+          paymentsStore.createIndex('created_at', 'created_at', { unique: false })
+        }
+        if (!paymentsStore.indexNames.contains('gateway_order_id')) {
+          paymentsStore.createIndex('gateway_order_id', 'gateway_order_id', { unique: false })
+        }
+        if (!paymentsStore.indexNames.contains('gateway_payment_id')) {
+          paymentsStore.createIndex('gateway_payment_id', 'gateway_payment_id', { unique: false })
+        }
       }
       }) // Close upgradePromise Promise
     }

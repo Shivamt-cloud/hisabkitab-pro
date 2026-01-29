@@ -7,26 +7,27 @@ import { Notification, NotificationType, NotificationPriority } from '../types/n
 import { Home, Bell, Check, CheckCheck, Trash2, AlertCircle, AlertTriangle, Info, X } from 'lucide-react'
 
 const Notifications = () => {
-  const { user } = useAuth()
+  const { user, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [filterType, setFilterType] = useState<NotificationType | 'all'>('all')
   const [filterPriority, setFilterPriority] = useState<NotificationPriority | 'all'>('all')
   const [showRead, setShowRead] = useState(true)
   const [unreadCount, setUnreadCount] = useState(0)
+  const companyId = getCurrentCompanyId?.() ?? null
 
   useEffect(() => {
     loadNotifications()
     // Refresh notifications every 30 seconds
     const interval = setInterval(loadNotifications, 30000)
     return () => clearInterval(interval)
-  }, [filterType, filterPriority, showRead])
+  }, [filterType, filterPriority, showRead, companyId])
 
   const loadNotifications = async () => {
     try {
       const [allNotificationsResult, unreadCountResult] = await Promise.all([
-        notificationService.getAll(user?.id),
-        notificationService.getUnreadCount(user?.id)
+        notificationService.getAll(user?.id, companyId),
+        notificationService.getUnreadCount(user?.id, companyId)
       ])
       
       let allNotifications = allNotificationsResult
@@ -55,7 +56,7 @@ const Notifications = () => {
 
   const handleMarkAsRead = async (id: number) => {
     try {
-      await notificationService.markAsRead(id)
+      await notificationService.markAsRead(id, companyId)
       await loadNotifications()
     } catch (error) {
       console.error('Error marking notification as read:', error)
@@ -64,7 +65,7 @@ const Notifications = () => {
 
   const handleMarkAllAsRead = async () => {
     try {
-      await notificationService.markAllAsRead(user?.id)
+      await notificationService.markAllAsRead(user?.id, companyId)
       await loadNotifications()
     } catch (error) {
       console.error('Error marking all as read:', error)
@@ -73,7 +74,7 @@ const Notifications = () => {
 
   const handleDelete = async (id: number) => {
     try {
-      await notificationService.delete(id)
+      await notificationService.delete(id, companyId)
       await loadNotifications()
     } catch (error) {
       console.error('Error deleting notification:', error)
@@ -82,7 +83,7 @@ const Notifications = () => {
 
   const handleDeleteRead = async () => {
     try {
-      await notificationService.deleteRead(user?.id)
+      await notificationService.deleteRead(user?.id, companyId)
       await loadNotifications()
     } catch (error) {
       console.error('Error deleting read notifications:', error)

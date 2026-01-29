@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS purchases (
   payment_status TEXT DEFAULT 'pending' CHECK (payment_status IN ('paid', 'pending', 'partial')),
   payment_method TEXT,
   notes TEXT,
+  return_remarks TEXT, -- Remarks/details for purchase returns to supplier
   company_id INTEGER,
   created_by BIGINT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -156,7 +157,8 @@ CREATE TABLE IF NOT EXISTS sales (
   return_amount DECIMAL(15, 2),
   credit_applied DECIMAL(15, 2),
   credit_added DECIMAL(15, 2),
-  notes TEXT,
+  notes TEXT, -- Customer-facing notes (shown on invoice)
+  internal_remarks TEXT, -- Internal remarks (NOT shown to customers, only in reports)
   company_id INTEGER,
   created_by BIGINT,
   archived BOOLEAN DEFAULT false,

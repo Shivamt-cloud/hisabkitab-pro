@@ -20,6 +20,9 @@ export interface PurchaseItem {
   gst_rate?: number
   tax_amount?: number
   total: number
+  color?: string // Color variant (e.g., for clothing business)
+  size?: string // Size variant (e.g., S, M, L, XL for clothing business)
+  purchase_type?: 'purchase' | 'return' // Whether this item is a purchase or return to supplier
 }
 
 export interface GSTPurchase {
@@ -40,6 +43,7 @@ export interface GSTPurchase {
   payment_status: PaymentStatus
   payment_method?: string
   notes?: string
+  return_remarks?: string // Remarks/details for purchase returns to supplier
   company_id?: number
   created_by: number
   created_at: string
@@ -58,6 +62,7 @@ export interface SimplePurchase {
   payment_status: PaymentStatus
   payment_method?: string
   notes?: string
+  return_remarks?: string // Remarks/details for purchase returns to supplier
   company_id?: number
   created_by: number
   created_at: string

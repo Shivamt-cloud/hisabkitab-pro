@@ -27,6 +27,7 @@ export interface Notification {
   createdAt: string
   readAt?: string
   userId?: string // If notification is user-specific
+  company_id?: number // Scopes notification to a company; required for multi-tenant isolation
 }
 
 export interface NotificationPreferences {

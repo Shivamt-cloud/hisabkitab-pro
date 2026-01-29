@@ -3,11 +3,15 @@ import { useAuth } from '../context/AuthContext'
 import { useNavigate, useParams } from 'react-router-dom'
 import { purchaseService, supplierService } from '../services/purchaseService'
 import { productService } from '../services/productService'
+import { companyService } from '../services/companyService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { SimplePurchase, PurchaseItem, Supplier } from '../types/purchase'
 import { Product } from '../services/productService'
-import { ArrowLeft, Save, Plus, Trash2, Package, Home, Calculator, RefreshCw, Barcode } from 'lucide-react'
+import { ArrowLeft, Save, Plus, Trash2, Package, Home, Calculator, RefreshCw, Barcode, Printer } from 'lucide-react'
 import { generateBarcode, BarcodeFormat, BARCODE_FORMAT_INFO } from '../utils/barcodeGenerator'
+import SupplierModal from '../components/SupplierModal'
+import ProductModal from '../components/ProductModal'
+import BarcodePrintModal from '../components/BarcodePrintModal'
 
 const SimplePurchaseForm = () => {
   const { hasPermission, user, getCurrentCompanyId } = useAuth()
@@ -25,17 +29,38 @@ const SimplePurchaseForm = () => {
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'pending' | 'partial'>('pending')
   const [paymentMethod, setPaymentMethod] = useState('')
   const [notes, setNotes] = useState('')
+  const [returnRemarks, setReturnRemarks] = useState('')
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [autoGenerateBarcode, setAutoGenerateBarcode] = useState(false)
   const [barcodeFormat, setBarcodeFormat] = useState<BarcodeFormat>('EAN13')
+  const [supplierModalOpen, setSupplierModalOpen] = useState(false)
+  const [productModalOpen, setProductModalOpen] = useState(false)
+  const [barcodePrintModalOpen, setBarcodePrintModalOpen] = useState(false)
+  const [savedPurchaseItems, setSavedPurchaseItems] = useState<PurchaseItem[]>([])
+  const [companyName, setCompanyName] = useState<string>('')
 
   useEffect(() => {
     loadData()
+    loadCompanyName()
     if (isEditing && id) {
       loadPurchaseData(parseInt(id))
     }
   }, [id, isEditing])
+
+  const loadCompanyName = async () => {
+    try {
+      const companyId = getCurrentCompanyId()
+      if (companyId) {
+        const company = await companyService.getById(companyId)
+        if (company) {
+          setCompanyName(company.name)
+        }
+      }
+    } catch (error) {
+      console.error('Error loading company name:', error)
+    }
+  }
 
   const loadData = async () => {
     try {
@@ -66,6 +91,24 @@ const SimplePurchaseForm = () => {
     }
   }
 
+  const handleSupplierAdded = async (newSupplier: Supplier) => {
+    // Reload suppliers to get the updated list
+    await loadData()
+    // Select the newly added supplier
+    setSupplierId(newSupplier.id)
+    setSupplierName(newSupplier.name)
+  }
+
+  const handleProductAdded = async (newProduct: Product) => {
+    // Reload products to get the updated list
+    await loadData()
+    // If there's an empty item row, select the new product in it
+    const emptyItemIndex = items.findIndex(item => item.product_id === 0)
+    if (emptyItemIndex >= 0) {
+      updateItem(emptyItemIndex, 'product_id', newProduct.id)
+    }
+  }
+
   const loadPurchaseData = async (purchaseId: number) => {
     try {
       const purchase = await purchaseService.getById(purchaseId)
@@ -89,6 +132,7 @@ const SimplePurchaseForm = () => {
         setPurchaseDate(simplePurchase.purchase_date)
         setItems(simplePurchase.items.map(item => ({
           ...item,
+          purchase_type: item.purchase_type || 'purchase',
           barcode: item.barcode || '',
           mrp: item.mrp || 0,
           sale_price: item.sale_price || 0,
@@ -96,10 +140,13 @@ const SimplePurchaseForm = () => {
           margin_amount: item.margin_amount || 0,
           min_stock_level: item.min_stock_level,
           sold_quantity: item.sold_quantity || 0, // Ensure sold_quantity is initialized
+          color: item.color || '',
+          size: item.size || '',
         })))
         setPaymentStatus(simplePurchase.payment_status)
         setPaymentMethod(simplePurchase.payment_method || '')
         setNotes(simplePurchase.notes || '')
+        setReturnRemarks(simplePurchase.return_remarks || '')
       }
     } catch (error) {
       console.error('Error loading purchase data:', error)
@@ -111,6 +158,7 @@ const SimplePurchaseForm = () => {
     if (items.length === 0 || items[items.length - 1].product_id > 0) {
       setItems([...items, {
         product_id: 0,
+        purchase_type: 'purchase',
         article: '',
         barcode: '',
         quantity: 1,
@@ -120,6 +168,8 @@ const SimplePurchaseForm = () => {
         margin_percentage: 0,
         margin_amount: 0,
         min_stock_level: undefined,
+        color: '',
+        size: '',
         total: 0,
       }])
     }
@@ -234,6 +284,8 @@ const SimplePurchaseForm = () => {
             margin_percentage: 0,
             margin_amount: 0,
             min_stock_level: undefined,
+            color: '',
+            size: '',
             total: 0,
           })
         }
@@ -330,32 +382,42 @@ const SimplePurchaseForm = () => {
           payment_status: paymentStatus,
           payment_method: paymentMethod,
           notes,
+          return_remarks: items.some(item => item.purchase_type === 'return') ? returnRemarks.trim() || undefined : undefined,
         } as Partial<SimplePurchase>)
         
         alert('Purchase updated successfully!')
         navigate('/purchases/history')
       } else {
         const itemsWithBarcodes = ensureBarcodesGenerated(items.filter(item => item.product_id > 0))
+        const finalItems = itemsWithBarcodes.map(item => ({
+          ...item,
+          product_name: products.find(p => p.id === item.product_id)?.name,
+        }))
+        
         await purchaseService.createSimple({
           type: 'simple',
           purchase_date: purchaseDate,
           supplier_id: supplierId ? supplierId as number : undefined,
           supplier_name: supplier?.name || supplierName,
           invoice_number: invoiceNumber || undefined,
-          items: itemsWithBarcodes.map(item => ({
-            ...item,
-            product_name: products.find(p => p.id === item.product_id)?.name,
-          })),
+          items: finalItems,
           total_amount: calculateTotal(),
           payment_status: paymentStatus,
           payment_method: paymentMethod,
           notes,
+          return_remarks: items.some(item => item.purchase_type === 'return') ? returnRemarks.trim() || undefined : undefined,
           company_id: getCurrentCompanyId() ?? undefined,
           created_by: parseInt(user?.id || '1'),
         })
         
         alert('Purchase created successfully!')
-        navigate('/purchases/history')
+        // Optionally show print modal after save
+        const itemsWithNames = finalItems.map(item => ({
+          ...item,
+          product_name: item.product_name || products.find(p => p.id === item.product_id)?.name,
+        }))
+        setSavedPurchaseItems(itemsWithNames)
+        setBarcodePrintModalOpen(true)
       }
     } catch (error) {
       console.error('Error creating purchase:', error)
@@ -435,6 +497,15 @@ const SimplePurchaseForm = () => {
                       ))
                     )}
                   </select>
+                  <button
+                    type="button"
+                    onClick={() => setSupplierModalOpen(true)}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors mb-2 w-full justify-center"
+                    title="Add New Supplier"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span className="text-sm font-medium">Add Supplier</span>
+                  </button>
                   {suppliers.length === 0 && (
                     <p className="mt-1 text-sm text-yellow-600">
                       No suppliers found. <button type="button" onClick={() => navigate('/suppliers/new')} className="text-blue-600 hover:underline">Add a supplier</button>
@@ -505,10 +576,21 @@ const SimplePurchaseForm = () => {
             {/* Products */}
             <div className="mb-8 pt-8 border-t border-gray-200">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                  <Calculator className="w-6 h-6" />
-                  Products
-                </h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                    <Calculator className="w-6 h-6" />
+                    Products
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setProductModalOpen(true)}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    title="Add New Product"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span className="text-sm font-medium">Add Product</span>
+                  </button>
+                </div>
                 <div className="flex items-center gap-3">
                   <span className="text-sm text-gray-600">{items.filter(i => i.product_id > 0).length} items</span>
                   <button
@@ -562,8 +644,11 @@ const SimplePurchaseForm = () => {
                   <thead className="bg-gray-100 border-b border-gray-300">
                     <tr>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[200px]">Product</th>
+                      <th className="px-6 py-5 text-center text-xs font-semibold text-gray-700 uppercase min-w-[120px]">Type</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[140px]">Article</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[170px]">Barcode</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[100px]">Color</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[100px]">Size</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[100px]">Qty</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[120px]">Remaining Qty</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[160px]">Purchase Price</th>
@@ -576,8 +661,10 @@ const SimplePurchaseForm = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {items.map((item, index) => (
-                      <tr key={index} className="hover:bg-blue-50/50 transition-colors">
+                    {items.map((item, index) => {
+                      const isReturn = item.purchase_type === 'return'
+                      return (
+                      <tr key={index} className={`transition-colors ${isReturn ? 'bg-red-50/50 hover:bg-red-100/50 border-l-4 border-red-400' : 'hover:bg-blue-50/50'}`}>
                         <td className="px-6 py-5">
                           <select
                             value={item.product_id || ''}
@@ -602,6 +689,41 @@ const SimplePurchaseForm = () => {
                               No products found. <button type="button" onClick={() => navigate('/products/new')} className="text-blue-600 hover:underline">Add a product</button>
                             </p>
                           )}
+                        </td>
+                        <td className="px-6 py-5">
+                          <div className="flex flex-col gap-2 items-center">
+                            <div className="flex gap-1">
+                              <button
+                                type="button"
+                                onClick={() => updateItem(index, 'purchase_type', 'purchase')}
+                                className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors ${
+                                  !isReturn
+                                    ? 'bg-green-500 text-white'
+                                    : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                                }`}
+                                title="Purchase"
+                              >
+                                Purchase
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => updateItem(index, 'purchase_type', 'return')}
+                                className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors ${
+                                  isReturn
+                                    ? 'bg-red-500 text-white'
+                                    : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                                }`}
+                                title="Return to Supplier"
+                              >
+                                Return
+                              </button>
+                            </div>
+                            {isReturn && (
+                              <span className="text-xs font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded">
+                                RETURN
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-5">
                           <input
@@ -636,6 +758,26 @@ const SimplePurchaseForm = () => {
                               Generate
                             </button>
                           )}
+                        </td>
+                        <td className="px-6 py-5">
+                          <input
+                            type="text"
+                            value={item.color || ''}
+                            onChange={(e) => updateItem(index, 'color', e.target.value)}
+                            className="w-full min-w-[100px] px-5 py-4 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                            placeholder="Color (optional)"
+                            title="Product color variant (e.g., Red, Blue, Black)"
+                          />
+                        </td>
+                        <td className="px-6 py-5">
+                          <input
+                            type="text"
+                            value={item.size || ''}
+                            onChange={(e) => updateItem(index, 'size', e.target.value)}
+                            className="w-full min-w-[100px] px-5 py-4 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                            placeholder="Size (optional)"
+                            title="Product size variant (e.g., S, M, L, XL, 38, 40)"
+                          />
                         </td>
                         <td className="px-6 py-5">
                           <input
@@ -716,7 +858,7 @@ const SimplePurchaseForm = () => {
                           </button>
                         </td>
                       </tr>
-                    ))}
+                    )})}
                   </tbody>
                 </table>
               </div>
@@ -731,6 +873,26 @@ const SimplePurchaseForm = () => {
                     <p className="font-bold text-green-600 text-2xl">₹{totalAmount.toFixed(2)}</p>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* Return Remarks - Only show if there are return items */}
+            {items.some(item => item.purchase_type === 'return') && (
+              <div className="mb-8 p-4 bg-red-50 rounded-xl border border-red-200">
+                <label className="block text-sm font-semibold text-red-700 mb-2">
+                  Return Remarks <span className="text-xs text-red-600 font-normal">(Required for returns)</span>
+                </label>
+                <textarea
+                  value={returnRemarks}
+                  onChange={(e) => setReturnRemarks(e.target.value)}
+                  rows={3}
+                  className="w-full px-4 py-3 border border-red-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none resize-none bg-white text-gray-900 placeholder:text-gray-400"
+                  placeholder="Enter details about why items are being returned to supplier (e.g., defective items, wrong items received, quality issues)..."
+                  required={items.some(item => item.purchase_type === 'return')}
+                />
+                <p className="text-xs text-red-600 mt-2">
+                  Please provide details about the items being returned to the supplier.
+                </p>
               </div>
             )}
 
@@ -754,6 +916,23 @@ const SimplePurchaseForm = () => {
                 className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors"
               >
                 Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const itemsWithNames = items.map(item => ({
+                    ...item,
+                    product_name: item.product_name || products.find(p => p.id === item.product_id)?.name,
+                  }))
+                  setSavedPurchaseItems(itemsWithNames)
+                  setBarcodePrintModalOpen(true)
+                }}
+                disabled={items.length === 0}
+                className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                title={items.length === 0 ? 'Add items to print barcodes' : 'Print barcode labels'}
+              >
+                <Printer className="w-5 h-5" />
+                Print Barcodes
               </button>
               <button
                 type="button"
@@ -783,6 +962,32 @@ const SimplePurchaseForm = () => {
             </div>
           </form>
         </main>
+
+        {/* Supplier Modal */}
+        <SupplierModal
+          isOpen={supplierModalOpen}
+          onClose={() => setSupplierModalOpen(false)}
+          onSupplierAdded={handleSupplierAdded}
+        />
+
+        {/* Product Modal */}
+        <ProductModal
+          isOpen={productModalOpen}
+          onClose={() => setProductModalOpen(false)}
+          onProductAdded={handleProductAdded}
+        />
+        
+        {/* Barcode Print Modal */}
+        <BarcodePrintModal
+          isOpen={barcodePrintModalOpen}
+          onClose={() => {
+            setBarcodePrintModalOpen(false)
+            navigate('/purchases/history')
+          }}
+          items={savedPurchaseItems}
+          purchaseDate={purchaseDate}
+          companyName={companyName}
+        />
       </div>
     </ProtectedRoute>
   )

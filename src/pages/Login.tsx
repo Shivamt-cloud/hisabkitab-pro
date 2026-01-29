@@ -414,7 +414,7 @@ Please review and process this registration request.
                     </div>
                     
                     {/* Plan Details with Device Limits and Pricing */}
-                                    <div className="mt-4 space-y-2">
+                                    <div className="mt-4 space-y-3">
                       {(['basic', 'standard', 'premium'] as SubscriptionTier[]).map((tier) => {
                         const tierPrice = calculateTierPrice(pricing.yearlyPrice, tier)
                         const tierOriginalPrice = calculateTierPrice(pricing.originalPrice || pricing.yearlyPrice * 2, tier)
@@ -423,19 +423,35 @@ Please review and process this registration request.
                                         '♾️ Premium Plan - Unlimited Devices'
                         const tierDescription = tier === 'premium' ? 'Supports: Mobile, Laptop, Desktop, Tablet (All Types)' : 
                                                'Supports: Mobile, Laptop, Desktop, Tablet'
-                        
+                        const isMostPopular = tier === 'standard'
                         return (
-                          <div key={tier} className={`${tier === 'basic' ? 'bg-white/15' : 'bg-white/10'} backdrop-blur-sm rounded-lg p-3 border ${tier === 'basic' ? 'border-white/20' : 'border-white/15'}`}>
-                            <div className={`text-xs font-bold ${tier === 'basic' ? 'text-white/90' : 'text-white/85'} mb-1 flex items-center justify-between`}>
-                              <span>{tierName}</span>
-                              <div className="text-right">
-                                <div className="line-through opacity-60 text-xs mb-0.5">
-                                  {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
-                                </div>
-                                <span className="font-extrabold">{formatPrice(tierPrice, pricing.currencySymbol)}/Year</span>
+                          <div
+                            key={tier}
+                            className={`overflow-hidden rounded-xl border-2 backdrop-blur-sm ${
+                              isMostPopular
+                                ? 'border-emerald-400/80 bg-gradient-to-br from-emerald-500/30 via-teal-500/25 to-cyan-500/30 shadow-lg shadow-emerald-500/20'
+                                : tier === 'basic'
+                                  ? 'border-white/20 bg-white/15'
+                                  : 'border-white/15 bg-white/10'
+                            }`}
+                          >
+                            {isMostPopular && (
+                              <div className="bg-gradient-to-r from-emerald-500 to-teal-500 px-3 py-1.5 text-center">
+                                <span className="text-xs font-black uppercase tracking-wider text-white drop-shadow-sm">★ Most Popular</span>
                               </div>
+                            )}
+                            <div className="p-3">
+                              <div className={`text-xs font-bold ${tier === 'basic' ? 'text-white/90' : 'text-white/90'} mb-1 flex items-center justify-between gap-2`}>
+                                <span className="flex-1 min-w-0">{tierName}</span>
+                                <div className="text-right flex-shrink-0">
+                                  <div className="line-through opacity-70 text-xs mb-0.5">
+                                    {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
+                                  </div>
+                                  <span className="font-extrabold">{formatPrice(tierPrice, pricing.currencySymbol)}/Year</span>
+                                </div>
+                              </div>
+                              <div className={`text-xs ${tier === 'basic' ? 'text-white/80' : 'text-white/80'}`}>{tierDescription}</div>
                             </div>
-                            <div className={`text-xs ${tier === 'basic' ? 'text-white/80' : 'text-white/75'}`}>{tierDescription}</div>
                           </div>
                         )
                       })}
@@ -1312,45 +1328,66 @@ Please review and process this registration request.
                 <label className="block text-sm font-bold text-gray-700 mb-3">
                   Select Subscription Plan <span className="text-red-500">*</span>
                 </label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                   {(['basic', 'standard', 'premium'] as SubscriptionTier[]).map((tier) => {
                     const tierInfo = getTierPricing(tier)
                     const tierPrice = calculateTierPrice(pricing.yearlyPrice, tier)
                     const tierOriginalPrice = calculateTierPrice(pricing.originalPrice || pricing.yearlyPrice * 2, tier)
                     const maxUsers = getMaxUsersForPlan(tier)
                     const isSelected = registrationFormData.subscription_tier === tier
-                    
+                    const isMostPopular = tier === 'standard'
                     return (
                       <div
                         key={tier}
                         onClick={() => setRegistrationFormData({ ...registrationFormData, subscription_tier: tier })}
-                        className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
+                        className={`relative overflow-hidden rounded-2xl border-2 cursor-pointer transition-all duration-300 hover:scale-[1.02] hover:shadow-xl ${
+                          isMostPopular
+                            ? 'bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 border-emerald-400 shadow-lg shadow-emerald-200/60 hover:shadow-emerald-300/50'
+                            : ''
+                        } ${
                           isSelected
-                            ? 'border-blue-500 bg-blue-50 shadow-lg'
-                            : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'
+                            ? 'border-blue-500 bg-blue-50 shadow-lg ring-2 ring-blue-300 ring-offset-2'
+                            : !isMostPopular
+                              ? 'border-gray-300 bg-white hover:border-gray-400 hover:bg-gray-50'
+                              : ''
                         }`}
                       >
-                        <div className="flex items-center justify-between mb-2">
-                          <h4 className="font-bold text-gray-900">{tierInfo.name}</h4>
-                          {isSelected && <CheckCircle className="w-5 h-5 text-blue-600" />}
-                        </div>
-                        <div className="mb-2">
-                          <div className="text-xs text-gray-500 line-through mb-1">
-                            {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
+                        {/* Most Popular: full-width bar inside card - no overlap */}
+                        {isMostPopular && (
+                          <div className="bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 px-4 py-2 text-center">
+                            <span className="text-sm font-black uppercase tracking-widest text-white drop-shadow-sm">★ Most Popular</span>
                           </div>
-                          <div className="text-2xl font-extrabold text-gray-900">
-                            {formatPrice(tierPrice, pricing.currencySymbol)}
-                            <span className="text-sm font-normal">/Year</span>
+                        )}
+                        <div className="p-5">
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className={`font-bold ${isMostPopular ? 'text-emerald-900' : 'text-gray-900'}`}>{tierInfo.name}</h4>
+                            {isSelected && <CheckCircle className="w-5 h-5 text-blue-600 flex-shrink-0" />}
                           </div>
-                          <div className="inline-block mt-1 bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                            50% OFF
+                          <div className="mb-3">
+                            <div className="text-xs text-gray-500 line-through mb-1">
+                              {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
+                            </div>
+                            <div className={`text-2xl font-extrabold ${isMostPopular ? 'text-emerald-800' : 'text-gray-900'}`}>
+                              {formatPrice(tierPrice, pricing.currencySymbol)}
+                              <span className="text-sm font-normal">/Year</span>
+                            </div>
+                            <div className="inline-block mt-1 bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                              50% OFF
+                            </div>
                           </div>
-                        </div>
-                        <div className="text-xs text-gray-600 mb-2">
-                          Max Users: {maxUsers === 'unlimited' ? 'Unlimited' : maxUsers}
-                        </div>
-                        <div className="text-xs text-gray-600">
-                          Devices: {tierInfo.deviceLimit === 'unlimited' ? 'Unlimited' : tierInfo.deviceLimit}
+                          <div className={`text-xs mb-2 ${isMostPopular ? 'text-emerald-800/90' : 'text-gray-600'}`}>
+                            Max Users: {maxUsers === 'unlimited' ? 'Unlimited' : maxUsers}
+                          </div>
+                          <div className={`text-xs ${isMostPopular ? 'text-emerald-800/90' : 'text-gray-600'}`}>
+                            Devices: {tierInfo.deviceLimit === 'unlimited' ? 'Unlimited' : tierInfo.deviceLimit}
+                          </div>
+                          {isMostPopular && (
+                            <div className="mt-3 pt-3 border-t border-emerald-300/70">
+                              <p className="text-xs font-semibold text-emerald-800">
+                                Supports: Mobile, Laptop, Desktop, Tablet
+                              </p>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )

@@ -15,15 +15,24 @@ export function DatabaseProvider({ children }: DatabaseProviderProps) {
   const [isInitialized, setIsInitialized] = useState(false)
   const [isMigrating, setIsMigrating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showNonBlockingBanner, setShowNonBlockingBanner] = useState(false)
 
   useEffect(() => {
     let timeoutId: NodeJS.Timeout | null = null
+    let bannerTimerId: NodeJS.Timeout | null = null
     
     async function initializeDatabase() {
       try {
+        // Do not block UI immediately — show a small banner if it takes time.
+        // (2s delay so users don't see it on normal fast loads)
+        bannerTimerId = setTimeout(() => setShowNonBlockingBanner(true), 2000)
+
         // Set a timeout to prevent hanging
         timeoutId = setTimeout(() => {
           console.warn('Database initialization taking longer than expected, continuing anyway...')
+          // If we're continuing anyway, don't keep showing a scary banner.
+          if (bannerTimerId) clearTimeout(bannerTimerId)
+          setShowNonBlockingBanner(false)
           setIsInitialized(true)
         }, 5000) // 5 second timeout
 
@@ -51,6 +60,8 @@ export function DatabaseProvider({ children }: DatabaseProviderProps) {
         }
 
                if (timeoutId) clearTimeout(timeoutId)
+               if (bannerTimerId) clearTimeout(bannerTimerId)
+               setShowNonBlockingBanner(false)
                setIsInitialized(true)
 
                // Ensure admin user exists after database is initialized
@@ -60,23 +71,15 @@ export function DatabaseProvider({ children }: DatabaseProviderProps) {
                  console.warn('Could not initialize users:', userError)
                }
 
-               // Start time-based backup service (12 PM & 6 PM) after database is initialized
-               // Get user ID from localStorage if available
-               try {
-                 const savedUser = localStorage.getItem('hisabkitab_user')
-                 const user = savedUser ? JSON.parse(savedUser) : null
-                 const { timeBasedBackupService } = await import('../services/timeBasedBackupService')
-                 await timeBasedBackupService.start(user?.id)
-                 console.log('✅ Time-based backup service started (12 PM & 6 PM)')
-               } catch (backupError) {
-                 console.warn('Could not start time-based backup service:', backupError)
-                 // Continue even if backup service fails to start
-               }
+               // NOTE: Automatic backups disabled (per product decision).
+               // Users can still use manual Backup/Restore when needed.
       } catch (err: any) {
         if (timeoutId) clearTimeout(timeoutId)
+        if (bannerTimerId) clearTimeout(bannerTimerId)
         console.error('Database initialization error:', err)
         setError(err.message || 'Failed to initialize database')
         // Still allow app to continue - it will fallback to localStorage
+        setShowNonBlockingBanner(false)
         setIsInitialized(true)
       }
     }
@@ -90,30 +93,24 @@ export function DatabaseProvider({ children }: DatabaseProviderProps) {
     }
   }, [])
 
-  // Show loading state during migration
-  if (isMigrating) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600 font-medium">Migrating data to database...</p>
-          <p className="text-gray-500 text-sm mt-2">Please wait</p>
-        </div>
+  // Non-blocking banner while DB work is running
+  const banner = (showNonBlockingBanner || isMigrating) ? (
+    <div className="fixed top-0 left-0 right-0 z-[60] bg-blue-600 text-white px-4 py-2 text-sm flex items-center justify-between shadow-lg">
+      <div className="flex items-center gap-2">
+        <div className="w-4 h-4 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
+        <span>
+          {isMigrating ? 'Finalizing database migration…' : 'Preparing database…'}
+        </span>
       </div>
-    )
-  }
-
-  // Show loading state if not initialized yet (but not migrating)
-  if (!isInitialized && !error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600 font-medium">Initializing database...</p>
-        </div>
-      </div>
-    )
-  }
+      <button
+        type="button"
+        className="text-white/90 hover:text-white underline text-xs"
+        onClick={() => setShowNonBlockingBanner(false)}
+      >
+        Hide
+      </button>
+    </div>
+  ) : null
 
   // Show error state if initialization failed critically
   if (error && !isInitialized) {
@@ -139,6 +136,11 @@ export function DatabaseProvider({ children }: DatabaseProviderProps) {
   }
 
   // Render children once initialized (or if error but initialized - allows fallback to localStorage)
-  return <>{children}</>
+  return (
+    <>
+      {banner}
+      {children}
+    </>
+  )
 }
 

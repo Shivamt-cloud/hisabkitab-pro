@@ -326,48 +326,50 @@ export function exportInvoiceToPDF(
   pdf.save(`${filename}.pdf`)
 }
 
-/**
- * Print receipt (thermal/compact format for POS printers)
- */
-export function printReceipt(
-  invoiceData: {
-    invoice_number: string
-    invoice_date: string
-    customer?: { name?: string; phone?: string; gstin?: string }
-    items: Array<{
-      product_name: string
-      quantity: number
-      unit_price: number
-      total: number
-      unit?: string
-      discount?: number
-      discount_percentage?: number
-      mrp?: number
-    }>
-    subtotal: number
-    tax_amount?: number
+export type ReceiptInvoiceData = {
+  invoice_number: string
+  invoice_date: string
+  customer?: { name?: string; phone?: string; gstin?: string }
+  items: Array<{
+    product_name: string
+    quantity: number
+    unit_price: number
+    total: number
+    unit?: string
     discount?: number
-    grand_total: number
-    payment_method: string
-    payment_methods?: Array<{ method: string; amount: number }>
-    payment_status: string
-    return_amount?: number
-    credit_applied?: number
-    credit_balance?: number
-    company_info?: {
-      name?: string
-      address?: string
-      phone?: string
-      email?: string
-      gstin?: string
-    }
+    discount_percentage?: number
+    mrp?: number
+  }>
+  subtotal: number
+  tax_amount?: number
+  discount?: number
+  grand_total: number
+  payment_method: string
+  payment_methods?: Array<{ method: string; amount: number }>
+  payment_status: string
+  return_amount?: number
+  credit_applied?: number
+  credit_balance?: number
+  company_info?: {
+    name?: string
+    address?: string
+    phone?: string
+    email?: string
+    gstin?: string
   }
-): void {
-  const receiptWindow = window.open('', '_blank', 'width=400,height=600')
-  if (!receiptWindow) {
-    alert('Please allow popups to print receipt')
-    return
-  }
+}
+
+/**
+ * Build receipt HTML (thermal/compact format for POS printers)
+ */
+import type { ReceiptPrinterSettings } from '../types/settings'
+
+export function buildReceiptHTML(
+  invoiceData: ReceiptInvoiceData,
+  paperWidthMm: number = 80,
+  layout?: ReceiptPrinterSettings
+): string {
+  const normalizedWidth = paperWidthMm === 58 ? 58 : 80
 
   const companyName = invoiceData.company_info?.name || 'HisabKitab'
   const companyAddress = invoiceData.company_info?.address || ''
@@ -391,6 +393,37 @@ export function printReceipt(
     { method: invoiceData.payment_method, amount: invoiceData.grand_total }
   ]
 
+  const showCompanyName = layout?.show_company_name ?? true
+  const showCompanyAddress = layout?.show_company_address ?? true
+  const showCompanyPhone = layout?.show_company_phone ?? true
+  const showCompanyGstin = layout?.show_company_gstin ?? true
+
+  const showInvoiceNumber = layout?.show_invoice_number ?? true
+  const showDate = layout?.show_date ?? true
+  const showTime = layout?.show_time ?? true
+  const showPaymentStatus = layout?.show_payment_status ?? true
+
+  const showCustomerName = layout?.show_customer_name ?? true
+  const showCustomerPhone = layout?.show_customer_phone ?? true
+  const showCustomerGstin = layout?.show_customer_gstin ?? true
+
+  const showItems = layout?.show_items ?? true
+  const showItemDiscount = layout?.show_item_discount ?? true
+  const showItemMrp = layout?.show_item_mrp ?? true
+
+  const showSubtotal = layout?.show_subtotal ?? true
+  const showDiscount = layout?.show_discount ?? true
+  const showTax = layout?.show_tax ?? true
+  const showCreditApplied = layout?.show_credit_applied ?? true
+  const showReturnAmount = layout?.show_return_amount ?? true
+  const showCreditBalance = layout?.show_credit_balance ?? true
+
+  const showFooter = layout?.show_footer ?? true
+  const whatsappNumber = layout?.whatsapp_number?.trim()
+  const instagramHandle = layout?.instagram_handle?.trim()
+  const facebookPage = layout?.facebook_page?.trim()
+  const customFooterLine = layout?.custom_footer_line?.trim()
+
   const receiptHTML = `
 <!DOCTYPE html>
 <html>
@@ -400,7 +433,7 @@ export function printReceipt(
   <style>
     @media print {
       @page {
-        size: 80mm auto;
+        size: ${normalizedWidth}mm auto;
         margin: 0;
       }
       body {
@@ -421,7 +454,7 @@ export function printReceipt(
       font-size: 12px;
       line-height: 1.4;
       padding: 10px;
-      width: 80mm;
+      width: ${normalizedWidth}mm;
       margin: 0 auto;
       background: white;
     }
@@ -554,34 +587,43 @@ export function printReceipt(
 <body>
   <div class="receipt">
     <div class="header">
-      <div class="company-name">${companyName}</div>
-      ${companyAddress ? `<div class="company-info">${companyAddress}</div>` : ''}
-      ${companyPhone ? `<div class="company-info">Ph: ${companyPhone}</div>` : ''}
-      ${companyGSTIN ? `<div class="company-info">GSTIN: ${companyGSTIN}</div>` : ''}
+      ${showCompanyName ? `<div class="company-name">${companyName}</div>` : ''}
+      ${showCompanyAddress && companyAddress ? `<div class="company-info">${companyAddress}</div>` : ''}
+      ${showCompanyPhone && companyPhone ? `<div class="company-info">Ph: ${companyPhone}</div>` : ''}
+      ${showCompanyGstin && companyGSTIN ? `<div class="company-info">GSTIN: ${companyGSTIN}</div>` : ''}
     </div>
 
     <div class="section">
       <div class="invoice-info">
-        <span>Invoice #: ${invoiceData.invoice_number}</span>
-        <span>${dateStr}</span>
+        <span>
+          ${showInvoiceNumber ? `Invoice #: ${invoiceData.invoice_number}` : ''}
+        </span>
+        <span>
+          ${showDate ? dateStr : ''}
+        </span>
       </div>
       <div class="invoice-info">
-        <span>${timeStr}</span>
-        <span>${invoiceData.payment_status.toUpperCase()}</span>
+        <span>
+          ${showTime ? timeStr : ''}
+        </span>
+        <span>
+          ${showPaymentStatus ? invoiceData.payment_status.toUpperCase() : ''}
+        </span>
       </div>
     </div>
 
-    ${customerName !== 'Walk-in Customer' ? `
+    ${customerName !== 'Walk-in Customer' && (showCustomerName || showCustomerPhone || showCustomerGstin) ? `
     <div class="section">
       <div class="section-title">Customer</div>
       <div class="customer-info">
-        ${customerName}
-        ${invoiceData.customer?.phone ? `<br>Ph: ${invoiceData.customer.phone}` : ''}
-        ${invoiceData.customer?.gstin ? `<br>GSTIN: ${invoiceData.customer.gstin}` : ''}
+        ${showCustomerName ? customerName : ''}
+        ${showCustomerPhone && invoiceData.customer?.phone ? `<br>Ph: ${invoiceData.customer.phone}` : ''}
+        ${showCustomerGstin && invoiceData.customer?.gstin ? `<br>GSTIN: ${invoiceData.customer.gstin}` : ''}
       </div>
     </div>
     ` : ''}
 
+    ${showItems ? `
     <div class="section">
       <div class="section-title">Items</div>
       <table class="items-table">
@@ -592,7 +634,12 @@ export function printReceipt(
           <tr>
             <td class="item-name">
               ${item.product_name}
-              ${hasDiscount ? `<div class="item-discount">(${item.discount_percentage?.toFixed(1) || 0}% OFF)</div>` : ''}
+              ${showItemDiscount && hasDiscount
+                ? `<div class="item-discount">(${item.discount_percentage?.toFixed(1) || 0}% OFF)</div>`
+                : ''}
+              ${showItemMrp && typeof item.mrp === 'number'
+                ? `<div class="item-discount">MRP: ₹${item.mrp.toFixed(2)}</div>`
+                : ''}
             </td>
             <td class="item-qty">${item.quantity}${item.unit ? item.unit.substring(0, 2) : ''}</td>
             <td class="item-price">₹${itemTotal.toFixed(2)}</td>
@@ -601,25 +648,27 @@ export function printReceipt(
         }).join('')}
       </table>
     </div>
+    ` : ''}
 
     <div class="totals">
+      ${showSubtotal ? `
       <div class="total-row">
         <span>Subtotal:</span>
         <span>₹${invoiceData.subtotal.toFixed(2)}</span>
-      </div>
-      ${invoiceData.discount && invoiceData.discount > 0 ? `
+      </div>` : ''}
+      ${showDiscount && invoiceData.discount && invoiceData.discount > 0 ? `
       <div class="total-row">
         <span>Discount:</span>
         <span>-₹${invoiceData.discount.toFixed(2)}</span>
       </div>
       ` : ''}
-      ${invoiceData.tax_amount && invoiceData.tax_amount > 0 ? `
+      ${showTax && invoiceData.tax_amount && invoiceData.tax_amount > 0 ? `
       <div class="total-row">
         <span>Tax (GST):</span>
         <span>₹${invoiceData.tax_amount.toFixed(2)}</span>
       </div>
       ` : ''}
-      ${invoiceData.credit_applied && invoiceData.credit_applied > 0 ? `
+      ${showCreditApplied && invoiceData.credit_applied && invoiceData.credit_applied > 0 ? `
       <div class="total-row">
         <span>Credit Applied:</span>
         <span>-₹${invoiceData.credit_applied.toFixed(2)}</span>
@@ -631,6 +680,7 @@ export function printReceipt(
       </div>
     </div>
 
+    ${(showReturnAmount || showCreditBalance || paymentMethods.length > 0) ? `
     <div class="section payment-info">
       <div class="section-title">Payment</div>
       ${paymentMethods.map(pm => `
@@ -638,36 +688,62 @@ export function printReceipt(
           ${pm.method}: ₹${pm.amount.toFixed(2)}
         </div>
       `).join('')}
-      ${invoiceData.return_amount && invoiceData.return_amount > 0 ? `
+      ${showReturnAmount && invoiceData.return_amount && invoiceData.return_amount > 0 ? `
         <div class="payment-method" style="color: #059669;">
           Return: ₹${invoiceData.return_amount.toFixed(2)}
         </div>
       ` : ''}
-      ${invoiceData.credit_balance !== undefined ? `
+      ${showCreditBalance && invoiceData.credit_balance !== undefined ? `
         <div class="payment-method" style="margin-top: 4px; font-size: 10px; color: #666;">
           Credit Balance: ₹${invoiceData.credit_balance.toFixed(2)}
         </div>
       ` : ''}
     </div>
+    ` : ''}
 
+    ${showFooter || whatsappNumber || instagramHandle || facebookPage || customFooterLine ? `
     <div class="footer">
-      <div>Thank you for your business!</div>
+      ${showFooter ? `<div>Thank you for your business!</div>` : ''}
+      ${customFooterLine ? `<div style="margin-top: 2px;">${customFooterLine}</div>` : ''}
+      ${whatsappNumber ? `<div style="margin-top: 2px; font-size: 9px;">WhatsApp: ${whatsappNumber}</div>` : ''}
+      ${instagramHandle ? `<div style="margin-top: 2px; font-size: 9px;">Instagram: ${instagramHandle}</div>` : ''}
+      ${facebookPage ? `<div style="margin-top: 2px; font-size: 9px;">Facebook: ${facebookPage}</div>` : ''}
       <div style="margin-top: 4px; font-size: 9px;">This is a computer-generated receipt</div>
     </div>
+    ` : `
+    <div class="footer">
+      <div style="margin-top: 4px; font-size: 9px;">This is a computer-generated receipt</div>
+    </div>`}
   </div>
 
   <button class="print-btn no-print" onclick="window.print()">🖨️ Print Receipt</button>
 
   <script>
-    // Auto-print when window loads (optional - can be removed if manual print preferred)
-    // window.onload = () => {
-    //   setTimeout(() => window.print(), 500)
-    // }
+    // Optional auto-print can be enabled here if desired
   </script>
 </body>
 </html>
   `
 
+  return receiptHTML
+}
+
+/**
+ * Print receipt (browser popup fallback).
+ * Electron-aware flows should prefer buildReceiptHTML + window.electronAPI.print.html.
+ */
+export function printReceipt(
+  invoiceData: ReceiptInvoiceData,
+  paperWidthMm?: number,
+  layout?: ReceiptPrinterSettings
+): void {
+  const receiptWindow = window.open('', '_blank', 'width=400,height=600')
+  if (!receiptWindow) {
+    alert('Please allow popups to print receipt')
+    return
+  }
+
+  const receiptHTML = buildReceiptHTML(invoiceData, paperWidthMm, layout)
   receiptWindow.document.write(receiptHTML)
   receiptWindow.document.close()
   

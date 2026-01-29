@@ -203,7 +203,7 @@ const SalesHistory = () => {
   }
 
   const exportToExcel = () => {
-    const headers = ['Date', 'Invoice', 'Customer', 'Items', 'Amount', 'Payment Status', 'Payment Method', 'Status']
+    const headers = ['Date', 'Invoice', 'Customer', 'Items', 'Amount', 'Payment Status', 'Payment Method', 'Status', 'Internal Remarks']
     const rows = sales.map(sale => [
       new Date(sale.sale_date).toLocaleDateString('en-IN'),
       sale.invoice_number,
@@ -212,7 +212,8 @@ const SalesHistory = () => {
       parseFloat(sale.grand_total.toFixed(2)),
       sale.payment_status,
       sale.payment_method || '',
-      sale.archived ? 'Archived' : 'Active'
+      sale.archived ? 'Archived' : 'Active',
+      sale.internal_remarks || ''
     ])
 
     const filename = `sales_history_${timePeriod}_${new Date().toISOString().split('T')[0]}`
@@ -220,7 +221,7 @@ const SalesHistory = () => {
   }
 
   const exportToPDF = () => {
-    const headers = ['Date', 'Invoice', 'Customer', 'Items', 'Amount', 'Payment Status', 'Payment Method', 'Status']
+    const headers = ['Date', 'Invoice', 'Customer', 'Items', 'Amount', 'Payment Status', 'Payment Method', 'Status', 'Internal Remarks']
     const rows = sales.map(sale => [
       new Date(sale.sale_date).toLocaleDateString('en-IN'),
       sale.invoice_number,
@@ -229,7 +230,8 @@ const SalesHistory = () => {
       `₹${sale.grand_total.toFixed(2)}`,
       sale.payment_status,
       sale.payment_method || '',
-      sale.archived ? 'Archived' : 'Active'
+      sale.archived ? 'Archived' : 'Active',
+      sale.internal_remarks || ''
     ])
 
     const period = timePeriod === 'all' ? 'All Time' : timePeriod
@@ -483,6 +485,7 @@ const SalesHistory = () => {
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Amount</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Payment</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Internal Remarks</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Last Modified</th>
                       <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
                     </tr>
@@ -568,6 +571,16 @@ const SalesHistory = () => {
                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
                               Active
                             </span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 hidden lg:table-cell">
+                          {sale.internal_remarks ? (
+                            <div className="text-xs text-gray-700 bg-yellow-50 px-2 py-1 rounded border border-yellow-200 max-w-xs">
+                              <div className="font-semibold text-yellow-800 mb-1">Internal:</div>
+                              <div className="text-gray-600 whitespace-pre-wrap break-words">{sale.internal_remarks}</div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400 italic">No remarks</span>
                           )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">

@@ -78,7 +78,9 @@ export const purchaseService = {
     for (const item of newPurchase.items) {
       const product = await productService.getById(item.product_id, true)
       if (product) {
-        await productService.updateStock(item.product_id, item.quantity, 'add')
+        // For returns, reduce stock; for purchases, add stock
+        const stockOperation = item.purchase_type === 'return' ? 'subtract' : 'add'
+        await productService.updateStock(item.product_id, item.quantity, stockOperation)
         // Update product prices, min stock level, and barcode if provided
         const updates: any = {}
         if (item.unit_price || item.mrp || item.sale_price) {
@@ -134,7 +136,9 @@ export const purchaseService = {
     for (const item of newPurchase.items) {
       const product = await productService.getById(item.product_id, true)
       if (product) {
-        await productService.updateStock(item.product_id, item.quantity, 'add')
+        // For returns, reduce stock; for purchases, add stock
+        const stockOperation = item.purchase_type === 'return' ? 'subtract' : 'add'
+        await productService.updateStock(item.product_id, item.quantity, stockOperation)
         // Update product prices, min stock level, and barcode if provided
         const updates: any = {}
         if (item.unit_price || item.mrp || item.sale_price) {
@@ -166,7 +170,9 @@ export const purchaseService = {
     // Revert old stock before updating with new stock
     if (existing && existing.items) {
       for (const oldItem of existing.items) {
-        await productService.updateStock(oldItem.product_id, oldItem.quantity, 'subtract')
+        // Revert based on original purchase type
+        const revertOperation = oldItem.purchase_type === 'return' ? 'add' : 'subtract'
+        await productService.updateStock(oldItem.product_id, oldItem.quantity, revertOperation)
       }
     }
 
@@ -181,7 +187,9 @@ export const purchaseService = {
       for (const item of purchase.items) {
         const product = await productService.getById(item.product_id, true)
         if (product) {
-          await productService.updateStock(item.product_id, item.quantity, 'add')
+          // For returns, reduce stock; for purchases, add stock
+          const stockOperation = item.purchase_type === 'return' ? 'subtract' : 'add'
+          await productService.updateStock(item.product_id, item.quantity, stockOperation)
           // Update product prices and min stock level if provided
           const updates: any = {}
           if (item.unit_price || item.mrp || item.sale_price) {

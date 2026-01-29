@@ -1,4 +1,4 @@
-import { SystemSettings, CompanySettings, InvoiceSettings, TaxSettings, GeneralSettings } from '../types/settings'
+import { SystemSettings, CompanySettings, InvoiceSettings, TaxSettings, GeneralSettings, ReceiptPrinterSettings } from '../types/settings'
 import { getById, put, STORES } from '../database/db'
 
 const SETTINGS_KEY = 'main'
@@ -48,6 +48,62 @@ const defaultSettings: SystemSettings = {
     enable_barcode_generation: true,
     default_barcode_format: 'EAN13',
   },
+  barcode_label: {
+    label_size: 'standard', // 1.46" x 1.02"
+    custom_width: 1.46,
+    custom_height: 1.02,
+    print_layout: 'single', // single or double
+    show_product_name: true,
+    show_article_code: true,
+    show_barcode: true,
+    show_purchase_price: false,
+    show_mrp: true,
+    show_sale_price: true,
+    show_size: true,
+    show_color: true,
+    show_purchase_date: false,
+    show_company_name: false,
+    product_name_font_size: 10,
+    barcode_font_size: 8,
+    detail_font_size: 8,
+    barcode_height: 40, // mm
+    barcode_width: 0, // 0 = auto
+    show_barcode_text: true,
+    printer_type: 'GENERIC',
+    printer_device_name: '',
+    silent_print: false,
+  },
+  receipt_printer: {
+    paper_width_mm: 80,
+    printer_type: 'GENERIC',
+    printer_device_name: '',
+    silent_print: false,
+    show_company_name: true,
+    show_company_address: true,
+    show_company_phone: true,
+    show_company_gstin: true,
+    show_invoice_number: true,
+    show_date: true,
+    show_time: true,
+    show_payment_status: true,
+    show_customer_name: true,
+    show_customer_phone: true,
+    show_customer_gstin: true,
+    show_items: true,
+    show_item_discount: true,
+    show_item_mrp: true,
+    show_subtotal: true,
+    show_discount: true,
+    show_tax: true,
+    show_credit_applied: true,
+    show_return_amount: true,
+    show_credit_balance: true,
+    show_footer: true,
+    whatsapp_number: '',
+    instagram_handle: '',
+    facebook_page: '',
+    custom_footer_line: '',
+  },
 }
 
 interface SettingsRecord {
@@ -84,6 +140,10 @@ export const settingsService = {
           invoice: { ...defaultSettings.invoice, ...stored.invoice },
           tax: { ...defaultSettings.tax, ...stored.tax },
           general: { ...defaultSettings.general, ...stored.general },
+          barcode_label: stored.barcode_label ? { ...defaultSettings.barcode_label!, ...stored.barcode_label } : defaultSettings.barcode_label,
+          receipt_printer: stored.receipt_printer
+            ? { ...defaultSettings.receipt_printer!, ...stored.receipt_printer }
+            : defaultSettings.receipt_printer,
           updated_at: stored.updated_at,
           updated_by: stored.updated_by,
         }
@@ -253,6 +313,10 @@ export const settingsService = {
       invoice: newSettings.invoice ? { ...current.invoice, ...newSettings.invoice } : current.invoice,
       tax: newSettings.tax ? { ...current.tax, ...newSettings.tax } : current.tax,
       general: newSettings.general ? { ...current.general, ...newSettings.general } : current.general,
+      barcode_label: newSettings.barcode_label ? { ...(current.barcode_label || defaultSettings.barcode_label!), ...newSettings.barcode_label } : current.barcode_label,
+      receipt_printer: newSettings.receipt_printer
+        ? { ...(current.receipt_printer || defaultSettings.receipt_printer!), ...newSettings.receipt_printer }
+        : current.receipt_printer,
       updated_at: new Date().toISOString(),
       updated_by: userId,
     }
@@ -260,10 +324,17 @@ export const settingsService = {
     return updated
   },
 
+  // Alias for updateAll (for convenience)
+  update: async (newSettings: Partial<SystemSettings>, userId?: number): Promise<SystemSettings> => {
+    return await settingsService.updateAll(newSettings, userId)
+  },
+
   // Reset to defaults
   resetToDefaults: async (userId?: number): Promise<SystemSettings> => {
     const reset: SystemSettings = {
       ...defaultSettings,
+      barcode_label: defaultSettings.barcode_label,
+      receipt_printer: defaultSettings.receipt_printer,
       updated_at: new Date().toISOString(),
       updated_by: userId,
     }
@@ -286,6 +357,10 @@ export const settingsService = {
         invoice: { ...defaultSettings.invoice, ...imported.invoice },
         tax: { ...defaultSettings.tax, ...imported.tax },
         general: { ...defaultSettings.general, ...imported.general },
+        barcode_label: imported.barcode_label ? { ...defaultSettings.barcode_label, ...imported.barcode_label } : defaultSettings.barcode_label,
+        receipt_printer: imported.receipt_printer
+          ? { ...defaultSettings.receipt_printer!, ...imported.receipt_printer as ReceiptPrinterSettings }
+          : defaultSettings.receipt_printer,
         updated_at: new Date().toISOString(),
         updated_by: userId,
       }

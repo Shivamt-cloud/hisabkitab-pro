@@ -1,7 +1,8 @@
 import { useRef } from 'react'
 import { InvoiceData } from '../types/invoice'
 import { Printer, Download, X, Share2, Plus, Receipt } from 'lucide-react'
-import { exportInvoiceToPDF, exportHTMLToPDF, printReceipt } from '../utils/exportUtils'
+import { exportInvoiceToPDF, exportHTMLToPDF, printReceipt, buildReceiptHTML } from '../utils/exportUtils'
+import { settingsService } from '../services/settingsService'
 
 interface InvoiceProps {
   invoiceData: InvoiceData
@@ -92,15 +93,43 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
     handleDownloadPDF()
   }
 
-  const handlePrintReceipt = () => {
+  const handlePrintReceipt = async () => {
+    let receiptSettings: any = undefined
+    // Try Electron printer with receipt settings first
+    if (window.electronAPI?.print?.html) {
+      try {
+        const settings = await settingsService.getAll()
+        receiptSettings = settings.receipt_printer
+        const paperWidthMm = receiptSettings?.paper_width_mm || 80
+        const html = buildReceiptHTML(invoiceData, paperWidthMm, receiptSettings)
+
+        const res = await window.electronAPI.print.html({
+          html,
+          silent: !!receiptSettings?.silent_print,
+          deviceName: receiptSettings?.printer_device_name || undefined,
+        })
+
+        if (!res.ok) {
+          alert(`Receipt print failed: ${res.error || 'Unknown error'}. Falling back to browser print.`)
+          printReceipt(invoiceData, paperWidthMm, receiptSettings)
+        }
+        return
+      } catch (e) {
+        console.error('Electron receipt print failed, falling back to browser print:', e)
+        printReceipt(invoiceData, undefined, receiptSettings)
+        return
+      }
+    }
+
+    // Browser fallback
     printReceipt(invoiceData)
   }
 
   return (
     <div className="invoice-view">
       {/* Action Buttons - Hidden when printing */}
-      {showActions && (
-        <div className="no-print fixed top-4 right-4 z-50 flex gap-2 bg-white shadow-lg rounded-lg p-2 border border-gray-200">
+      {showActions !== false && (
+        <div className="no-print fixed top-4 right-4 z-50 flex flex-wrap gap-2 bg-white shadow-lg rounded-lg p-2 border border-gray-200">
           {onClose && (
             <button
               onClick={onClose}
@@ -128,10 +157,11 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
           </button>
           <button
             onClick={handlePrintReceipt}
-            className="p-2 hover:bg-purple-50 rounded transition-colors"
+            className="px-3 py-2 hover:bg-purple-50 rounded transition-colors flex items-center gap-2 text-sm font-medium text-purple-700 border border-purple-200"
             title="Print Receipt (Thermal)"
           >
             <Receipt className="w-5 h-5 text-purple-600" />
+            <span className="hidden sm:inline">Thermal Receipt</span>
           </button>
           <button
             onClick={handlePrint}

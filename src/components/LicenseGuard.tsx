@@ -20,9 +20,6 @@ export function LicenseGuard({ children }: LicenseGuardProps) {
     const verifyLicense = async () => {
       setIsChecking(true)
       try {
-        // Wait a bit for database to initialize
-        await new Promise(resolve => setTimeout(resolve, 500))
-        
         // Add timeout to prevent hanging
         const timeoutPromise = new Promise<LicenseStatus>((_, reject) => 
           setTimeout(() => reject(new Error('License check timeout')), 3000)
@@ -55,8 +52,8 @@ export function LicenseGuard({ children }: LicenseGuardProps) {
       }
     }
 
-    // Delay initial check slightly to allow database to initialize
-    const timeoutId = setTimeout(verifyLicense, 1000)
+    // Run immediately; do not block initial UI for artificial delays
+    const timeoutId = setTimeout(verifyLicense, 0)
     
     // Re-check license every hour
     const interval = setInterval(verifyLicense, 60 * 60 * 1000)
@@ -66,14 +63,16 @@ export function LicenseGuard({ children }: LicenseGuardProps) {
     }
   }, [location.pathname])
 
+  // Non-blocking: while checking, show app but keep a small banner (fail-open).
   if (isChecking) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Verifying license...</p>
+      <>
+        <div className="fixed top-0 left-0 right-0 z-[70] bg-slate-900 text-white px-4 py-2 text-sm flex items-center gap-2 shadow-lg">
+          <div className="w-4 h-4 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
+          <span>Checking license…</span>
         </div>
-      </div>
+        {children}
+      </>
     )
   }
 

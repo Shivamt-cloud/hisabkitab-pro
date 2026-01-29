@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell } = require('electron')
+const { app, BrowserWindow, Menu, shell, ipcMain } = require('electron')
 const path = require('path')
 const { autoUpdater } = require('electron-updater')
 
@@ -76,6 +76,89 @@ function createWindow() {
     }
   })
 }
+
+// IPC: list printers
+ipcMain.handle('printers:list', async () => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || mainWindow
+    if (!win) return []
+    const printers = await win.webContents.getPrintersAsync()
+    // Return only safe fields
+    return printers.map(p => ({
+      name: p.name,
+      displayName: p.displayName,
+      isDefault: p.isDefault,
+      status: p.status,
+      description: p.description,
+      options: p.options,
+    }))
+  } catch (e) {
+    console.error('[IPC] printers:list failed', e)
+    return []
+  }
+})
+
+// IPC: print HTML to a selected printer
+ipcMain.handle('print:html', async (_event, payload) => {
+  try {
+    const { html, silent, deviceName, pageSize } = payload || {}
+    if (!html || typeof html !== 'string') {
+      return { ok: false, error: 'Missing html' }
+    }
+
+    const printWin = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+      },
+    })
+
+    const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+    await printWin.loadURL(dataUrl)
+
+    // Wait until window load handlers run (e.g., JsBarcode rendering), then a short delay.
+    try {
+      await printWin.webContents.executeJavaScript(
+        `new Promise(resolve => {
+           if (document.readyState === 'complete') return resolve(true);
+           window.addEventListener('load', () => resolve(true), { once: true });
+         })`
+      )
+      await new Promise(r => setTimeout(r, 350))
+    } catch (e) {
+      // Best effort; continue to print even if waiting fails
+      console.warn('[IPC] print:html wait-for-load failed', e)
+    }
+
+    const printOptions = {
+      silent: !!silent,
+      printBackground: true,
+    }
+    if (deviceName && typeof deviceName === 'string') {
+      printOptions.deviceName = deviceName
+    }
+    // Optional: Electron supports pageSize in some environments; keep best-effort
+    if (pageSize) {
+      printOptions.pageSize = pageSize
+    }
+
+    return await new Promise((resolve) => {
+      printWin.webContents.print(printOptions, (success, failureReason) => {
+        printWin.close()
+        if (!success) {
+          resolve({ ok: false, error: failureReason || 'Print failed' })
+        } else {
+          resolve({ ok: true })
+        }
+      })
+    })
+  } catch (e) {
+    console.error('[IPC] print:html failed', e)
+    return { ok: false, error: e?.message || String(e) }
+  }
+})
 
 // Create application menu
 function createMenu() {
