@@ -19,36 +19,17 @@ function calculateGatewayFee(amount: number): number {
   return Math.round((gatewayFee + gstOnGatewayFee) * 100) / 100
 }
 
-// India: fixed full price → 50% off price per duration (yearly 24000→12000, 6m 12000→6000, 3m 6000→3000, 1m 2000→1000)
-const IN_PLAN_PRICES: Array<{ duration_months: DurationMonths; label: string; full: number; discounted: number }> = [
-  { duration_months: 1, label: '1 Month', full: 2000, discounted: 1000 },
-  { duration_months: 3, label: '3 Months', full: 6000, discounted: 3000 },
-  { duration_months: 6, label: '6 Months', full: 12000, discounted: 6000 },
-  { duration_months: 12, label: '1 Year', full: 24000, discounted: 12000 },
-]
-
 /**
  * Get recharge plans for a given tier and country.
- * India: fixed prices (full → 50% off). Other countries: derived from yearly original/discounted.
+ * Plans and payment breakdown are always tier-based: Basic, Standard, and Premium each have their own pricing.
  */
 export function getRechargePlans(tier: SubscriptionTier, countryCode: string = 'IN'): RechargePlan[] {
   const countryPricing = getCountryPricing(countryCode)
   const discountPct = countryPricing.discount ?? 50
 
-  if (countryCode === 'IN') {
-    return IN_PLAN_PRICES.map((p) => ({
-      duration_months: p.duration_months,
-      label: p.label,
-      base_price: p.full,
-      final_price: p.discounted,
-      discount_percentage: discountPct,
-      savings: p.full - p.discounted,
-    }))
-  }
-
+  // Use country base yearly (Basic tier), then apply tier multiplier so pricing is plan-specific
   const discountedYearly = countryPricing.yearlyPrice
   const originalYearly = countryPricing.originalPrice ?? discountedYearly * 2
-  const tierPricing = getTierPricing(tier)
   const tierDiscountedYearly = calculateTierPrice(discountedYearly, tier)
   const tierOriginalYearly = calculateTierPrice(originalYearly, tier)
   const monthlyOriginal = Math.round(tierOriginalYearly / 12)

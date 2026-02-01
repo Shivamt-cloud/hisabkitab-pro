@@ -37,6 +37,8 @@ export const STORES = {
 let dbInstance: IDBDatabase | null = null
 let isUpgrading = false
 let upgradePromise: Promise<void> | null = null
+const CONNECTION_VERIFY_INTERVAL_MS = 30_000
+let lastConnectionVerifyAt = 0
 
 export interface DBConfig {
   name?: string
@@ -461,27 +463,30 @@ export function initDB(config: DBConfig = {}): Promise<IDBDatabase> {
 }
 
 /**
- * Get database instance
+ * Get database instance. Connection verification is throttled (every 30s) to reduce overhead.
  */
 export async function getDB(): Promise<IDBDatabase> {
-  // Wait for any ongoing upgrade to complete
   if (isUpgrading && upgradePromise) {
     await upgradePromise
   }
-  
+
   if (!dbInstance) {
     dbInstance = await initDB()
+    lastConnectionVerifyAt = Date.now()
+    return dbInstance
   }
-  
-  // Verify connection is still open
-  try {
-    dbInstance.transaction([STORES.USERS], 'readonly')
-  } catch (e) {
-    // Connection closed, reopen
-    dbInstance = null
-    dbInstance = await initDB()
+
+  const now = Date.now()
+  if (now - lastConnectionVerifyAt >= CONNECTION_VERIFY_INTERVAL_MS) {
+    lastConnectionVerifyAt = now
+    try {
+      dbInstance.transaction([STORES.USERS], 'readonly')
+    } catch {
+      dbInstance = null
+      dbInstance = await initDB()
+    }
   }
-  
+
   return dbInstance
 }
 

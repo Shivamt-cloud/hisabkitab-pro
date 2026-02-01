@@ -1370,7 +1370,13 @@ const PurchaseHistory = () => {
                                     </button>
                                   )}
                                   <button
-                                    onClick={() => navigate(`/purchases/${purchase.id}`)}
+                                    onClick={() =>
+                                      navigate(
+                                        purchase.type === 'gst'
+                                          ? `/purchases/${purchase.id}/edit-gst`
+                                          : `/purchases/${purchase.id}/edit-simple`
+                                      )
+                                    }
                                     className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                                     title="View Details"
                                   >
@@ -1768,7 +1774,13 @@ const PurchaseHistory = () => {
                               </button>
                             )}
                             <button
-                              onClick={() => navigate(`/purchases/${purchase.id}`)}
+                              onClick={() =>
+                                navigate(
+                                  purchase.type === 'gst'
+                                    ? `/purchases/${purchase.id}/edit-gst`
+                                    : `/purchases/${purchase.id}/edit-simple`
+                                )
+                              }
                               className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                               title="View Details"
                             >

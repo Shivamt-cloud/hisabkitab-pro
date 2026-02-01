@@ -103,7 +103,7 @@ function getGlobalPlatformSection(request: RegistrationRequest): string {
 **Total:** Unlimited primary devices + 1 personal mobile = **Unlimited access** for your entire business!
 `
 
-  const planName = tier === 'basic' ? '📱 Basic Plan - 1 Device Access' : tier === 'standard' ? '📱📱📱 Standard Plan - 3 Devices Access' : '♾️ Premium Plan - Unlimited Devices'
+  const planName = tier === 'basic' ? '📱 Basic Plan - 1 device + 1 mobile' : tier === 'standard' ? '📱📱📱 Standard Plan - 3 devices + 1 mobile' : '♾️ Premium Plan - Unlimited'
 
   return `
 **🌍 GLOBAL PLATFORM - ACCESS FROM ANYWHERE:**
@@ -1020,9 +1020,9 @@ HisabKitab-Pro Team`
     const getPlanDetails = () => {
       const tier = request.subscription_tier || 'basic'
       const tierNames = {
-        basic: 'Basic Plan - 1 Device Access',
-        standard: 'Standard Plan - 3 Devices Access',
-        premium: 'Premium Plan - Unlimited Devices'
+        basic: 'Basic Plan - 1 device + 1 mobile',
+        standard: 'Standard Plan - 3 devices + 1 mobile',
+        premium: 'Premium Plan - Unlimited'
       }
       
       // Estimate pricing (you may want to adjust based on country)

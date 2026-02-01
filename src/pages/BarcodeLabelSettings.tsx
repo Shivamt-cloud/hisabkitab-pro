@@ -121,14 +121,15 @@ const BarcodeLabelSettingsPage = () => {
     const isZebra = normalized.includes('zebra') || normalized.includes('zpl')
 
     if (isTsc) {
-      // Common TE244 roll: 40mm x 25mm (custom). User can adjust for their roll.
+      // TSC TE244: 2 columns side-by-side (2 parallel barcodes per row). Full strip width = 2 labels.
+      // Common: 80mm total width (2×40mm) or 40mm (2×20mm). Height 25mm per label.
       setBarcodeLabel(prev => ({
         ...prev,
         printer_type: 'TSC_TSPL',
         label_size: 'custom',
-        custom_width: 40 / 25.4,  // inches
-        custom_height: 25 / 25.4, // inches
-        print_layout: 'single',
+        custom_width: 80 / 25.4,  // inches — full strip width for 2 side-by-side labels (80mm)
+        custom_height: 25 / 25.4, // inches — height per label (25mm)
+        print_layout: 'double',    // 2 barcodes side by side (1st left, 2nd right)
         // Keep barcode readable on small labels
         barcode_height: Math.min(Math.max(prev.barcode_height, 18), 30),
         detail_font_size: Math.min(prev.detail_font_size, 8),
@@ -136,7 +137,7 @@ const BarcodeLabelSettingsPage = () => {
         barcode_font_size: Math.min(prev.barcode_font_size, 8),
       }))
       setAutoPresetMessage(
-        'Detected TSC/TE244 printer — applied recommended 40×25mm label preset. Adjust label size/layout if your roll differs.'
+        'Detected TSC/TE244 — set to 2 side-by-side barcodes per row (80×25mm strip). Adjust width in Label size if your roll differs (e.g. 40mm for 2×20mm).'
       )
     } else if (isZebra) {
       setBarcodeLabel(prev => ({
@@ -182,9 +183,10 @@ const BarcodeLabelSettingsPage = () => {
       return // Respect user's manual choice
     }
 
-    // Auto-recommend: enable Double on wide labels for non-TSC printers
+    // TSC TE244: 2 columns side-by-side → recommend Double. Other wide labels: Double. Else Single.
     const isWideLabel = labelWidthMm >= 80
-    const canUseDouble = !isTsc && isWideLabel
+    const tscDouble = isTsc && labelWidthMm >= 40 // TSC with 2 parallel columns (e.g. 80mm or 40mm strip)
+    const canUseDouble = tscDouble || (!isTsc && isWideLabel)
     const recommendedLayout = canUseDouble ? 'double' : 'single'
 
     if (barcodeLabel.print_layout !== recommendedLayout) {
@@ -330,19 +332,29 @@ const BarcodeLabelSettingsPage = () => {
     setSaving(true)
     setSaved(false)
     try {
-      await settingsService.update({ barcode_label: barcodeLabel }, user?.id ? parseInt(user.id) : undefined)
+      const userId = user?.id ? (typeof user.id === 'string' && /^\d+$/.test(user.id) ? parseInt(user.id, 10) : undefined) : undefined
+      const savePromise = settingsService.updateBarcodeLabel(barcodeLabel, userId)
+      const timeoutMs = 45000
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Save timed out. Try closing other tabs, refresh the page, then save again.')), timeoutMs)
+      )
+      await Promise.race([savePromise, timeoutPromise])
       setSaved(true)
-      // Show preview after saving
-      if (!showPreview) {
-        setShowPreview(true)
-        setTimeout(() => generateBarcodePreview(), 100)
-      } else {
-        // Regenerate preview with new settings
-        generateBarcodePreview()
-      }
       setTimeout(() => setSaved(false), 3000)
+      try {
+        if (!showPreview) {
+          setShowPreview(true)
+          setTimeout(() => generateBarcodePreview(), 100)
+        } else {
+          generateBarcodePreview()
+        }
+      } catch (previewError) {
+        console.warn('Barcode preview after save:', previewError)
+      }
     } catch (error) {
-      alert('Failed to save barcode label settings')
+      console.error('Barcode label save error:', error)
+      const message = error instanceof Error ? error.message : 'Failed to save barcode label settings'
+      alert(message)
     } finally {
       setSaving(false)
     }
@@ -801,7 +813,8 @@ const BarcodeLabelSettingsPage = () => {
                                 ? 210
                                 : 37.084
                         const isWideLabel = labelWidthMm >= 80
-                        const canUseDouble = !isTsc && isWideLabel
+                        const tscDouble = isTsc && labelWidthMm >= 40
+                        const canUseDouble = tscDouble || (!isTsc && isWideLabel)
                         const recommendedLayout = canUseDouble ? 'double' : 'single'
                         setBarcodeLabel(prev => ({ ...prev, print_layout: recommendedLayout }))
                       }}
@@ -823,8 +836,8 @@ const BarcodeLabelSettingsPage = () => {
                     }
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                   >
-                    <option value="single">Single (1 barcode per label / page)</option>
-                    <option value="double">Double (2 barcodes per page – left & right)</option>
+                    <option value="single">Single (1 barcode per label)</option>
+                    <option value="double">Double (2 barcodes side by side – parallel, left & right)</option>
                   </select>
                   {(() => {
                     const isTsc = (barcodeLabel.printer_type || 'GENERIC') === 'TSC_TSPL'
@@ -838,10 +851,10 @@ const BarcodeLabelSettingsPage = () => {
                             : 37.084
                     const isSmallLabel = labelWidthMm < 60
                     const isWideLabel = labelWidthMm >= 80
-                    const recommendedLayout = (isTsc && isSmallLabel) ? 'single' : (!isTsc && isWideLabel) ? 'double' : 'single'
+                    const tscDoubleRecommended = isTsc && labelWidthMm >= 40
+                    const recommendedLayout = tscDoubleRecommended ? 'double' : (!isTsc && isWideLabel) ? 'double' : 'single'
                     const isManualOverride = !isLayoutAuto
-                    const isIncompatible = barcodeLabel.print_layout === 'double' && isTsc && isSmallLabel
-                    const isNotRecommended = barcodeLabel.print_layout !== recommendedLayout && !isIncompatible
+                    const isNotRecommended = barcodeLabel.print_layout !== recommendedLayout && isManualOverride
 
                     return (
                       <div className="mt-2 space-y-1">
@@ -850,16 +863,10 @@ const BarcodeLabelSettingsPage = () => {
                           <span className="font-semibold text-blue-600">
                             {recommendedLayout === 'single' ? 'Single' : 'Double'}
                           </span>
-                          {recommendedLayout === 'double' && ' (wide label, non-TSC printer)'}
-                          {recommendedLayout === 'single' && isTsc && isSmallLabel && ' (small TE244 roll)'}
+                          {recommendedLayout === 'double' && isTsc && ' (TSC TE244: 2 side-by-side barcodes)'}
+                          {recommendedLayout === 'double' && !isTsc && ' (wide label)'}
                           {recommendedLayout === 'single' && !isTsc && !isWideLabel && ' (narrow label)'}
                         </p>
-                        {isManualOverride && isIncompatible && (
-                          <p className="text-xs text-red-600 font-medium flex items-center gap-1">
-                            <span>⚠️</span>
-                            Warning: Double layout may not work well on small TSC/TE244 labels. Consider using Single layout.
-                          </p>
-                        )}
                         {isManualOverride && isNotRecommended && (
                           <p className="text-xs text-amber-600 flex items-center gap-1">
                             <span>ℹ️</span>
@@ -1083,6 +1090,9 @@ const BarcodeLabelSettingsPage = () => {
               {/* Printer Settings */}
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-gray-900">Printer</h3>
+                <p className="text-sm text-gray-600">
+                  Supported barcode printers include <strong>TSC TE244</strong> (and similar TSC models). Install the printer driver (USB or LAN), then select your printer below — the app will auto-apply a 40×25mm label preset for TSC/TE244.
+                </p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Printer Type</label>
@@ -1098,7 +1108,7 @@ const BarcodeLabelSettingsPage = () => {
                       <option value="ZEBRA_ZPL">Zebra (Driver)</option>
                     </select>
                     <p className="text-xs text-gray-500 mt-2">
-                      For TE244, install the printer driver (USB/LAN) and select it below.
+                      For TSC TE244: choose &quot;TSC / TE244 (Driver)&quot; and select your printer device below.
                     </p>
                   </div>
 

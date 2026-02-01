@@ -34,6 +34,9 @@ export const RolePermissions: Record<UserRole, Permission[]> = {
     { resource: 'reports', actions: ['read', 'export'] },
     { resource: 'users', actions: ['create', 'read', 'update', 'delete'] },
     { resource: 'settings', actions: ['read', 'update'] },
+    { resource: 'barcode_label_settings', actions: ['read', 'update'] },
+    { resource: 'receipt_printer_settings', actions: ['read', 'update'] },
+    { resource: 'business_overview', actions: ['read', 'export'] }, // Admin: employees, expenses, sales, cost, P&L
     { resource: 'expenses', actions: ['create', 'read', 'update', 'delete'] },
   ],
   manager: [
@@ -42,7 +45,8 @@ export const RolePermissions: Record<UserRole, Permission[]> = {
     { resource: 'products', actions: ['create', 'read', 'update'] },
     { resource: 'reports', actions: ['read', 'export'] },
     { resource: 'users', actions: ['create', 'read', 'update', 'delete'] }, // Allow managers to fully manage sales persons, commissions, and assignments
-    { resource: 'settings', actions: ['read'] },
+    { resource: 'settings', actions: ['read'] }, // Full system settings only for admin; use Custom Permissions for Barcode Label / Receipt Printer
+    { resource: 'business_overview', actions: ['read', 'export'] }, // Manager: employees, expenses, sales, cost, P&L
     { resource: 'expenses', actions: ['create', 'read', 'update', 'delete'] }, // Managers can manage expenses
   ],
   staff: [

@@ -73,26 +73,50 @@ const BarcodePrintModal = ({ isOpen, onClose, items, purchaseDate, companyName }
     purchaseDate?: string
   ): string => {
     const barcodeId = `barcode-${index}-${item.barcode || item.product_id || 'item'}`
-    
+    // Always show a product name when setting is on: use name or fallback so label is never blank
+    const productName = (item.product_name && item.product_name.trim()) || `Item ${index + 1}`
+    const showProductName = settings.show_product_name
+
+    const detailRows: string[] = []
+    if (settings.show_article_code && (item.article ?? '').toString().trim()) {
+      detailRows.push(`<div class="detail-row"><span>Article:</span><span>${escapeHtml(String(item.article))}</span></div>`)
+    }
+    if (settings.show_size && (item.size ?? '').toString().trim()) {
+      detailRows.push(`<div class="detail-row"><span>Size:</span><span>${escapeHtml(String(item.size))}</span></div>`)
+    }
+    if (settings.show_color && (item.color ?? '').toString().trim()) {
+      detailRows.push(`<div class="detail-row"><span>Color:</span><span>${escapeHtml(String(item.color))}</span></div>`)
+    }
+    if (settings.show_mrp && item.mrp != null) {
+      detailRows.push(`<div class="detail-row"><span>MRP:</span><span>₹${Number(item.mrp).toFixed(2)}</span></div>`)
+    }
+    if (settings.show_sale_price && item.sale_price != null) {
+      detailRows.push(`<div class="detail-row"><span>Sale Price:</span><span>₹${Number(item.sale_price).toFixed(2)}</span></div>`)
+    }
+    if (settings.show_purchase_price && item.unit_price != null) {
+      detailRows.push(`<div class="detail-row"><span>Price:</span><span>₹${Number(item.unit_price).toFixed(2)}</span></div>`)
+    }
+    if (settings.show_purchase_date && purchaseDate) {
+      detailRows.push(`<div class="detail-row"><span>Date:</span><span>${new Date(purchaseDate).toLocaleDateString('en-IN')}</span></div>`)
+    }
+    // Ensure at least one detail line so label doesn't show only barcode
+    if (detailRows.length === 0) {
+      detailRows.push(`<div class="detail-row"><span>Qty:</span><span>${item.quantity}</span></div>`)
+    }
+
     return `
       <div class="label">
-        ${settings.show_product_name && item.product_name ? `<div class="product-name">${escapeHtml(item.product_name)}</div>` : ''}
+        ${showProductName ? `<div class="product-name">${escapeHtml(productName)}</div>` : ''}
         
         ${settings.show_barcode && item.barcode ? `
           <div class="barcode-container">
             <svg id="${barcodeId}" class="barcode-image"></svg>
-            ${settings.show_barcode_text ? `<div class="barcode-text">${item.barcode}</div>` : ''}
           </div>
+          ${settings.show_barcode_text ? `<div class="barcode-text">${item.barcode}</div>` : ''}
         ` : ''}
         
         <div class="details">
-          ${settings.show_article_code && item.article ? `<div class="detail-row"><span>Article:</span><span>${escapeHtml(item.article)}</span></div>` : ''}
-          ${settings.show_size && item.size ? `<div class="detail-row"><span>Size:</span><span>${escapeHtml(item.size)}</span></div>` : ''}
-          ${settings.show_color && item.color ? `<div class="detail-row"><span>Color:</span><span>${escapeHtml(item.color)}</span></div>` : ''}
-          ${settings.show_mrp && item.mrp ? `<div class="detail-row"><span>MRP:</span><span>₹${item.mrp.toFixed(2)}</span></div>` : ''}
-          ${settings.show_sale_price && item.sale_price ? `<div class="detail-row"><span>Sale Price:</span><span>₹${item.sale_price.toFixed(2)}</span></div>` : ''}
-          ${settings.show_purchase_price && item.unit_price ? `<div class="detail-row"><span>Price:</span><span>₹${item.unit_price.toFixed(2)}</span></div>` : ''}
-          ${settings.show_purchase_date && purchaseDate ? `<div class="detail-row"><span>Date:</span><span>${new Date(purchaseDate).toLocaleDateString('en-IN')}</span></div>` : ''}
+          ${detailRows.join('')}
         </div>
         
         ${settings.show_company_name && companyName ? `<div class="company-name">${escapeHtml(companyName)}</div>` : ''}
@@ -115,12 +139,32 @@ const BarcodePrintModal = ({ isOpen, onClose, items, purchaseDate, companyName }
     const widthMm = width * 25.4
     const heightMm = height * 25.4
 
+    // Small labels (e.g. TSC TE244 40x25mm): scale down so everything fits
+    const isSmallLabel = heightMm < 35
+    const paddingMm = isSmallLabel ? 0.75 : 2
+    const gapMm = isSmallLabel ? 0.15 : 0.5
+    const marginMm = isSmallLabel ? 0.25 : 1
+    const productFontPt = isSmallLabel ? 7 : settings.product_name_font_size
+    const detailFontPt = isSmallLabel ? 6 : settings.detail_font_size
+    const barcodeFontPt = isSmallLabel ? 6 : settings.barcode_font_size
+    const barcodeHeightMm = isSmallLabel
+      ? Math.min(settings.barcode_height, Math.floor(heightMm * 0.22))
+      : settings.barcode_height
+    const detailsMinHeightMm = isSmallLabel ? Math.floor(heightMm * 0.38) : 14
+    const companyNameMinHeightMm = isSmallLabel ? 2.5 : 3
+
     const selectedItemsList = items.filter((_, index) => selectedItems.has(index))
     
     // For double-column layout: calculate exact width per column (equal sizes)
     const isDoubleLayout = settings.print_layout === 'double'
-    const gapMm = 2 // gap between columns
-    const singleLabelWidthMm = isDoubleLayout ? (widthMm - gapMm) / 2 : widthMm
+    const columnGapMm = 2 // gap between columns
+    const singleLabelWidthMm = isDoubleLayout ? (widthMm - columnGapMm) / 2 : widthMm
+    // Full-width barcode: use actual label content width (after container + label padding in single layout)
+    const labelContentWidthMm = isDoubleLayout
+      ? singleLabelWidthMm - 2 * paddingMm
+      : widthMm - 2 * paddingMm - 2 * paddingMm
+    const contentWidthPx = labelContentWidthMm * 3.7795275591
+    const barWidthPx = Math.max(1, Math.round(contentWidthPx / 113))
     
     // Generate labels HTML
     let labelsHTML = ''
@@ -139,14 +183,14 @@ const BarcodePrintModal = ({ isOpen, onClose, items, purchaseDate, companyName }
       // Single label per page
       selectedItemsList.forEach((item, idx) => {
         labelsHTML += `
-          <div class="label-container">
+          <div class="label-container single-layout">
             ${generateSingleLabelHTML(item, settings, idx, companyName, purchaseDate)}
           </div>
         `
       })
     }
 
-    // Generate barcode scripts - need to match the IDs used in labels
+    // Generate barcode scripts - need to match the IDs used in labels (use capped height for small labels)
     const barcodeScripts = selectedItemsList
       .filter(item => item.barcode && settings.show_barcode)
       .map((item, idx) => {
@@ -158,14 +202,24 @@ const BarcodePrintModal = ({ isOpen, onClose, items, purchaseDate, companyName }
             if (typeof JsBarcode !== 'undefined') {
               const element = document.getElementById("${barcodeId}");
               if (element) {
-                // JsBarcode expects height in px; settings.barcode_height is in mm.
-                const heightPx = Math.round(${settings.barcode_height} * 3.7795275591); // 96dpi
+                const heightPx = Math.round(${barcodeHeightMm} * 3.7795275591);
+                const barWidth = ${barWidthPx};
                 JsBarcode(element, "${barcodeValue}", {
                   format: "EAN13",
-                  width: 2,
+                  width: barWidth,
                   height: heightPx,
-                  displayValue: false
+                  displayValue: false,
+                  margin: 0
                 });
+                var svg = element;
+                var container = svg.parentElement;
+                if (container) {
+                  svg.setAttribute("preserveAspectRatio", "none");
+                  svg.setAttribute("width", "100%");
+                  svg.setAttribute("height", "100%");
+                  svg.style.width = "100%";
+                  svg.style.height = "100%";
+                }
               }
             }
           } catch(e) {
@@ -198,72 +252,148 @@ const BarcodePrintModal = ({ isOpen, onClose, items, purchaseDate, companyName }
             .label-container {
               width: ${widthMm}mm;
               height: ${heightMm}mm;
-              padding: 2mm;
+              min-height: ${heightMm}mm;
+              max-height: ${heightMm}mm;
+              padding: ${paddingMm}mm;
               border: 1px solid #ccc;
               display: flex;
               flex-direction: column;
-              justify-content: space-between;
+              justify-content: flex-start;
+              box-sizing: border-box;
+              overflow: hidden;
               page-break-after: always;
+              page-break-inside: avoid;
             }
             .label-row {
               display: flex;
-              gap: ${gapMm}mm;
+              flex-direction: row;
+              gap: ${columnGapMm}mm;
               width: ${widthMm}mm;
               page-break-after: always;
+              page-break-inside: avoid;
             }
             .label {
               width: ${singleLabelWidthMm}mm;
+              min-width: 0;
+              max-width: 100%;
               height: ${heightMm}mm;
-              padding: 2mm;
+              min-height: ${heightMm}mm;
+              max-height: ${heightMm}mm;
+              padding: ${paddingMm}mm;
               border: 1px dashed #ddd;
               display: flex;
               flex-direction: column;
-              justify-content: space-between;
+              justify-content: flex-start;
               box-sizing: border-box;
+              overflow: hidden;
+              page-break-inside: avoid;
+              flex-shrink: 0;
+            }
+            .label-container.single-layout .label {
+              width: 100%;
+              max-width: 100%;
             }
             .product-name {
-              font-size: ${settings.product_name_font_size}pt;
+              font-size: ${productFontPt}pt;
               font-weight: bold;
-              margin-bottom: 1mm;
+              margin-bottom: ${marginMm}mm;
               word-wrap: break-word;
+              overflow-wrap: break-word;
+              overflow: hidden;
+              flex-shrink: 0;
+              line-height: 1.1;
+              max-width: 100%;
             }
             .barcode-container {
-              text-align: center;
-              margin: 2mm 0;
-            }
-            .barcode-image {
+              width: 100%;
               max-width: 100%;
-              height: ${settings.barcode_height}mm;
-              ${settings.barcode_width > 0 ? `width: ${settings.barcode_width}mm;` : ''}
-            }
-            .barcode-text {
-              font-size: ${settings.barcode_font_size}pt;
-              font-family: 'Courier New', monospace;
-              margin-top: 1mm;
-            }
-            .details {
-              font-size: ${settings.detail_font_size}pt;
+              min-width: 0;
+              height: ${barcodeHeightMm}mm;
+              min-height: ${barcodeHeightMm}mm;
+              text-align: center;
+              margin: ${marginMm}mm 0;
+              flex-shrink: 1;
               display: flex;
               flex-direction: column;
-              gap: 0.5mm;
+              align-items: stretch;
+              justify-content: stretch;
+              overflow: hidden;
+            }
+            .barcode-image {
+              width: 100%;
+              max-width: 100%;
+              height: ${barcodeHeightMm}mm;
+              max-height: ${barcodeHeightMm}mm;
+              display: block;
+              min-width: 0;
+            }
+            .barcode-text {
+              font-size: ${barcodeFontPt}pt;
+              font-family: 'Courier New', monospace;
+              margin-top: ${marginMm}mm;
+              flex-shrink: 0;
+              line-height: 1.1;
+              overflow: hidden;
+              max-width: 100%;
+            }
+            .details {
+              font-size: ${detailFontPt}pt;
+              display: flex;
+              flex-direction: column;
+              gap: ${gapMm}mm;
+              overflow: hidden;
+              flex: 1;
+              min-height: ${detailsMinHeightMm}mm;
+              flex-shrink: 1;
+              min-width: 0;
+              max-width: 100%;
             }
             .detail-row {
               display: flex;
               justify-content: space-between;
+              flex-shrink: 0;
+              line-height: 1.1;
+              min-width: 0;
+              overflow: hidden;
+            }
+            .detail-row span {
+              overflow: hidden;
+              word-wrap: break-word;
+              overflow-wrap: break-word;
+              min-width: 0;
+            }
+            .detail-row span:last-child {
+              margin-left: 2mm;
+              text-align: right;
+              max-width: 60%;
             }
             .company-name {
-              font-size: ${settings.detail_font_size - 1}pt;
+              font-size: ${Math.max(5, detailFontPt - 1)}pt;
               text-align: center;
-              margin-top: 1mm;
+              margin-top: ${marginMm}mm;
+              padding-bottom: ${marginMm}mm;
+              min-height: ${companyNameMinHeightMm}mm;
               color: #666;
+              flex-shrink: 0;
+              line-height: 1.1;
+              overflow: hidden;
+              max-width: 100%;
+              display: flex;
+              align-items: flex-end;
+              justify-content: center;
             }
             @media print {
+              body { margin: 0; padding: 0; }
               .label-container {
                 border: none;
+                page-break-after: always;
+                page-break-inside: avoid;
               }
               .label {
                 border: none;
+                page-break-inside: avoid;
               }
+              .label-row { page-break-after: always; }
             }
           </style>
           <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>

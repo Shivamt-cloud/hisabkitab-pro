@@ -45,6 +45,7 @@ const Expenses = () => {
   const expenseTypeLabels: Record<ExpenseType, string> = {
     opening: 'Opening Balance',
     closing: 'Closing Balance',
+    salary: 'Employee Salary',
     sales_person_payment: 'Sales Person Payment',
     purchase: 'Purchase',
     transport: 'Transport',

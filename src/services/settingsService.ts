@@ -1,4 +1,4 @@
-import { SystemSettings, CompanySettings, InvoiceSettings, TaxSettings, GeneralSettings, ReceiptPrinterSettings } from '../types/settings'
+import { SystemSettings, CompanySettings, InvoiceSettings, TaxSettings, GeneralSettings, ReceiptPrinterSettings, BarcodeLabelSettings } from '../types/settings'
 import { getById, put, STORES } from '../database/db'
 
 const SETTINGS_KEY = 'main'
@@ -62,7 +62,7 @@ const defaultSettings: SystemSettings = {
     show_size: true,
     show_color: true,
     show_purchase_date: false,
-    show_company_name: false,
+    show_company_name: true,
     product_name_font_size: 10,
     barcode_font_size: 8,
     detail_font_size: 8,
@@ -111,20 +111,49 @@ interface SettingsRecord {
   settings: SystemSettings
 }
 
+let settingsRecordCache: SettingsRecord | null = null
+const SETTINGS_CACHE_KEY = SETTINGS_KEY
+
+function invalidateSettingsCache(): void {
+  settingsRecordCache = null
+}
+
 async function getSettingsRecord(): Promise<SettingsRecord> {
+  if (settingsRecordCache) {
+    return settingsRecordCache
+  }
   try {
-    const record = await getById<SettingsRecord>(STORES.SETTINGS, SETTINGS_KEY)
-    if (record) {
-      return record
+    const raw = await getById<Record<string, unknown>>(STORES.SETTINGS, SETTINGS_CACHE_KEY)
+    if (raw && typeof raw === 'object') {
+      // Support both nested { key, settings } and flat { key, company, invoice, barcode_label, ... } (e.g. from migration)
+      const normalized: SettingsRecord =
+        raw.settings != null && typeof raw.settings === 'object'
+          ? { key: SETTINGS_KEY, settings: raw.settings as SystemSettings }
+          : {
+              key: SETTINGS_KEY,
+              settings: {
+                company: { ...defaultSettings.company, ...(raw.company as object) },
+                invoice: { ...defaultSettings.invoice, ...(raw.invoice as object) },
+                tax: { ...defaultSettings.tax, ...(raw.tax as object) },
+                general: { ...defaultSettings.general, ...(raw.general as object) },
+                barcode_label: raw.barcode_label
+                  ? { ...defaultSettings.barcode_label!, ...(raw.barcode_label as object) }
+                  : defaultSettings.barcode_label,
+                receipt_printer: raw.receipt_printer
+                  ? { ...defaultSettings.receipt_printer!, ...(raw.receipt_printer as object) }
+                  : defaultSettings.receipt_printer,
+                updated_at: raw.updated_at as string | undefined,
+                updated_by: raw.updated_by as number | undefined,
+              },
+            }
+      settingsRecordCache = normalized
+      return normalized
     }
   } catch (error) {
     console.error('Error getting settings record:', error)
   }
-  // Return default if not found or on error
-  return {
-    key: SETTINGS_KEY,
-    settings: defaultSettings,
-  }
+  const fallback: SettingsRecord = { key: SETTINGS_KEY, settings: defaultSettings }
+  return fallback
 }
 
 export const settingsService = {
@@ -307,6 +336,7 @@ export const settingsService = {
 
   // Update all settings
   updateAll: async (newSettings: Partial<SystemSettings>, userId?: number): Promise<SystemSettings> => {
+    invalidateSettingsCache()
     const current = await settingsService.getAll()
     const updated: SystemSettings = {
       company: newSettings.company ? { ...current.company, ...newSettings.company } : current.company,
@@ -321,6 +351,7 @@ export const settingsService = {
       updated_by: userId,
     }
     await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings: updated })
+    settingsRecordCache = { key: SETTINGS_KEY, settings: updated }
     return updated
   },
 
@@ -329,8 +360,24 @@ export const settingsService = {
     return await settingsService.updateAll(newSettings, userId)
   },
 
+  // Update only barcode_label; use full current settings so we never overwrite with partial (fixes flat vs nested record)
+  updateBarcodeLabel: async (barcodeLabel: BarcodeLabelSettings, userId?: number): Promise<SystemSettings> => {
+    invalidateSettingsCache()
+    const current = await settingsService.getAll()
+    const updated: SystemSettings = {
+      ...current,
+      barcode_label: { ...(defaultSettings.barcode_label!), ...current.barcode_label, ...barcodeLabel },
+      updated_at: new Date().toISOString(),
+      updated_by: userId,
+    }
+    await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings: updated })
+    settingsRecordCache = { key: SETTINGS_KEY, settings: updated }
+    return updated
+  },
+
   // Reset to defaults
   resetToDefaults: async (userId?: number): Promise<SystemSettings> => {
+    invalidateSettingsCache()
     const reset: SystemSettings = {
       ...defaultSettings,
       barcode_label: defaultSettings.barcode_label,
@@ -339,6 +386,7 @@ export const settingsService = {
       updated_by: userId,
     }
     await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings: reset })
+    settingsRecordCache = { key: SETTINGS_KEY, settings: reset }
     return reset
   },
 
@@ -351,6 +399,7 @@ export const settingsService = {
   // Import settings
   import: async (jsonString: string, userId?: number): Promise<SystemSettings> => {
     try {
+      invalidateSettingsCache()
       const imported = JSON.parse(jsonString)
       const merged = {
         company: { ...defaultSettings.company, ...imported.company },
@@ -365,6 +414,7 @@ export const settingsService = {
         updated_by: userId,
       }
       await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings: merged })
+      settingsRecordCache = { key: SETTINGS_KEY, settings: merged }
       return merged
     } catch (error) {
       throw new Error('Invalid settings format')

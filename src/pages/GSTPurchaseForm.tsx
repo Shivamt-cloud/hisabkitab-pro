@@ -122,7 +122,7 @@ const GSTPurchaseForm = () => {
         setSelectedSupplier(gstPurchase.supplier_id)
         setInvoiceNumber(gstPurchase.invoice_number)
         setPurchaseDate(gstPurchase.purchase_date)
-        setItems(gstPurchase.items.map(item => ({
+        const mappedItems = gstPurchase.items.map(item => ({
           ...item,
           purchase_type: item.purchase_type || 'purchase',
           mrp: item.mrp || 0,
@@ -133,7 +133,8 @@ const GSTPurchaseForm = () => {
           sold_quantity: item.sold_quantity || 0, // Ensure sold_quantity is initialized
           color: item.color || '',
           size: item.size || '',
-        })))
+        }))
+        setItems(mappedItems)
         setPaymentStatus(gstPurchase.payment_status)
         setPaymentMethod(gstPurchase.payment_method || '')
         setNotes(gstPurchase.notes || '')
@@ -143,6 +144,17 @@ const GSTPurchaseForm = () => {
       console.error('Error loading purchase data:', error)
     }
   }
+
+  // When editing, enrich items with product_name once products are loaded (for barcode labels)
+  useEffect(() => {
+    if (!isEditing || items.length === 0 || products.length === 0) return
+    const missing = items.some(item => item.product_id > 0 && !(item.product_name && item.product_name.trim()))
+    if (!missing) return
+    setItems(prev => prev.map(item => ({
+      ...item,
+      product_name: (item.product_name && item.product_name.trim()) || (item.product_id > 0 ? (products.find(p => p.id === item.product_id)?.name ?? item.product_name) : item.product_name),
+    })))
+  }, [isEditing, products, items.length])
 
   const addItem = () => {
     // Only add if last item is empty or all items have products

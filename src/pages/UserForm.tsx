@@ -75,7 +75,7 @@ const UserForm = () => {
             const userPerms = await permissionService.getUserPermissions(id)
             if (userPerms) {
               setUseCustomPermissions(userPerms.useCustomPermissions)
-              setCustomPermissions(userPerms.customPermissions)
+              setCustomPermissions(userPerms.customPermissions.filter((p) => p.module !== 'settings'))
             }
           }
         } catch (error) {
@@ -183,6 +183,18 @@ const UserForm = () => {
         }
 
         await userService.update(id, updateData)
+
+        // Persist custom permissions so Barcode/Receipt settings etc. are visible when enabled
+        if (useCustomPermissions) {
+          await permissionService.saveUserPermissions({
+            userId: id,
+            useCustomPermissions: true,
+            customPermissions: customPermissions.filter((p) => p.module !== 'settings'),
+          })
+        } else {
+          await permissionService.deleteUserPermissions(id)
+        }
+
         alert('User updated successfully!')
       } else {
         // Create new user (use trimmed password)
@@ -213,7 +225,21 @@ const UserForm = () => {
           return
         }
         
-        await userService.create(userData)
+        const createdUser = await userService.create(userData)
+
+        // Persist custom permissions for new user (e.g. Barcode/Receipt settings)
+        if (createdUser?.id) {
+          if (useCustomPermissions) {
+            await permissionService.saveUserPermissions({
+              userId: createdUser.id,
+              useCustomPermissions: true,
+              customPermissions: customPermissions.filter((p) => p.module !== 'settings'),
+            })
+          } else {
+            await permissionService.deleteUserPermissions(createdUser.id)
+          }
+        }
+
         alert('User created successfully!')
       }
       navigate('/users')
@@ -494,7 +520,9 @@ const UserForm = () => {
 
                 {useCustomPermissions && (
                   <div className="bg-gray-50 rounded-lg p-4 space-y-4 max-h-96 overflow-y-auto">
-                    {(Object.keys(PERMISSION_MODULES) as PermissionModule[]).map((module) => {
+                    {(Object.keys(PERMISSION_MODULES) as PermissionModule[])
+                    .filter((module) => module !== 'settings') // System Settings only for admin, not in custom permissions
+                    .map((module) => {
                       const moduleInfo = PERMISSION_MODULES[module]
                       const modulePerm = customPermissions.find(p => p.module === module)
                       const selectedActions = modulePerm?.actions || []

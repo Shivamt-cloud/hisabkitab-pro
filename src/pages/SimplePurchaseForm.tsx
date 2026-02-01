@@ -153,6 +153,17 @@ const SimplePurchaseForm = () => {
     }
   }
 
+  // When editing, enrich items with product_name once products are loaded (for barcode labels)
+  useEffect(() => {
+    if (!isEditing || items.length === 0 || products.length === 0) return
+    const missing = items.some(item => item.product_id > 0 && !(item.product_name && item.product_name.trim()))
+    if (!missing) return
+    setItems(prev => prev.map(item => ({
+      ...item,
+      product_name: (item.product_name && item.product_name.trim()) || (item.product_id > 0 ? (products.find(p => p.id === item.product_id)?.name ?? item.product_name) : item.product_name),
+    })))
+  }, [isEditing, products, items.length])
+
   const addItem = () => {
     // Only add if last item is empty or all items have products
     if (items.length === 0 || items[items.length - 1].product_id > 0) {

@@ -8,6 +8,9 @@ export type PermissionModule =
   | 'stock'
   | 'users'
   | 'settings'
+  | 'barcode_label_settings'
+  | 'receipt_printer_settings'
+  | 'business_overview'
   | 'sales_persons'
   | 'categories'
   | 'expenses'
@@ -82,6 +85,21 @@ export const PERMISSION_MODULES: Record<PermissionModule, {
     label: 'System Settings',
     description: 'Configure system settings and preferences',
     actions: ['read', 'update'],
+  },
+  barcode_label_settings: {
+    label: 'Barcode Label Settings',
+    description: 'Configure barcode label size, printer, and fields (Custom Permissions only)',
+    actions: ['read', 'update'],
+  },
+  receipt_printer_settings: {
+    label: 'Receipt Printer Settings',
+    description: 'Configure receipt printer and thermal receipt layout (Custom Permissions only)',
+    actions: ['read', 'update'],
+  },
+  business_overview: {
+    label: 'Business Overview',
+    description: 'View employees, salary/expenses, sales, purchases, cost and profit & loss (Manager or Custom Permissions)',
+    actions: ['read', 'export'],
   },
   sales_persons: {
     label: 'Sales Persons',

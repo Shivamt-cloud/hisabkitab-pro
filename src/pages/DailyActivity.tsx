@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { saleService } from '../services/saleService'
 import { purchaseService, supplierService } from '../services/purchaseService'
@@ -13,7 +14,8 @@ import {
   DollarSign,
   FileText,
   Clock,
-  Filter
+  Filter,
+  Home
 } from 'lucide-react'
 import { Sale } from '../types/sale'
 import { Purchase } from '../types/purchase'
@@ -30,6 +32,7 @@ interface DailySummary {
 }
 
 const DailyActivity = () => {
+  const navigate = useNavigate()
   const { getCurrentCompanyId, user } = useAuth()
   const companyId = getCurrentCompanyId()
   
@@ -238,9 +241,18 @@ const DailyActivity = () => {
       <div className="min-h-screen bg-gray-50 p-6">
         <div className="max-w-7xl mx-auto">
           {/* Header */}
-          <div className="mb-6">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">Daily Activity Report</h1>
-            <p className="text-gray-600">View sales and purchases for today or recent days</p>
+          <div className="mb-6 flex items-center gap-4">
+            <button
+              onClick={() => navigate('/')}
+              className="p-2 hover:bg-gray-200 rounded-lg transition-colors flex items-center justify-center"
+              title="Back to Dashboard"
+            >
+              <Home className="w-6 h-6 text-gray-600" />
+            </button>
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900 mb-2">Daily Activity Report</h1>
+              <p className="text-gray-600">View sales and purchases for today or recent days</p>
+            </div>
           </div>
 
           {/* Date Filter */}

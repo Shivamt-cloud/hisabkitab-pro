@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { UserMenu } from '../components/UserMenu'
 import { saleService } from '../services/saleService'
@@ -38,12 +38,15 @@ import {
   ChevronDown,
   ChevronUp,
   Barcode,
+  BarChart3,
   ReceiptText,
   ExternalLink,
   Wrench,
   Heart,
   Calculator,
   Wifi,
+  Gift,
+  BookOpen,
 } from 'lucide-react'
 import SubscriptionRechargeModal from '../components/SubscriptionRechargeModal'
 
@@ -890,6 +893,14 @@ const Dashboard = () => {
                   </span>
                 )}
               </button>
+              <Link
+                to="/user-manual"
+                className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-700 font-medium"
+                title="User Manual (Help)"
+              >
+                <BookOpen className="w-5 h-5 text-gray-600" />
+                <span className="hidden sm:inline">User Manual</span>
+              </Link>
               <div className="flex flex-col items-end gap-2">
                 <UserMenu />
                 {subscriptionInfo && (
@@ -940,7 +951,13 @@ const Dashboard = () => {
                           <div>
                             <p className="text-gray-500 text-xs mb-1">Plan</p>
                             <p className="text-gray-900 font-semibold">
-                              {subscriptionInfo.tier ? (subscriptionInfo.tier === 'premium' ? '♾️ Premium Plan - Unlimited' : subscriptionInfo.tier === 'standard' ? '📱📱📱 Standard Plan' : '📱 Basic Plan') : 'N/A'}
+                              {subscriptionInfo.tier
+                                ? (() => {
+                                    const tierInfo = getTierPricing(subscriptionInfo.tier as 'basic' | 'standard' | 'premium')
+                                    const icon = subscriptionInfo.tier === 'premium' ? '♾️' : subscriptionInfo.tier === 'standard' ? '📱📱📱' : '📱'
+                                    return `${icon} ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}`
+                                  })()
+                                : 'N/A'}
                             </p>
                           </div>
                           {subscriptionInfo.status && (
@@ -1414,48 +1431,83 @@ const Dashboard = () => {
                 </button>
               </div>
             )}
-            {hasPermission('reports:read') && (
+            {(hasPermission('reports:read') ||
+              hasPermission('barcode_label_settings:read') ||
+              hasPermission('barcode_label_settings:update') ||
+              hasPermission('receipt_printer_settings:read') ||
+              hasPermission('receipt_printer_settings:update') ||
+              hasPermission('business_overview:read')) && (
               <div className="mt-6 pt-6 border-t border-gray-200/50 space-y-4">
-                <button 
-                  onClick={() => navigate('/analytics')}
-                  className="group w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
-                >
-                  <TrendingUp className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                  <span>Analytics Dashboard</span>
-                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
-                </button>
-                <button 
-                  onClick={() => navigate('/audit-logs')}
-                  className="group w-full bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
-                >
-                  <FileText className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                  <span>Audit Logs</span>
-                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
-                </button>
-                <button 
-                  onClick={() => navigate('/settings/barcode-label')}
-                  className="group w-full bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
-                >
-                  <Barcode className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                  <span>Barcode Label Settings</span>
-                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
-                </button>
-                <button 
-                  onClick={() => navigate('/settings/receipt-printer')}
-                  className="group w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
-                >
-                  <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                  <span>Receipt Printer Settings</span>
-                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
-                </button>
+                {hasPermission('reports:read') && (
+                  <>
+                    <button 
+                      onClick={() => navigate('/analytics')}
+                      className="group w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                    >
+                      <TrendingUp className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                      <span>Analytics Dashboard</span>
+                      <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                    </button>
+                    <button 
+                      onClick={() => navigate('/audit-logs')}
+                      className="group w-full bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                    >
+                      <FileText className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                      <span>Audit Logs</span>
+                      <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                    </button>
+                  </>
+                )}
+                {(hasPermission('barcode_label_settings:read') || hasPermission('barcode_label_settings:update')) && (
+                  <button 
+                    onClick={() => navigate('/settings/barcode-label')}
+                    className="group w-full bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                  >
+                    <Barcode className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                    <span>Barcode Label Settings</span>
+                    <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                  </button>
+                )}
+                {(hasPermission('receipt_printer_settings:read') || hasPermission('receipt_printer_settings:update')) && (
+                  <button 
+                    onClick={() => navigate('/settings/receipt-printer')}
+                    className="group w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                  >
+                    <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                    <span>Receipt Printer Settings</span>
+                    <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                  </button>
+                )}
+                {hasPermission('business_overview:read') && (
+                  <button
+                    onClick={() => navigate('/business-overview')}
+                    className="group w-full relative overflow-hidden bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white font-bold py-5 px-6 rounded-2xl hover:shadow-2xl hover:shadow-amber-500/30 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-3 border-2 border-amber-400/30"
+                  >
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_50%,_rgba(255,255,255,0.15)_0%,_transparent_50%)]" />
+                    <BarChart3 className="w-6 h-6 relative z-10 group-hover:rotate-6 transition-transform" />
+                    <span className="relative z-10">Business Overview</span>
+                    <ArrowUpRight className="w-5 h-5 relative z-10 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                    <p className="absolute bottom-2 left-6 right-6 text-center text-xs font-medium text-white/90 opacity-0 group-hover:opacity-100 transition-opacity">
+                      Employees, salary, expenses, sales, cost & P&L at a glance
+                    </p>
+                  </button>
+                )}
               </div>
             )}
           </section>
 
         </div>
 
-        {/* Footer - Apps rotate every 5s so all tools get advertised (add new tools in FOOTER_APPS above) */}
-        <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-4 transition-opacity duration-500">
+        {/* Free tools for users – mention what we provide */}
+        <div className="mt-8 bg-gradient-to-r from-slate-50 to-blue-50 rounded-2xl border border-slate-200/60 p-5 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <Gift className="w-5 h-5 text-indigo-600" />
+            <h3 className="text-lg font-bold text-gray-900">Free tools for you</h3>
+          </div>
+          <p className="text-sm text-gray-600 mb-4">
+            We offer free tools for our users—formatters, calculators, speed tests, and more. Click any card below to open a tool in a new tab.
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 transition-opacity duration-500">
           {Array.from({ length: FOOTER_APPS_VISIBLE }, (_, i) => {
             const app = FOOTER_APPS[(footerRotationIndex + i) % FOOTER_APPS.length]
             return { app, i }
@@ -1478,6 +1530,7 @@ const Dashboard = () => {
               <ExternalLink className="w-3.5 h-3.5 opacity-80 flex-shrink-0" />
             </a>
           ))}
+          </div>
         </div>
 
         {/* Additional Info Bar - Welcome Section (footer) */}

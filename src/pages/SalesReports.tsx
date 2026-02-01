@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { reportService } from '../services/reportService'
@@ -10,10 +10,17 @@ import {
   SalesBySalesPersonReport,
   ReportTimePeriod,
 } from '../types/reports'
-import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText, Eye, ShoppingCart } from 'lucide-react'
+import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText, Eye, ShoppingCart, Search, X } from 'lucide-react'
 import { saleService } from '../services/saleService'
 import { Sale } from '../types/sale'
 import { exportToExcel as exportExcel, exportDataToPDF } from '../utils/exportUtils'
+import { productService, Product } from '../services/productService'
+import { categoryService } from '../services/productService'
+import { customerService } from '../services/customerService'
+import { salesPersonService } from '../services/salespersonService'
+import type { Category } from '../services/productService'
+import type { Customer } from '../types/customer'
+import type { SalesPerson } from '../types/salesperson'
 
 type ReportView = 'product' | 'category' | 'customer' | 'salesperson' | 'sales'
 
@@ -26,11 +33,47 @@ const SalesReports = () => {
   const [customEndDate, setCustomEndDate] = useState('')
   const [loading, setLoading] = useState(false)
 
+  // Search / filter state
+  const [filterProductId, setFilterProductId] = useState<number | ''>('')
+  const [filterCategoryName, setFilterCategoryName] = useState<string>('')
+  const [filterCustomerId, setFilterCustomerId] = useState<number | ''>('')
+  const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false)
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('')
+  const [filterSalesPersonId, setFilterSalesPersonId] = useState<number | ''>('')
+
+  // Options for filter dropdowns
+  const [products, setProducts] = useState<Product[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([])
+
   const [productReports, setProductReports] = useState<SalesByProductReport[]>([])
   const [categoryReports, setCategoryReports] = useState<SalesByCategoryReport[]>([])
   const [customerReports, setCustomerReports] = useState<SalesByCustomerReport[]>([])
   const [salesPersonReports, setSalesPersonReports] = useState<SalesBySalesPersonReport[]>([])
   const [sales, setSales] = useState<Sale[]>([])
+
+  // Load filter options (products, categories, customers, sales persons)
+  useEffect(() => {
+    const companyId = getCurrentCompanyId()
+    const load = async () => {
+      try {
+        const [prods, cats, custs, persons] = await Promise.all([
+          productService.getAll(true, companyId),
+          categoryService.getAll(),
+          customerService.getAll(true, companyId),
+          salesPersonService.getAll(true),
+        ])
+        setProducts(prods)
+        setCategories(cats)
+        setCustomers(custs)
+        setSalesPersons(persons)
+      } catch (e) {
+        console.error('Error loading filter options:', e)
+      }
+    }
+    load()
+  }, [getCurrentCompanyId])
 
   useEffect(() => {
     loadReports()
@@ -114,6 +157,96 @@ const SalesReports = () => {
     }
   }
 
+  // Selected customer for display
+  const selectedCustomer = useMemo(
+    () => (filterCustomerId ? customers.find(c => c.id === filterCustomerId) : null),
+    [customers, filterCustomerId]
+  )
+
+  // Filtered customer list for dropdown (search by name or mobile)
+  const customersFilteredForDropdown = useMemo(() => {
+    if (!customerSearchQuery.trim()) return customers
+    const q = customerSearchQuery.trim().toLowerCase()
+    return customers.filter(
+      c =>
+        (c.name && c.name.toLowerCase().includes(q)) ||
+        (c.phone && c.phone.includes(customerSearchQuery.trim()))
+    )
+  }, [customers, customerSearchQuery])
+
+  // Apply filters to report data and sales list
+  const {
+    filteredProductReports,
+    filteredCategoryReports,
+    filteredCustomerReports,
+    filteredSalesPersonReports,
+    filteredSales,
+  } = useMemo(() => {
+    let fProduct = productReports
+    let fCategory = categoryReports
+    let fCustomer = customerReports
+    let fSalesPerson = salesPersonReports
+    let fSales = sales
+
+    if (filterProductId !== '') {
+      fProduct = productReports.filter(r => r.product_id === filterProductId)
+      const product = products.find(p => p.id === filterProductId)
+      const catName = product?.category_name || 'Uncategorized'
+      if (filterCategoryName === '' || catName === filterCategoryName) {
+        fCategory = categoryReports.filter(r => r.category_name === catName)
+      }
+      fSales = fSales.filter(s =>
+        s.items.some(item => item.product_id === filterProductId)
+      )
+    }
+
+    if (filterCategoryName !== '') {
+      fCategory = fCategory.filter(r => r.category_name === filterCategoryName)
+      if (filterProductId === '') {
+        const productIdsInCategory = new Set(
+          products
+            .filter(p => (p.category_name || 'Uncategorized') === filterCategoryName)
+            .map(p => p.id)
+        )
+        fProduct = productReports.filter(r => productIdsInCategory.has(r.product_id))
+        fSales = fSales.filter(s =>
+          s.items.some(item => productIdsInCategory.has(item.product_id))
+        )
+      }
+    }
+
+    if (filterCustomerId !== '') {
+      fCustomer = customerReports.filter(r => r.customer_id === filterCustomerId)
+      fSales = fSales.filter(s => s.customer_id === filterCustomerId)
+    }
+
+    if (filterSalesPersonId !== '') {
+      fSalesPerson = salesPersonReports.filter(
+        r => r.sales_person_id === filterSalesPersonId
+      )
+      fSales = fSales.filter(s => s.sales_person_id === filterSalesPersonId)
+    }
+
+    return {
+      filteredProductReports: fProduct,
+      filteredCategoryReports: fCategory,
+      filteredCustomerReports: fCustomer,
+      filteredSalesPersonReports: fSalesPerson,
+      filteredSales: fSales,
+    }
+  }, [
+    productReports,
+    categoryReports,
+    customerReports,
+    salesPersonReports,
+    sales,
+    products,
+    filterProductId,
+    filterCategoryName,
+    filterCustomerId,
+    filterSalesPersonId,
+  ])
+
   const exportToExcel = () => {
     const headers: string[] = []
     const rows: any[][] = []
@@ -122,7 +255,7 @@ const SalesReports = () => {
     switch (activeView) {
       case 'product':
         headers.push('Product', 'Quantity', 'Revenue', 'Cost', 'Profit', 'Margin %', 'Avg Price', 'Sales Count')
-        productReports.forEach(r => {
+        filteredProductReports.forEach(r => {
           rows.push([
             r.product_name,
             r.total_quantity,
@@ -138,7 +271,7 @@ const SalesReports = () => {
         break
       case 'category':
         headers.push('Category', 'Quantity', 'Revenue', 'Cost', 'Profit', 'Margin %', 'Products', 'Sales Count')
-        categoryReports.forEach(r => {
+        filteredCategoryReports.forEach(r => {
           rows.push([
             r.category_name,
             r.total_quantity,
@@ -154,7 +287,7 @@ const SalesReports = () => {
         break
       case 'customer':
         headers.push('Customer', 'Quantity', 'Revenue', 'Cost', 'Profit', 'Margin %', 'Orders', 'Avg Order Value')
-        customerReports.forEach(r => {
+        filteredCustomerReports.forEach(r => {
           rows.push([
             r.customer_name,
             r.total_quantity,
@@ -170,7 +303,7 @@ const SalesReports = () => {
         break
       case 'salesperson':
         headers.push('Sales Person', 'Quantity', 'Revenue', 'Cost', 'Profit', 'Margin %', 'Commission', 'Sales Count')
-        salesPersonReports.forEach(r => {
+        filteredSalesPersonReports.forEach(r => {
           rows.push([
             r.sales_person_name,
             r.total_quantity,
@@ -186,7 +319,7 @@ const SalesReports = () => {
         break
       case 'sales':
         headers.push('Date', 'Invoice', 'Customer', 'Items', 'Amount', 'Payment Status', 'Payment Method')
-        sales.forEach(s => {
+        filteredSales.forEach(s => {
           rows.push([
             new Date(s.sale_date).toLocaleDateString('en-IN'),
             s.invoice_number,
@@ -213,7 +346,7 @@ const SalesReports = () => {
     switch (activeView) {
       case 'product':
         headers.push('Product', 'Quantity', 'Revenue', 'Profit', 'Margin %')
-        productReports.forEach(r => {
+        filteredProductReports.forEach(r => {
           rows.push([
             r.product_name,
             r.total_quantity,
@@ -226,7 +359,7 @@ const SalesReports = () => {
         break
       case 'category':
         headers.push('Category', 'Quantity', 'Revenue', 'Profit', 'Margin %')
-        categoryReports.forEach(r => {
+        filteredCategoryReports.forEach(r => {
           rows.push([
             r.category_name,
             r.total_quantity,
@@ -239,7 +372,7 @@ const SalesReports = () => {
         break
       case 'customer':
         headers.push('Customer', 'Quantity', 'Revenue', 'Profit', 'Orders')
-        customerReports.forEach(r => {
+        filteredCustomerReports.forEach(r => {
           rows.push([
             r.customer_name,
             r.total_quantity,
@@ -252,7 +385,7 @@ const SalesReports = () => {
         break
       case 'salesperson':
         headers.push('Sales Person', 'Quantity', 'Revenue', 'Profit', 'Commission')
-        salesPersonReports.forEach(r => {
+        filteredSalesPersonReports.forEach(r => {
           rows.push([
             r.sales_person_name,
             r.total_quantity,
@@ -265,7 +398,7 @@ const SalesReports = () => {
         break
       case 'sales':
         headers.push('Date', 'Invoice', 'Customer', 'Items', 'Amount', 'Payment Status')
-        sales.forEach(s => {
+        filteredSales.forEach(s => {
           rows.push([
             new Date(s.sale_date).toLocaleDateString('en-IN'),
             s.invoice_number,
@@ -302,7 +435,7 @@ const SalesReports = () => {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
-          {productReports.map((report) => (
+          {filteredProductReports.map((report) => (
             <tr key={report.product_id} className="hover:bg-gray-50 transition-colors">
               <td className="px-6 py-4 whitespace-nowrap">
                 <div className="text-sm font-medium text-gray-900">{report.product_name}</div>
@@ -345,7 +478,7 @@ const SalesReports = () => {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
-          {categoryReports.map((report) => (
+          {filteredCategoryReports.map((report) => (
             <tr key={report.category_name} className="hover:bg-gray-50 transition-colors">
               <td className="px-6 py-4 whitespace-nowrap">
                 <div className="text-sm font-medium text-gray-900">{report.category_name}</div>
@@ -388,7 +521,7 @@ const SalesReports = () => {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
-          {customerReports.map((report) => (
+          {filteredCustomerReports.map((report) => (
             <tr key={report.customer_name} className="hover:bg-gray-50 transition-colors">
               <td className="px-6 py-4 whitespace-nowrap">
                 <div className="text-sm font-medium text-gray-900">{report.customer_name}</div>
@@ -431,7 +564,7 @@ const SalesReports = () => {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
-          {salesPersonReports.map((report) => (
+          {filteredSalesPersonReports.map((report) => (
             <tr key={report.sales_person_name} className="hover:bg-gray-50 transition-colors">
               <td className="px-6 py-4 whitespace-nowrap">
                 <div className="text-sm font-medium text-gray-900">{report.sales_person_name}</div>
@@ -460,11 +593,11 @@ const SalesReports = () => {
 
   const getCurrentReport = () => {
     switch (activeView) {
-      case 'product': return productReports
-      case 'category': return categoryReports
-      case 'customer': return customerReports
-      case 'salesperson': return salesPersonReports
-      case 'sales': return sales
+      case 'product': return filteredProductReports
+      case 'category': return filteredCategoryReports
+      case 'customer': return filteredCustomerReports
+      case 'salesperson': return filteredSalesPersonReports
+      case 'sales': return filteredSales
     }
   }
 
@@ -484,7 +617,7 @@ const SalesReports = () => {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
-          {sales.map((sale) => (
+          {filteredSales.map((sale) => (
             <tr key={sale.id} className="hover:bg-gray-50 transition-colors">
               <td className="px-6 py-4 whitespace-nowrap">
                 <div className="text-sm text-gray-900">
@@ -663,6 +796,142 @@ const SalesReports = () => {
             )}
           </div>
 
+          {/* Search / Filter by Product, Category, Customer, Sales Person */}
+          <div className={`bg-white/70 backdrop-blur-xl rounded-xl shadow-xl p-6 mb-8 border border-white/50 ${customerDropdownOpen ? 'relative z-[100]' : ''}`}>
+            <div className="flex flex-wrap items-center gap-4 mb-3">
+              <Search className="w-5 h-5 text-gray-500" />
+              <span className="text-sm font-semibold text-gray-700">Filter report:</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-500">By Product</label>
+                <select
+                  value={filterProductId === '' ? '' : filterProductId}
+                  onChange={(e) => setFilterProductId(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none min-w-[180px]"
+                >
+                  <option value="">All products</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-500">By Category</label>
+                <select
+                  value={filterCategoryName}
+                  onChange={(e) => setFilterCategoryName(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none min-w-[160px]"
+                >
+                  <option value="">All categories</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1 relative">
+                <label className="text-xs font-medium text-gray-500">By Customer (name or mobile)</label>
+                <div className="relative min-w-[220px]">
+                  <input
+                    type="text"
+                    value={customerDropdownOpen ? customerSearchQuery : (selectedCustomer ? `${selectedCustomer.name}${selectedCustomer.phone ? ` • ${selectedCustomer.phone}` : ''}` : '')}
+                    onChange={(e) => {
+                      setCustomerSearchQuery(e.target.value)
+                      if (!customerDropdownOpen) setCustomerDropdownOpen(true)
+                    }}
+                    onFocus={() => setCustomerDropdownOpen(true)}
+                    onBlur={() => setTimeout(() => setCustomerDropdownOpen(false), 180)}
+                    placeholder={filterCustomerId ? '' : 'All customers – search by name or mobile...'}
+                    className="px-3 py-2 pr-8 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none w-full"
+                  />
+                  {filterCustomerId && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        setFilterCustomerId('')
+                        setCustomerSearchQuery('')
+                      }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 rounded"
+                      title="Clear customer filter"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                  {customerDropdownOpen && (
+                    <div className="absolute z-[110] mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl max-h-56 overflow-auto">
+                      <ul className="py-1">
+                        <li>
+                          <button
+                            type="button"
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 text-gray-600"
+                            onClick={() => {
+                              setFilterCustomerId('')
+                              setCustomerSearchQuery('')
+                              setCustomerDropdownOpen(false)
+                            }}
+                          >
+                            All customers
+                          </button>
+                        </li>
+                        {customersFilteredForDropdown.length === 0 ? (
+                          <li className="px-3 py-2 text-sm text-gray-500">No customers match</li>
+                        ) : (
+                          customersFilteredForDropdown.map((c) => (
+                            <li key={c.id}>
+                              <button
+                                type="button"
+                                className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${filterCustomerId === c.id ? 'bg-blue-50 text-blue-700 font-medium' : ''}`}
+                                onClick={() => {
+                                  setFilterCustomerId(c.id)
+                                  setCustomerSearchQuery('')
+                                  setCustomerDropdownOpen(false)
+                                }}
+                              >
+                                {c.name}
+                                {c.phone ? <span className="text-gray-500 ml-1">• {c.phone}</span> : ''}
+                              </button>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-500">By Sales Person</label>
+                <select
+                  value={filterSalesPersonId === '' ? '' : filterSalesPersonId}
+                  onChange={(e) => setFilterSalesPersonId(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none min-w-[160px]"
+                >
+                  <option value="">All sales persons</option>
+                  {salesPersons.map((sp) => (
+                    <option key={sp.id} value={sp.id}>{sp.name}</option>
+                  ))}
+                </select>
+              </div>
+              {(filterProductId !== '' || filterCategoryName !== '' || filterCustomerId !== '' || filterSalesPersonId !== '') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterProductId('')
+                    setFilterCategoryName('')
+                    setFilterCustomerId('')
+                    setCustomerSearchQuery('')
+                    setFilterSalesPersonId('')
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors mt-6"
+                  title="Clear all filters"
+                >
+                  <X className="w-4 h-4" />
+                  Clear filters
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Tabs */}
           <div className="bg-white/70 backdrop-blur-xl rounded-xl shadow-xl p-6 mb-8 border border-white/50">
             <div className="flex gap-4 border-b border-gray-200 mb-6">
@@ -673,7 +942,7 @@ const SalesReports = () => {
                 }`}
               >
                 <Package className="w-4 h-4" />
-                By Product ({productReports.length})
+                By Product ({filteredProductReports.length})
                 {activeView === 'product' && (
                   <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
                 )}
@@ -685,7 +954,7 @@ const SalesReports = () => {
                 }`}
               >
                 <TrendingUp className="w-4 h-4" />
-                By Category ({categoryReports.length})
+                By Category ({filteredCategoryReports.length})
                 {activeView === 'category' && (
                   <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
                 )}
@@ -697,7 +966,7 @@ const SalesReports = () => {
                 }`}
               >
                 <Users className="w-4 h-4" />
-                By Customer ({customerReports.length})
+                By Customer ({filteredCustomerReports.length})
                 {activeView === 'customer' && (
                   <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
                 )}
@@ -709,7 +978,7 @@ const SalesReports = () => {
                 }`}
               >
                 <UserCheck className="w-4 h-4" />
-                By Sales Person ({salesPersonReports.length})
+                By Sales Person ({filteredSalesPersonReports.length})
                 {activeView === 'salesperson' && (
                   <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
                 )}
@@ -721,7 +990,7 @@ const SalesReports = () => {
                 }`}
               >
                 <ShoppingCart className="w-4 h-4" />
-                All Sales ({sales.length})
+                All Sales ({filteredSales.length})
                 {activeView === 'sales' && (
                   <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
                 )}

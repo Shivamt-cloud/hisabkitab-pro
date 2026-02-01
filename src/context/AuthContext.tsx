@@ -182,14 +182,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     setIsLoading(false)
                     return { 
                       success: false, 
-                      error: `Device limit reached. Your plan allows ${deviceLimit} device(s), but ${currentDeviceCount} device(s) are already registered.${deviceList ? ` Registered devices: ${deviceList}${companyDevices.length > 3 ? '...' : ''}` : ''} Please remove an old device from System Settings or upgrade your plan.` 
+                      error: `Device limit reached. Your plan allows ${tierPricing.deviceDisplayLabel}, but ${currentDeviceCount} device(s) are already registered.${deviceList ? ` Registered devices: ${deviceList}${companyDevices.length > 3 ? '...' : ''}` : ''} Please remove an old device from System Settings or upgrade your plan.` 
                     }
                   } catch (error) {
                     console.error('Error fetching device list:', error)
                     setIsLoading(false)
                     return { 
                       success: false, 
-                      error: `Device limit reached. Your plan allows ${deviceLimit} device(s), but ${currentDeviceCount} device(s) are already registered. Please remove a device from System Settings or upgrade your plan.` 
+                      error: `Device limit reached. Your plan allows ${tierPricing.deviceDisplayLabel}, but ${currentDeviceCount} device(s) are already registered. Please remove a device from System Settings or upgrade your plan.` 
                     }
                   }
                 }
@@ -321,7 +321,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (modulePerm) {
         return modulePerm.actions.includes(action)
       }
-      // If module not found in custom permissions, deny access
+      // If module not in custom list, fall back to role (so admin/manager keep role grants like business_overview)
+      const rolePerms = RolePermissions[user.role]
+      const resourcePerm = rolePerms.find(p => p.resource === module)
+      if (resourcePerm) return resourcePerm.actions.includes(action)
       return false
     }
     

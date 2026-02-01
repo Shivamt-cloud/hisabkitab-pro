@@ -1,6 +1,7 @@
 export type ExpenseType = 
   | 'opening' // Opening cash balance (morning)
   | 'closing' // Closing cash balance (evening)
+  | 'salary' // Employee salary
   | 'sales_person_payment' // Money given to sales person
   | 'purchase' // Purchase expense
   | 'transport' // Transport/vehicle expense

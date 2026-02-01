@@ -38,6 +38,7 @@ import BackupRestore from './pages/BackupRestore'
 import AuditLogs from './pages/AuditLogs'
 import BarcodeLabelSettings from './pages/BarcodeLabelSettings'
 import ReceiptPrinterSettings from './pages/ReceiptPrinterSettings'
+import BusinessOverview from './pages/BusinessOverview'
 import SubscriptionPayments from './pages/SubscriptionPayments'
 import AnalyticsDashboard from './pages/AnalyticsDashboard'
 import Notifications from './pages/Notifications'
@@ -47,6 +48,7 @@ import Expenses from './pages/Expenses'
 import ExpenseForm from './pages/ExpenseForm'
 import DailyReport from './pages/DailyReport'
 import UpcomingChecks from './pages/UpcomingChecks'
+import UserManual from './pages/UserManual'
 import { DatabaseProvider } from './components/DatabaseProvider'
 import { LicenseGuard } from './components/LicenseGuard'
 import { LicenseExpiredBanner } from './components/LicenseExpiredBanner'
@@ -67,6 +69,7 @@ function App() {
             <UpgradeBanner />
             <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/user-manual" element={<UserManual />} />
           <Route
             path="/"
             element={
@@ -462,7 +465,7 @@ function App() {
           <Route
             path="/settings/barcode-label"
             element={
-              <ProtectedRoute requiredPermission="settings:update">
+              <ProtectedRoute requiredPermission="barcode_label_settings:read">
                 <BarcodeLabelSettings />
               </ProtectedRoute>
             }
@@ -470,8 +473,16 @@ function App() {
           <Route
             path="/settings/receipt-printer"
             element={
-              <ProtectedRoute requiredPermission="settings:update">
+              <ProtectedRoute requiredPermission="receipt_printer_settings:read">
                 <ReceiptPrinterSettings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/business-overview"
+            element={
+              <ProtectedRoute requiredPermission="business_overview:read">
+                <BusinessOverview />
               </ProtectedRoute>
             }
           />

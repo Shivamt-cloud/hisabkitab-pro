@@ -44,7 +44,7 @@ export function UpgradeBanner() {
                 🎉 Upgrade Your Plan: Get More Device Access!
               </p>
               <p className="text-xs opacity-90 mt-0.5">
-                Standard Plan: 3 Devices | Premium Plan: Unlimited Devices
+                Standard Plan: 3 devices + 1 mobile | Premium Plan: Unlimited
               </p>
             </div>
           </div>

@@ -1,22 +1,60 @@
 // Device ID Utility - Generates and manages unique device identifiers
 
 /**
- * Generate a unique device ID using browser fingerprint + UUID
- * This ID is used to track devices for access restriction
+ * Simple string hash (djb2) for fingerprint - deterministic, no crypto needed
+ */
+function hashString(str: string): string {
+  let h = 5381
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) + h) + str.charCodeAt(i)
+    h = h & 0x7fffffff
+  }
+  return Math.abs(h).toString(36)
+}
+
+/**
+ * Build a stable browser/device fingerprint so the same physical device
+ * gets the same ID even after clearing localStorage (e.g. same Mac Safari = 1 device)
+ */
+function getBrowserFingerprint(): string {
+  const parts = [
+    navigator.userAgent,
+    navigator.language,
+    (navigator as any).languages ? (navigator as any).languages.join(',') : '',
+    navigator.platform,
+    String(window.screen.width),
+    String(window.screen.height),
+    String(window.screen.colorDepth),
+    String(window.devicePixelRatio ?? 1),
+    Intl.DateTimeFormat().resolvedOptions().timeZone,
+    String((navigator as any).hardwareConcurrency ?? 0),
+    String((navigator as any).deviceMemory ?? 0),
+    String(window.screen.availWidth),
+    String(window.screen.availHeight),
+  ]
+  return hashString(parts.join('|'))
+}
+
+/**
+ * Generate a unique device ID. Uses localStorage when present; when empty,
+ * uses a fingerprint-based ID so the same browser/device gets the same ID
+ * across sessions (avoids counting one physical device as multiple devices).
  */
 export function generateDeviceId(): string {
-  // Try to get existing device ID from localStorage
+  // Prefer existing device ID from localStorage (persists across sessions)
   const existingId = localStorage.getItem('device_id')
   if (existingId) {
     return existingId
   }
 
-  // Generate a new device ID
-  const deviceId = `device_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`
-  
-  // Store in localStorage for persistence
+  // No stored ID: use fingerprint so same device = same ID (e.g. same Mac Safari
+  // after clearing storage still counts as 1 device, not a new one)
+  const fingerprint = getBrowserFingerprint()
+  const deviceId = `device_fp_${fingerprint}`
+
+  // Store for next time so we don't recompute
   localStorage.setItem('device_id', deviceId)
-  
+
   // Also store device info
   const deviceInfo = {
     id: deviceId,
@@ -28,7 +66,7 @@ export function generateDeviceId(): string {
     created: new Date().toISOString(),
   }
   localStorage.setItem('device_info', JSON.stringify(deviceInfo))
-  
+
   return deviceId
 }
 

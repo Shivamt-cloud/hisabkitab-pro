@@ -77,15 +77,6 @@ const BackupRestore = () => {
   const [syncResult, setSyncResult] = useState<{ success: boolean; message: string } | null>(null)
   const [syncStartTime, setSyncStartTime] = useState<number | null>(null)
   const [syncElapsedTime, setSyncElapsedTime] = useState<number>(0)
-  const [recordCounts, setRecordCounts] = useState<{
-    products: { local: number; cloud: number }
-    customers: { local: number; cloud: number }
-    suppliers: { local: number; cloud: number }
-    purchases: { local: number; cloud: number }
-    sales: { local: number; cloud: number }
-    expenses: { local: number; cloud: number }
-  } | null>(null)
-  const [loadingCounts, setLoadingCounts] = useState(false)
 
   const loadStats = async () => {
     try {
@@ -310,11 +301,6 @@ const BackupRestore = () => {
       
       // Reload statistics to reflect any deletions
       await loadStats()
-      
-      // Refresh record counts to show IndexedDB vs Supabase comparison
-      if (recordCounts !== null) {
-        await checkRecordCounts()
-      }
     } catch (error: any) {
       setSyncResult({
         success: false,
@@ -346,67 +332,6 @@ const BackupRestore = () => {
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60
     return `${mins}m ${secs}s`
-  }
-
-  const checkRecordCounts = async () => {
-    setLoadingCounts(true)
-    try {
-      const companyId = getCurrentCompanyId()
-      
-      // Get IndexedDB counts
-      const [localProducts, localCustomers, localSuppliers, localPurchases, localSales, localExpenses] = await Promise.all([
-        getAll<Product>(STORES.PRODUCTS),
-        getAll<Customer>(STORES.CUSTOMERS),
-        getAll<Supplier>(STORES.SUPPLIERS),
-        getAll<Purchase>(STORES.PURCHASES),
-        getAll<Sale>(STORES.SALES),
-        getAll<Expense>(STORES.EXPENSES),
-      ])
-      
-      // Filter by company
-      const companyLocalProducts = companyId !== undefined && companyId !== null
-        ? localProducts.filter(p => p.company_id === companyId)
-        : localProducts
-      const companyLocalCustomers = companyId !== undefined && companyId !== null
-        ? localCustomers.filter(c => c.company_id === companyId)
-        : localCustomers
-      const companyLocalSuppliers = companyId !== undefined && companyId !== null
-        ? localSuppliers.filter(s => s.company_id === companyId)
-        : localSuppliers
-      const companyLocalPurchases = companyId !== undefined && companyId !== null
-        ? localPurchases.filter(p => p.company_id === companyId)
-        : localPurchases
-      const companyLocalSales = companyId !== undefined && companyId !== null
-        ? localSales.filter(s => s.company_id === companyId)
-        : localSales
-      const companyLocalExpenses = companyId !== undefined && companyId !== null
-        ? localExpenses.filter(e => e.company_id === companyId)
-        : localExpenses
-      
-      // Get Supabase counts
-      const [cloudProducts, cloudCustomers, cloudSuppliers, cloudPurchases, cloudSales, cloudExpenses] = await Promise.all([
-        cloudProductService.getAll(true, companyId).catch(() => []),
-        cloudCustomerService.getAll(true, companyId).catch(() => []),
-        cloudSupplierService.getAll(companyId).catch(() => []),
-        cloudPurchaseService.getAll(undefined, companyId).catch(() => []),
-        cloudSaleService.getAll(true, companyId).catch(() => []),
-        cloudExpenseService.getAll(companyId).catch(() => []),
-      ])
-      
-      setRecordCounts({
-        products: { local: companyLocalProducts.length, cloud: cloudProducts.length },
-        customers: { local: companyLocalCustomers.length, cloud: cloudCustomers.length },
-        suppliers: { local: companyLocalSuppliers.length, cloud: cloudSuppliers.length },
-        purchases: { local: companyLocalPurchases.length, cloud: cloudPurchases.length },
-        sales: { local: companyLocalSales.length, cloud: cloudSales.length },
-        expenses: { local: companyLocalExpenses.length, cloud: cloudExpenses.length },
-      })
-    } catch (error) {
-      console.error('Error checking record counts:', error)
-      alert('Failed to check record counts. Check console for details.')
-    } finally {
-      setLoadingCounts(false)
-    }
   }
 
   const formatLastSyncTime = (timeStr: string | null): string => {
@@ -779,7 +704,7 @@ const BackupRestore = () => {
                 <div className="text-center">
                   <h3 className="text-xl font-bold mb-2">Export Summary</h3>
                   <p className="text-sm opacity-90">Download data summary as CSV</p>
-                  <p className="text-xs opacity-75 mt-2">Quick overview of record counts</p>
+                  <p className="text-xs opacity-75 mt-2">Summary of products, sales, purchases, etc.</p>
                 </div>
               </button>
             </div>
@@ -1020,81 +945,6 @@ const BackupRestore = () => {
                 </div>
               )}
             </div>
-          </div>
-
-          {/* IndexedDB vs Supabase Counts Comparison */}
-          <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                <Database className="w-5 h-5 text-blue-600" />
-                IndexedDB vs Supabase Record Counts
-              </h2>
-              <button
-                onClick={checkRecordCounts}
-                disabled={loadingCounts}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                <RefreshCw className={`w-4 h-4 ${loadingCounts ? 'animate-spin' : ''}`} />
-                {loadingCounts ? 'Checking...' : 'Check Counts'}
-              </button>
-            </div>
-            
-            {recordCounts && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
-                {Object.entries(recordCounts).map(([key, counts]) => {
-                  const diff = counts.local - counts.cloud
-                  const isLocalGreater = diff > 0
-                  const isEqual = diff === 0
-                  const label = key.charAt(0).toUpperCase() + key.slice(1)
-                  
-                  return (
-                    <div key={key} className={`p-4 rounded-lg border-2 ${
-                      isEqual 
-                        ? 'bg-green-50 border-green-200'
-                        : isLocalGreater
-                        ? 'bg-orange-50 border-orange-200'
-                        : 'bg-blue-50 border-blue-200'
-                    }`}>
-                      <p className="text-sm font-medium text-gray-700 mb-2">{label}</p>
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-600">IndexedDB:</span>
-                          <span className="font-bold text-gray-900">{counts.local}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-600">Supabase:</span>
-                          <span className="font-bold text-gray-900">{counts.cloud}</span>
-                        </div>
-                        <div className={`flex justify-between text-sm font-semibold pt-1 border-t ${
-                          isEqual
-                            ? 'border-green-300 text-green-700'
-                            : isLocalGreater
-                            ? 'border-orange-300 text-orange-700'
-                            : 'border-blue-300 text-blue-700'
-                        }`}>
-                          <span>Difference:</span>
-                          <span>{diff > 0 ? `+${diff}` : diff}</span>
-                        </div>
-                        {isLocalGreater && (
-                          <p className="text-xs text-orange-600 mt-1">
-                            ⚠️ {diff} record(s) in IndexedDB not in Supabase (may need sync or deletion)
-                          </p>
-                        )}
-                        {!isLocalGreater && diff < 0 && (
-                          <p className="text-xs text-blue-600 mt-1">
-                            ℹ️ {Math.abs(diff)} record(s) in Supabase not in IndexedDB
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-            
-            {!recordCounts && (
-              <p className="text-gray-500 text-center py-8">Click "Check Counts" to compare IndexedDB and Supabase record counts</p>
-            )}
           </div>
 
           {/* Data Sync Status Section */}

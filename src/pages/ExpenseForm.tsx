@@ -140,6 +140,7 @@ const ExpenseForm = () => {
   const expenseTypes: { value: ExpenseType; label: string }[] = [
     { value: 'opening', label: 'Opening Balance (Morning)' },
     { value: 'closing', label: 'Closing Balance (Evening)' },
+    { value: 'salary', label: 'Employee Salary' },
     { value: 'sales_person_payment', label: 'Sales Person Payment' },
     { value: 'purchase', label: 'Purchase' },
     { value: 'transport', label: 'Transport' },

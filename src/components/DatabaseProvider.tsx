@@ -2,7 +2,7 @@
 // Initializes IndexedDB and runs migration on app startup
 
 import { ReactNode, useEffect, useState } from 'react'
-import { initDB } from '../database/db'
+import { initDB, getDB } from '../database/db'
 import { migrateFromLocalStorage, isMigrationComplete } from '../database/migration'
 import { autoBackupService } from '../services/autoBackupService'
 import { userService } from '../services/userService'
@@ -36,8 +36,9 @@ export function DatabaseProvider({ children }: DatabaseProviderProps) {
           setIsInitialized(true)
         }, 5000) // 5 second timeout
 
-        // Initialize database
+        // Initialize database and warm connection (so first reads/writes are fast)
         await initDB()
+        await getDB()
 
         // Check if migration is needed
         if (!isMigrationComplete()) {

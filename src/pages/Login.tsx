@@ -1,7 +1,7 @@
 import { useState, FormEvent, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { useNavigate } from 'react-router-dom'
-import { LogIn, Mail, Lock, AlertCircle, User, Package, ShoppingCart, TrendingUp, Users, BarChart3, Shield, CheckCircle, MessageCircle, Globe, X, Building2, Phone, MapPin, FileText, UserPlus } from 'lucide-react'
+import { useNavigate, Link } from 'react-router-dom'
+import { LogIn, Mail, Lock, AlertCircle, User, Package, ShoppingCart, TrendingUp, Users, BarChart3, Shield, CheckCircle, MessageCircle, Globe, X, Building2, Phone, MapPin, FileText, UserPlus, BookOpen } from 'lucide-react'
 import { COUNTRY_OPTIONS, detectCountry, formatPrice, getCountryPricing, getSavedCountry, isSupportedCountryCode, saveCountry, type CountryPricing } from '../utils/pricing'
 import { calculateTierPrice, getTierPricing } from '../utils/tierPricing'
 import { getMaxUsersForPlan } from '../utils/planUserLimits'
@@ -416,11 +416,12 @@ Please review and process this registration request.
                     {/* Plan Details with Device Limits and Pricing */}
                                     <div className="mt-4 space-y-3">
                       {(['basic', 'standard', 'premium'] as SubscriptionTier[]).map((tier) => {
+                        const tierInfo = getTierPricing(tier)
                         const tierPrice = calculateTierPrice(pricing.yearlyPrice, tier)
                         const tierOriginalPrice = calculateTierPrice(pricing.originalPrice || pricing.yearlyPrice * 2, tier)
-                        const tierName = tier === 'basic' ? '📱 Basic Plan - 1 Device Access' : 
-                                        tier === 'standard' ? '📱📱📱 Standard Plan - 3 Devices Access' : 
-                                        '♾️ Premium Plan - Unlimited Devices'
+                        const tierName = tier === 'basic' ? `📱 ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}` :
+                                        tier === 'standard' ? `📱📱📱 ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}` :
+                                        `♾️ ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}`
                         const tierDescription = tier === 'premium' ? 'Supports: Mobile, Laptop, Desktop, Tablet (All Types)' : 
                                                'Supports: Mobile, Laptop, Desktop, Tablet'
                         const isMostPopular = tier === 'standard'
@@ -699,7 +700,7 @@ Please review and process this registration request.
                     ⚡ First Year Discount ⚡
                   </div>
                   <div className="text-xs font-semibold mt-1.5 text-white/90 bg-white/10 px-2 py-1 rounded-lg inline-block">
-                    📱 1 Device (Basic) - Mobile, Laptop, Desktop, Tablet
+                    📱 1 device + 1 mobile (Basic) - Mobile, Laptop, Desktop, Tablet
                   </div>
                 </div>
               </div>
@@ -863,6 +864,18 @@ Please review and process this registration request.
                     Complete the registration form above with your business details, and our team will reach out to you within <span className="font-bold text-blue-600">24 hours</span> via email to activate your account and get you started! 🚀
                   </p>
                 </div>
+              </div>
+
+              {/* User Manual - Help for users */}
+              <div className="text-center mt-6 w-full">
+                <Link
+                  to="/user-manual"
+                  className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-gray-700 font-semibold rounded-xl border border-slate-200 transition-colors"
+                >
+                  <BookOpen className="w-5 h-5" />
+                  User Manual (Help)
+                </Link>
+                <p className="text-xs text-gray-500 mt-1">Step-by-step guide for daily use</p>
               </div>
 
               {/* Contact & Footer - Enhanced */}
@@ -1379,7 +1392,7 @@ Please review and process this registration request.
                             Max Users: {maxUsers === 'unlimited' ? 'Unlimited' : maxUsers}
                           </div>
                           <div className={`text-xs ${isMostPopular ? 'text-emerald-800/90' : 'text-gray-600'}`}>
-                            Devices: {tierInfo.deviceLimit === 'unlimited' ? 'Unlimited' : tierInfo.deviceLimit}
+                            Devices: {tierInfo.deviceDisplayLabel}
                           </div>
                           {isMostPopular && (
                             <div className="mt-3 pt-3 border-t border-emerald-300/70">
@@ -1513,7 +1526,7 @@ Please review and process this registration request.
                         <div className="space-y-2 text-sm text-gray-600 mb-4">
                           <div className="flex items-center gap-2">
                             <CheckCircle className="w-4 h-4 text-green-600" />
-                            <span>Devices: {tierInfo.deviceLimit === 'unlimited' ? 'Unlimited' : tierInfo.deviceLimit}</span>
+                            <span>Devices: {tierInfo.deviceDisplayLabel}</span>
                           </div>
                           <div className="flex items-center gap-2">
                             <CheckCircle className="w-4 h-4 text-green-600" />

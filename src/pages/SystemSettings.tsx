@@ -460,12 +460,13 @@ const SystemSettings = () => {
         alert('User created successfully! Email with login credentials has been opened.')
       }
       
-      // Save custom permissions if enabled
+      // Save custom permissions if enabled (exclude 'settings' - admin only)
       if (useCustomPermissions && userId) {
+        const permissionsToSave = customPermissions.filter((p) => p.module !== 'settings')
         await permissionService.saveUserPermissions({
           userId,
           useCustomPermissions: true,
-          customPermissions,
+          customPermissions: permissionsToSave,
         })
       } else if (userId) {
         // Delete custom permissions if not using them (will fall back to role-based)
@@ -514,7 +515,7 @@ const SystemSettings = () => {
       const userPerms = await permissionService.getUserPermissions(userData.id)
       if (userPerms) {
         setUseCustomPermissions(userPerms.useCustomPermissions)
-        setCustomPermissions(userPerms.customPermissions)
+        setCustomPermissions(userPerms.customPermissions.filter((p) => p.module !== 'settings'))
       } else {
         setUseCustomPermissions(false)
         setCustomPermissions([])
@@ -1588,7 +1589,9 @@ const SystemSettings = () => {
 
                         {useCustomPermissions && (
                           <div className="bg-gray-50 rounded-lg p-4 space-y-4 max-h-96 overflow-y-auto">
-                            {(Object.keys(PERMISSION_MODULES) as PermissionModule[]).map((module) => {
+                            {(Object.keys(PERMISSION_MODULES) as PermissionModule[])
+                              .filter((module) => module !== 'settings') // System Settings only for admin, not in custom permissions
+                              .map((module) => {
                               const moduleInfo = PERMISSION_MODULES[module]
                               const modulePerm = customPermissions.find(p => p.module === module)
                               const selectedActions = modulePerm?.actions || []
