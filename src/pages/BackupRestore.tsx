@@ -77,6 +77,7 @@ const BackupRestore = () => {
   const [syncResult, setSyncResult] = useState<{ success: boolean; message: string } | null>(null)
   const [syncStartTime, setSyncStartTime] = useState<number | null>(null)
   const [syncElapsedTime, setSyncElapsedTime] = useState<number>(0)
+  const [exportStatus, setExportStatus] = useState<string>('')
 
   const loadStats = async () => {
     try {
@@ -359,28 +360,61 @@ const BackupRestore = () => {
   }
 
   const handleExportJSON = async () => {
+    setExportStatus('Exporting JSON...')
     try {
-      const companyId = getCurrentCompanyId()
-      // Pass companyId to export only company's data
+      const companyId = getCurrentCompanyId?.()
       await backupService.exportToFile(user?.id, companyId)
-    } catch (error) {
-      alert('Failed to export backup file')
+    } catch (error: any) {
+      console.error('Export JSON failed:', error)
+      alert('Failed to export backup file: ' + (error?.message || String(error)))
+    } finally {
+      setExportStatus('')
     }
   }
 
   const handleExportCSV = async () => {
+    setExportStatus('Exporting CSV...')
     try {
-      const companyId = getCurrentCompanyId()
-      // Pass companyId to export only company's data
+      const companyId = getCurrentCompanyId?.()
       await backupService.exportSummaryToCSV(companyId)
-    } catch (error) {
-      alert('Failed to export summary')
+    } catch (error: any) {
+      console.error('Export CSV failed:', error)
+      alert('Failed to export summary: ' + (error?.message || String(error)))
+    } finally {
+      setExportStatus('')
+    }
+  }
+
+  const handleExportAllExcel = async () => {
+    setExportStatus('Exporting Excel...')
+    try {
+      const companyId = getCurrentCompanyId?.()
+      await backupService.exportAllToExcel(user?.id, companyId)
+    } catch (error: any) {
+      console.error('Export Excel failed:', error)
+      alert('Failed to export Excel backup: ' + (error?.message || String(error)))
+    } finally {
+      setExportStatus('')
+    }
+  }
+
+  const handleExportTally = async () => {
+    setExportStatus('Exporting for Tally...')
+    try {
+      const companyId = getCurrentCompanyId?.()
+      await backupService.exportTallyFriendly(companyId)
+    } catch (error: any) {
+      console.error('Export Tally failed:', error)
+      alert('Failed to export for Tally: ' + (error?.message || String(error)))
+    } finally {
+      setExportStatus('')
     }
   }
 
   const handleCreateCloudBackup = async () => {
+    setExportStatus('Creating cloud backup...')
     try {
-      const companyId = getCurrentCompanyId()
+      const companyId = getCurrentCompanyId?.()
       console.log('🔄 Creating cloud backup...', { userId: user?.id, companyId })
       
       const result = await backupService.createAutomaticBackup(user?.id, companyId)
@@ -402,6 +436,8 @@ const BackupRestore = () => {
     } catch (error: any) {
       console.error('❌ Exception creating backup:', error)
       alert(`❌ Error creating backup: ${error?.message || error?.toString() || 'Unknown error'}\n\nCheck browser console (F12) for more details.`)
+    } finally {
+      setExportStatus('')
     }
   }
 
@@ -671,10 +707,18 @@ const BackupRestore = () => {
               Export all your inventory data as a backup file. You can use this file to restore your data later.
             </p>
 
+            {exportStatus && (
+              <div className="mb-4 px-4 py-2 bg-blue-100 border border-blue-300 rounded-lg text-blue-800 font-medium flex items-center gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                {exportStatus}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <button
-                onClick={handleCreateCloudBackup}
-                className="group bg-gradient-to-br from-purple-500 to-pink-600 text-white rounded-xl p-6 hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-105 flex flex-col items-center gap-4"
+                type="button"
+                onClick={() => handleCreateCloudBackup()}
+                className="group bg-gradient-to-br from-purple-500 to-pink-600 text-white rounded-xl p-6 hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-105 flex flex-col items-center gap-4 cursor-pointer"
               >
                 <Cloud className="w-12 h-12 group-hover:scale-110 transition-transform" />
                 <div className="text-center">
@@ -685,6 +729,7 @@ const BackupRestore = () => {
               </button>
 
               <button
+                type="button"
                 onClick={handleExportJSON}
                 className="group bg-gradient-to-br from-green-500 to-emerald-600 text-white rounded-xl p-6 hover:shadow-2xl hover:shadow-green-500/25 transition-all duration-300 transform hover:scale-105 flex flex-col items-center gap-4"
               >
@@ -697,6 +742,7 @@ const BackupRestore = () => {
               </button>
 
               <button
+                type="button"
                 onClick={handleExportCSV}
                 className="group bg-gradient-to-br from-blue-500 to-indigo-600 text-white rounded-xl p-6 hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-105 flex flex-col items-center gap-4"
               >
@@ -705,6 +751,30 @@ const BackupRestore = () => {
                   <h3 className="text-xl font-bold mb-2">Export Summary</h3>
                   <p className="text-sm opacity-90">Download data summary as CSV</p>
                   <p className="text-xs opacity-75 mt-2">Summary of products, sales, purchases, etc.</p>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={handleExportAllExcel}
+                className="group bg-gradient-to-br from-emerald-500 to-teal-600 text-white rounded-xl p-6 hover:shadow-2xl hover:shadow-emerald-500/25 transition-all duration-300 transform hover:scale-105 flex flex-col items-center gap-4"
+              >
+                <FileText className="w-12 h-12 group-hover:scale-110 transition-transform" />
+                <div className="text-center">
+                  <h3 className="text-xl font-bold mb-2">Export All Data (Excel)</h3>
+                  <p className="text-sm opacity-90">One-click: Products, Customers, Suppliers, Sales, Purchases</p>
+                  <p className="text-xs opacity-75 mt-2">Backup or migration – one Excel file with multiple sheets</p>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={handleExportTally}
+                className="group bg-gradient-to-br from-amber-500 to-orange-600 text-white rounded-xl p-6 hover:shadow-2xl hover:shadow-amber-500/25 transition-all duration-300 transform hover:scale-105 flex flex-col items-center gap-4"
+              >
+                <FileText className="w-12 h-12 group-hover:scale-110 transition-transform" />
+                <div className="text-center">
+                  <h3 className="text-xl font-bold mb-2">Export for Tally</h3>
+                  <p className="text-sm opacity-90">Excel in Tally-import-friendly format</p>
+                  <p className="text-xs opacity-75 mt-2">Sales & Purchases – smoother handover to CA/Tally</p>
                 </div>
               </button>
             </div>

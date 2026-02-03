@@ -167,6 +167,36 @@ function createMenu() {
       label: 'File',
       submenu: [
         {
+          label: 'New Sale',
+          accelerator: process.platform === 'darwin' ? 'Cmd+Shift+S' : 'Ctrl+Shift+S',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('navigate-to', '/sales/new')
+          }
+        },
+        {
+          label: 'New Purchase',
+          accelerator: process.platform === 'darwin' ? 'Cmd+Shift+P' : 'Ctrl+Shift+P',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('navigate-to', '/purchases/new-gst')
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Save',
+          accelerator: process.platform === 'darwin' ? 'Cmd+S' : 'Ctrl+S',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app-save')
+          }
+        },
+        {
+          label: 'Print',
+          accelerator: process.platform === 'darwin' ? 'Cmd+P' : 'Ctrl+P',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app-print')
+          }
+        },
+        { type: 'separator' },
+        {
           label: 'Quit',
           accelerator: process.platform === 'darwin' ? 'Cmd+Q' : 'Ctrl+Q',
           click: () => {

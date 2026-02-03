@@ -17,6 +17,7 @@ import {
   Eye
 } from 'lucide-react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { LoadingState } from '../components/LoadingState'
 
 const Suppliers = () => {
   const { hasPermission, getCurrentCompanyId } = useAuth()
@@ -183,7 +184,9 @@ const Suppliers = () => {
 
           {/* Suppliers Table */}
           {loading ? (
-            <div className="text-center py-12 text-gray-500">Loading suppliers...</div>
+            <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl border border-white/50 overflow-hidden">
+              <LoadingState message="Loading suppliers..." />
+            </div>
           ) : filteredSuppliers.length === 0 ? (
             <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-12 border border-white/50 text-center">
               <Building2 className="w-16 h-16 text-gray-400 mx-auto mb-4" />

@@ -48,16 +48,17 @@ export const saleService = {
     // Load all purchases for this company to track purchase item inventory
     const allPurchases = await purchaseService.getAll(undefined, sale.company_id)
     
-    // Ensure all purchase items have sold_quantity initialized and IDs
+    // Ensure all purchase items have sold_quantity and unique id (normalization usually does this on read)
     for (const purchase of allPurchases) {
       let needsUpdate = false
-      for (const purchaseItem of purchase.items) {
+      for (let i = 0; i < (purchase.items || []).length; i++) {
+        const purchaseItem = purchase.items![i]
         if (purchaseItem.sold_quantity === undefined) {
           purchaseItem.sold_quantity = 0
           needsUpdate = true
         }
-        if (!purchaseItem.id) {
-          purchaseItem.id = Date.now() + Math.random() // Generate unique ID
+        if (typeof purchaseItem.id !== 'number' || purchaseItem.id <= 0) {
+          purchaseItem.id = purchase.id * 1000000 + i
           needsUpdate = true
         }
       }

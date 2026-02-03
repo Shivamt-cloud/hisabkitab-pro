@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { expenseService } from '../services/expenseService'
 import { salesPersonService } from '../services/salespersonService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
+import { Breadcrumbs } from '../components/Breadcrumbs'
 import { Home, Save, X } from 'lucide-react'
 import { Expense, ExpenseType, CashDenominations } from '../types/expense'
 import { SalesPerson } from '../types/salesperson'
@@ -12,6 +14,7 @@ const ExpenseForm = () => {
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
   const { hasPermission, user, getCurrentCompanyId } = useAuth()
+  const { toast } = useToast()
   const isEditing = !!id
   
   // Get type from URL params for quick access
@@ -130,10 +133,10 @@ const ExpenseForm = () => {
       } else {
         await expenseService.create(expenseData)
       }
-
+      toast.success(isEditing ? 'Expense updated!' : 'Expense saved!')
       navigate('/expenses')
     } catch (error: any) {
-      alert(error.message || 'Error saving expense')
+      toast.error(error.message || 'Error saving expense')
     }
   }
 
@@ -190,7 +193,15 @@ const ExpenseForm = () => {
                 >
                   <Home className="w-5 h-5 text-gray-700" />
                 </button>
-                <div>
+                <div className="min-w-0">
+                  <Breadcrumbs
+                    items={[
+                      { label: 'Dashboard', path: '/' },
+                      { label: 'Expenses', path: '/expenses' },
+                      { label: isEditing ? 'Edit Expense' : 'New Expense' },
+                    ]}
+                    className="mb-1"
+                  />
                   <h1 className="text-3xl font-bold text-gray-900">
                     {isEditing ? 'Edit Expense' : 'Add Daily Expense'}
                   </h1>

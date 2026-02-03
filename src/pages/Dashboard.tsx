@@ -10,6 +10,7 @@ import { notificationService } from '../services/notificationService'
 import { settingsService } from '../services/settingsService'
 import { companyService } from '../services/companyService'
 import { supplierPaymentService } from '../services/supplierPaymentService'
+import { paymentService } from '../services/paymentService'
 import { getTierPricing } from '../utils/tierPricing'
 import { 
   ShoppingCart, 
@@ -47,6 +48,9 @@ import {
   Wifi,
   Gift,
   BookOpen,
+  Search,
+  ListOrdered,
+  X,
 } from 'lucide-react'
 import SubscriptionRechargeModal from '../components/SubscriptionRechargeModal'
 
@@ -115,6 +119,18 @@ const Dashboard = () => {
   } | null>(null)
   const [showSubscriptionDetails, setShowSubscriptionDetails] = useState(false)
   const [showRechargeModal, setShowRechargeModal] = useState(false)
+  const [generalSettings, setGeneralSettings] = useState<{ sales_target_daily?: number; sales_target_monthly?: number }>({})
+  const [topProducts, setTopProducts] = useState<Array<{ name: string; value: number }>>([])
+  const [topCustomers, setTopCustomers] = useState<Array<{ name: string; value: number }>>([])
+  const [outstandingStats, setOutstandingStats] = useState<{
+    customerOutstanding: number
+    supplierOutstanding: number
+    customerCount: number
+    supplierCount: number
+  } | null>(null)
+  const [showSetGoalModal, setShowSetGoalModal] = useState(false)
+  const [setGoalForm, setSetGoalForm] = useState({ daily: '' as string | number, monthly: '' as string | number })
+  const [setGoalSaving, setSetGoalSaving] = useState(false)
 
   const loadCompanyName = async () => {
     try {
@@ -214,9 +230,10 @@ const Dashboard = () => {
     }
   }
 
+  // Re-run when user/company changes so sales targets load from correct company (persist after refresh)
   useEffect(() => {
     calculateReports()
-  }, [timePeriod, customStartDate, customEndDate])
+  }, [timePeriod, customStartDate, customEndDate, user?.id, user?.company_id, currentCompanyId])
 
   useEffect(() => {
     if (user) {
@@ -305,18 +322,29 @@ const Dashboard = () => {
   }
 
   const calculateReports = async () => {
-    // Get actual data
+    // Use stable company ID so load uses same key as save (fixes sales target reset on refresh)
     const companyId = getCurrentCompanyId()
-    // Pass companyId directly - services will handle null by returning empty array for data isolation
-    // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
-    const [allSales, allPurchases, allProducts, allCustomers, allSuppliers, upcomingChecks] = await Promise.all([
+    const effectiveCompanyId = companyId ?? user?.company_id ?? undefined
+    const [allSales, allPurchases, allProducts, allCustomers, allSuppliers, upcomingChecks, generalSettingsRes, paymentStatsRes] = await Promise.all([
       saleService.getAll(true, companyId),
       purchaseService.getAll(undefined, companyId),
       productService.getAll(false, companyId),
       customerService.getAll(false, companyId),
       supplierService.getAll(companyId),
-      supplierPaymentService.getUpcomingChecks(companyId, 30) // Get checks due in next 30 days
+      supplierPaymentService.getUpcomingChecks(companyId, 30),
+      settingsService.getGeneral(effectiveCompanyId),
+      paymentService.getStats(companyId),
     ])
+    setGeneralSettings({
+      sales_target_daily: generalSettingsRes.sales_target_daily,
+      sales_target_monthly: generalSettingsRes.sales_target_monthly,
+    })
+    setOutstandingStats({
+      customerOutstanding: paymentStatsRes.customerOutstanding,
+      supplierOutstanding: paymentStatsRes.supplierOutstanding,
+      customerCount: paymentStatsRes.customerCount,
+      supplierCount: paymentStatsRes.supplierCount,
+    })
 
     // Get date range based on selected time period
     const { startDate, endDate } = getDateRange()
@@ -347,6 +375,43 @@ const Dashboard = () => {
 
     // Calculate totals for filtered period
     const totalSales = filteredSales.reduce((sum, s) => sum + s.grand_total, 0)
+
+    // Top 5 products by value in period (from sale items)
+    const productValueMap = new Map<number, { name: string; value: number }>()
+    filteredSales.forEach(sale => {
+      sale.items.forEach(item => {
+        if (item.sale_type !== 'sale') return
+        const value = item.total ?? (item.quantity * item.unit_price)
+        const existing = productValueMap.get(item.product_id)
+        const name = item.product_name || `Product #${item.product_id}`
+        if (existing) {
+          existing.value += value
+        } else {
+          productValueMap.set(item.product_id, { name, value })
+        }
+      })
+    })
+    const topProductsList = Array.from(productValueMap.values())
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5)
+    setTopProducts(topProductsList)
+
+    // Top 5 customers by value in period
+    const customerValueMap = new Map<number | string, { name: string; value: number }>()
+    filteredSales.forEach(sale => {
+      const key = sale.customer_id ?? sale.customer_name ?? 'Walk-in'
+      const name = sale.customer_name || 'Walk-in'
+      const existing = customerValueMap.get(key)
+      if (existing) {
+        existing.value += sale.grand_total
+      } else {
+        customerValueMap.set(key, { name, value: sale.grand_total })
+      }
+    })
+    const topCustomersList = Array.from(customerValueMap.values())
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5)
+    setTopCustomers(topCustomersList)
     
     // Calculate total purchases (handle both GST and simple purchases)
     const totalPurchases = filteredPurchases.reduce((sum, purchase) => {
@@ -840,6 +905,30 @@ const Dashboard = () => {
   // Check if subscription is expiring soon (within 30 days)
   const isSubscriptionExpiringSoon = subscriptionDaysRemaining !== null && subscriptionDaysRemaining <= 30 && subscriptionDaysRemaining > 0
 
+  const handleSaveSetGoal = async () => {
+    const companyId = getCurrentCompanyId()
+    const effectiveCompanyId = companyId ?? user?.company_id ?? undefined
+    const dailyVal = setGoalForm.daily === '' ? undefined : Math.max(0, Number(setGoalForm.daily))
+    const monthlyVal = setGoalForm.monthly === '' ? undefined : Math.max(0, Number(setGoalForm.monthly))
+    setSetGoalSaving(true)
+    try {
+      await settingsService.updateGeneral(
+        {
+          sales_target_daily: dailyVal,
+          sales_target_monthly: monthlyVal,
+        },
+        user?.id ? Number(user.id) : undefined,
+        effectiveCompanyId
+      )
+      setGeneralSettings({ sales_target_daily: dailyVal, sales_target_monthly: monthlyVal })
+      setShowSetGoalModal(false)
+    } catch (e) {
+      console.error('Failed to save sales target:', e)
+    } finally {
+      setSetGoalSaving(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       {/* Header */}
@@ -1028,6 +1117,21 @@ const Dashboard = () => {
         </div>
       </header>
 
+      {/* Global search + keyboard shortcuts – Quick Win #1 & #2 */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 space-y-1">
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new CustomEvent('global-search-open'))}
+          className="flex items-center gap-2 text-sm text-gray-600 hover:text-indigo-600 transition-colors rounded-lg px-2 py-1 hover:bg-indigo-50"
+        >
+          <Search className="w-4 h-4 shrink-0" />
+          <span>Press <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono">Ctrl+K</kbd> (or <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono">⌘K</kbd> on Mac) to search products, customers, sales, purchases</span>
+        </button>
+        <p className="text-xs text-gray-500 pl-6">
+          Shortcuts: <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">⌘⇧S</kbd> / <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Ctrl+Shift+S</kbd> New Sale · <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">⌘⇧P</kbd> / <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Ctrl+Shift+P</kbd> New Purchase · <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">⌘S</kbd> / <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Ctrl+S</kbd> Save · <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">⌘P</kbd> / <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Ctrl+P</kbd> Print (on invoice)
+        </p>
+      </div>
+
       {/* Subscription Expiry Alert */}
       {isSubscriptionExpiringSoon && subscriptionInfo?.endDate && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -1059,7 +1163,69 @@ const Dashboard = () => {
               </h2>
               <p className="text-gray-600 text-lg">Quick access to sales and purchase operations</p>
             </div>
-            
+
+            {/* Sales target – just below heading; manager can set goal directly */}
+            {hasPermission('sales:read') && (
+              <div className="mb-8 p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl border border-emerald-200">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-emerald-600" />
+                    Sales target
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSetGoalForm({
+                        daily: generalSettings.sales_target_daily ?? '',
+                        monthly: generalSettings.sales_target_monthly ?? '',
+                      })
+                      setShowSetGoalModal(true)
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                  >
+                    <Settings className="w-4 h-4" />
+                    Set goal
+                  </button>
+                </div>
+                {generalSettings.sales_target_daily != null && generalSettings.sales_target_daily > 0 || generalSettings.sales_target_monthly != null && generalSettings.sales_target_monthly > 0 ? (
+                  <div className="flex flex-wrap gap-4">
+                    {generalSettings.sales_target_daily != null && generalSettings.sales_target_daily > 0 && (
+                      <div className="flex-1 min-w-[140px]">
+                        <p className="text-xs text-gray-600 mb-0.5">Daily</p>
+                        <p className="text-base font-bold text-gray-900">
+                          ₹{dashboardStats.todaySales.toLocaleString('en-IN', { maximumFractionDigits: 0 })} of ₹{generalSettings.sales_target_daily.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        </p>
+                        <div className="mt-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-emerald-500 to-teal-600 rounded-full"
+                            style={{ width: `${Math.min(100, (dashboardStats.todaySales / generalSettings.sales_target_daily) * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {generalSettings.sales_target_monthly != null && generalSettings.sales_target_monthly > 0 && (
+                      <div className="flex-1 min-w-[140px]">
+                        <p className="text-xs text-gray-600 mb-0.5">Monthly</p>
+                        <p className="text-base font-bold text-gray-900">
+                          ₹{dashboardStats.thisMonthSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })} of ₹{generalSettings.sales_target_monthly.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        </p>
+                        <div className="mt-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-emerald-500 to-teal-600 rounded-full"
+                            style={{ width: `${Math.min(100, (dashboardStats.thisMonthSales / generalSettings.sales_target_monthly) * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-600">
+                    No targets set. Use “Set goal” to add daily or monthly targets.
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Sales Options */}
             {salesOptions.length > 0 && (
               <div className="mb-8">
@@ -1166,7 +1332,7 @@ const Dashboard = () => {
                   <div className="w-1 h-6 bg-gradient-to-b from-orange-500 to-red-600 rounded-full"></div>
                   Stock Management
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                   <button
                     onClick={() => navigate('/stock/alerts')}
                     className="group relative bg-gradient-to-br from-orange-500 to-red-600 text-white rounded-2xl p-6 transform transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-orange-500/25 text-left overflow-hidden"
@@ -1178,6 +1344,22 @@ const Dashboard = () => {
                       </div>
                       <h3 className="text-xl font-bold mb-2">Stock Alerts</h3>
                       <p className="text-white/90 text-sm leading-relaxed">View low stock and out of stock products</p>
+                    </div>
+                    <div className="absolute top-4 right-4 opacity-20 group-hover:opacity-30 transition-opacity">
+                      <div className="w-20 h-20 bg-white rounded-full blur-2xl"></div>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => navigate('/stock/reorder')}
+                    className="group relative bg-gradient-to-br from-emerald-500 to-teal-600 text-white rounded-2xl p-6 transform transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-emerald-500/25 text-left overflow-hidden"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-br from-teal-600 to-cyan-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <div className="relative z-10">
+                      <div className="mb-4 transform group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300">
+                        <ListOrdered className="w-10 h-10" />
+                      </div>
+                      <h3 className="text-xl font-bold mb-2">Reorder List</h3>
+                      <p className="text-white/90 text-sm leading-relaxed">Products below min stock with last purchase qty/rate</p>
                     </div>
                     <div className="absolute top-4 right-4 opacity-20 group-hover:opacity-30 transition-opacity">
                       <div className="w-20 h-20 bg-white rounded-full blur-2xl"></div>
@@ -1320,6 +1502,73 @@ const Dashboard = () => {
                 )}
               </div>
             </div>
+
+            {/* Top 5 products & Top 5 customers */}
+            {hasPermission('sales:read') && (topProducts.length > 0 || topCustomers.length > 0) && (
+              <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                {topProducts.length > 0 && (
+                  <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide flex items-center gap-2">
+                      <Package className="w-4 h-4" />
+                      Top 5 products (period)
+                    </h3>
+                    <ul className="space-y-2">
+                      {topProducts.map((p, i) => (
+                        <li key={i} className="flex justify-between text-sm">
+                          <span className="text-gray-700 truncate pr-2">{p.name}</span>
+                          <span className="font-semibold text-gray-900 shrink-0">₹{p.value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {topCustomers.length > 0 && (
+                  <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide flex items-center gap-2">
+                      <Users className="w-4 h-4" />
+                      Top 5 customers (period)
+                    </h3>
+                    <ul className="space-y-2">
+                      {topCustomers.map((c, i) => (
+                        <li key={i} className="flex justify-between text-sm">
+                          <span className="text-gray-700 truncate pr-2">{c.name}</span>
+                          <span className="font-semibold text-gray-900 shrink-0">₹{c.value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Outstanding summary: receivables + payables with link */}
+            {hasPermission('sales:read') && outstandingStats !== null && (
+              <button
+                type="button"
+                onClick={() => navigate('/payments/outstanding')}
+                className="w-full mb-6 p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl border border-amber-200 hover:border-amber-300 hover:shadow-md transition-all text-left"
+              >
+                <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide flex items-center gap-2">
+                  <DollarSign className="w-4 h-4" />
+                  Outstanding summary
+                </h3>
+                <div className="flex flex-wrap gap-6">
+                  <div>
+                    <p className="text-xs text-gray-600">Receivables (from customers)</p>
+                    <p className="text-xl font-bold text-green-700">₹{outstandingStats.customerOutstanding.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                    <p className="text-xs text-gray-500">{outstandingStats.customerCount} invoice(s)</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600">Payables (to suppliers)</p>
+                    <p className="text-xl font-bold text-red-700">₹{outstandingStats.supplierOutstanding.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                    <p className="text-xs text-gray-500">{outstandingStats.supplierCount} invoice(s)</p>
+                  </div>
+                </div>
+                <p className="text-sm text-amber-700 font-medium mt-2 flex items-center gap-1">
+                  View lists <ArrowUpRight className="w-4 h-4" />
+                </p>
+              </button>
+            )}
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               {visibleReports.length === 0 ? (
@@ -1391,6 +1640,14 @@ const Dashboard = () => {
                 >
                   <TrendingUp className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span>View Commission Reports</span>
+                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                </button>
+                <button 
+                  onClick={() => navigate('/reports/ca')}
+                  className="group w-full bg-gradient-to-r from-slate-600 via-slate-700 to-slate-800 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-slate-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                >
+                  <FileText className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                  <span>CA Reports (GSTR-1, GSTR-2, GSTR-3B)</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                 </button>
               </div>
@@ -1589,6 +1846,67 @@ const Dashboard = () => {
           </div>
         </div>
       </main>
+
+      {/* Set goal modal – manager can set daily/monthly targets without admin */}
+      {showSetGoalModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => !setGoalSaving && setShowSetGoalModal(false)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-emerald-600" />
+                Set sales target
+              </h3>
+              <button type="button" onClick={() => !setGoalSaving && setShowSetGoalModal(false)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-500">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">Set optional daily or monthly targets. Leave blank to clear.</p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Daily sales target (₹)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="100"
+                  value={setGoalForm.daily}
+                  onChange={e => setSetGoalForm(f => ({ ...f, daily: e.target.value }))}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none"
+                  placeholder="Optional"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Monthly sales target (₹)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1000"
+                  value={setGoalForm.monthly}
+                  onChange={e => setSetGoalForm(f => ({ ...f, monthly: e.target.value }))}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none"
+                  placeholder="Optional"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                onClick={handleSaveSetGoal}
+                disabled={setGoalSaving}
+                className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {setGoalSaving ? 'Saving...' : 'Save'}
+              </button>
+              <button
+                type="button"
+                onClick={() => !setGoalSaving && setShowSetGoalModal(false)}
+                className="px-4 py-2.5 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Subscription Recharge Modal */}
       {subscriptionInfo && (

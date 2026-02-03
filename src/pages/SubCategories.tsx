@@ -12,6 +12,7 @@ import {
   ChevronRight
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { LoadingState } from '../components/LoadingState'
 
 const SubCategories = () => {
   const { hasPermission } = useAuth()
@@ -151,7 +152,7 @@ const SubCategories = () => {
 
           {/* Sub-Categories Table */}
           {loading ? (
-            <div className="text-center py-12 text-gray-500">Loading sub-categories...</div>
+            <LoadingState message="Loading sub-categories..." />
           ) : filteredCategories.length === 0 ? (
             <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-12 border border-white/50 text-center">
               <FolderTree className="w-16 h-16 text-gray-400 mx-auto mb-4" />

@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { productService, Product } from '../services/productService'
 import { saleService } from '../services/saleService'
 import { salesPersonService } from '../services/salespersonService'
@@ -8,15 +9,20 @@ import { customerService } from '../services/customerService'
 import { purchaseService } from '../services/purchaseService'
 import { SalesPerson } from '../types/salesperson'
 import { Customer } from '../types/customer'
-import { X, Plus, Trash2, Search, ShoppingCart, Home, User } from 'lucide-react'
-import { SaleItem } from '../types/sale'
+import { Breadcrumbs } from '../components/Breadcrumbs'
+import { X, Plus, Trash2, Search, ShoppingCart, Home, User, Pause, Play, RotateCcw } from 'lucide-react'
+import { SaleItem, Sale } from '../types/sale'
 import { Purchase, PurchaseItem } from '../types/purchase'
 
 const SaleForm = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const { hasPermission, user, getCurrentCompanyId } = useAuth()
+  const { toast } = useToast()
   const [saleItems, setSaleItems] = useState<SaleItem[]>([])
+  const saleItemsRef = useRef<SaleItem[]>(saleItems)
+  saleItemsRef.current = saleItems
+  const formRef = useRef<HTMLFormElement>(null)
   const [availableProducts, setAvailableProducts] = useState<Product[]>([])
   const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -39,6 +45,10 @@ const SaleForm = () => {
   const [discountType, setDiscountType] = useState<'percentage' | 'fixed'>('percentage') // Discount type: percentage or fixed amount
   const [discountValue, setDiscountValue] = useState<number>(0) // Discount value (percentage or fixed amount)
   const [internalRemarks, setInternalRemarks] = useState<string>('') // Internal remarks (not shown to customers)
+  const [hasHeldCart, setHasHeldCart] = useState(false) // Held cart available to resume (by company)
+  const [salesForQuickReorder, setSalesForQuickReorder] = useState<Sale[]>([]) // Recent sales for Last sold / Frequently sold
+
+  const HELD_CART_KEY = () => `hisabkitab_held_cart_${getCurrentCompanyId() ?? 'default'}`
 
   // Separate function to load customers (can be called independently)
   const loadCustomers = async () => {
@@ -296,12 +306,36 @@ const SaleForm = () => {
         
         // Load active customers
         await loadCustomers()
+
+        // Check for held cart (by company)
+        try {
+          const key = HELD_CART_KEY()
+          const raw = localStorage.getItem(key)
+          if (raw) {
+            const parsed = JSON.parse(raw)
+            if (parsed?.saleItems?.length > 0 || parsed?.savedAt) setHasHeldCart(true)
+          }
+        } catch (_) {}
+
+        // Load recent sales for Quick reorder (Last sold / Frequently sold)
+        const companyId = getCurrentCompanyId()
+        const allSales = await saleService.getAll(true, companyId ?? undefined)
+        // Sort by date descending and take last 100
+        const sorted = [...allSales].sort((a, b) => new Date(b.sale_date).getTime() - new Date(a.sale_date).getTime())
+        setSalesForQuickReorder(sorted.slice(0, 100))
       } catch (error) {
         console.error('Error loading sale form data:', error)
         alert('Error loading products. Please refresh the page.')
       }
     }
     loadData()
+  }, [])
+
+  // Quick Win #2: Ctrl+S to save
+  useEffect(() => {
+    const onAppSave = () => formRef.current?.requestSubmit()
+    window.addEventListener('app-save', onAppSave)
+    return () => window.removeEventListener('app-save', onAppSave)
   }, [])
 
   // Reload customers when location changes (e.g., when returning from customer creation)
@@ -355,6 +389,98 @@ const SaleForm = () => {
     // Reset credit applied when customer changes
     setCreditApplied(0)
   }, [customerId])
+
+  // Hold / Resume cart
+  const holdCart = () => {
+    if (saleItems.length === 0 && !customerId) {
+      toast.error('Cart is empty. Add items or select customer to hold.')
+      return
+    }
+    try {
+      const payload = {
+        saleItems,
+        customerId: customerId || '',
+        salesPersonId: salesPersonId || '',
+        paymentMethods,
+        discountType,
+        discountValue,
+        creditApplied,
+        internalRemarks,
+        savedAt: Date.now(),
+      }
+      localStorage.setItem(HELD_CART_KEY(), JSON.stringify(payload))
+      setSaleItems([])
+      setCustomerId('')
+      setSalesPersonId('')
+      setPaymentMethods([{ method: 'cash', amount: 0 }])
+      setDiscountValue(0)
+      setCreditApplied(0)
+      setInternalRemarks('')
+      setHasHeldCart(false)
+      toast.success('Cart held. You can resume it later from New Sale.')
+    } catch (e) {
+      toast.error('Could not hold cart.')
+    }
+  }
+
+  const resumeHeldCart = () => {
+    try {
+      const raw = localStorage.getItem(HELD_CART_KEY())
+      if (!raw) return
+      const parsed = JSON.parse(raw)
+      if (parsed.saleItems?.length) setSaleItems(parsed.saleItems)
+      if (parsed.customerId) setCustomerId(parsed.customerId)
+      if (parsed.salesPersonId) setSalesPersonId(parsed.salesPersonId)
+      if (parsed.paymentMethods?.length) setPaymentMethods(parsed.paymentMethods)
+      if (parsed.discountType) setDiscountType(parsed.discountType)
+      if (typeof parsed.discountValue === 'number') setDiscountValue(parsed.discountValue)
+      if (typeof parsed.creditApplied === 'number') setCreditApplied(parsed.creditApplied)
+      if (parsed.internalRemarks) setInternalRemarks(parsed.internalRemarks)
+      localStorage.removeItem(HELD_CART_KEY())
+      setHasHeldCart(false)
+      toast.success('Held cart restored.')
+    } catch (e) {
+      toast.error('Could not resume cart.')
+    }
+  }
+
+  const discardHeldCart = () => {
+    localStorage.removeItem(HELD_CART_KEY())
+    setHasHeldCart(false)
+    toast.success('Held cart discarded.')
+  }
+
+  // Quick reorder: Last sold (from most recent sale) and Frequently sold (by count)
+  const lastSoldProducts = useMemo(() => {
+    const latest = salesForQuickReorder[0]
+    if (!latest?.items?.length) return []
+    const seen = new Set<number>()
+    const list: Product[] = []
+    for (const item of latest.items) {
+      if (item.product_id && !seen.has(item.product_id)) {
+        seen.add(item.product_id)
+        const p = availableProducts.find(pr => pr.id === item.product_id)
+        if (p) list.push(p)
+      }
+    }
+    return list.slice(0, 10)
+  }, [salesForQuickReorder, availableProducts])
+
+  const frequentlySoldProducts = useMemo(() => {
+    const count: Record<number, number> = {}
+    salesForQuickReorder.forEach(s => {
+      s.items.forEach(it => {
+        if (it.product_id) count[it.product_id] = (count[it.product_id] || 0) + 1
+      })
+    })
+    const sorted = Object.entries(count)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([id]) => parseInt(id, 10))
+    return sorted
+      .map(pid => availableProducts.find(p => p.id === pid))
+      .filter((p): p is Product => !!p)
+  }, [salesForQuickReorder, availableProducts])
 
   // NEW SIMPLIFIED SEARCH: Direct search in purchase history by article/barcode/product name
   // This searches purchases directly - simple, fast, and accurate
@@ -514,6 +640,9 @@ const SaleForm = () => {
     
     return matchingItems
   }, [searchQuery, purchases, availableProducts])
+
+  const searchPurchaseItemsRef = useRef<Array<{ purchase: Purchase; item: PurchaseItem; product: Product | undefined; availableStock: number; matchType: string; isExactMatch: boolean }>>([])
+  searchPurchaseItemsRef.current = searchPurchaseItems
   
   // Keep filteredProducts empty for backward compatibility (we use searchPurchaseItems now)
   const filteredProducts = useMemo(() => {
@@ -718,13 +847,25 @@ const SaleForm = () => {
   // Format: "P{purchase_id}-I{purchase_item_id}" or "PROD-{product_id}" if no purchase item
   // This ensures each purchase item is treated uniquely, even if same product+article
   const getPurchaseItemUniqueKey = (purchaseId?: number, purchaseItemId?: number, productId?: number): string => {
-    if (purchaseId && purchaseItemId) {
+    if (purchaseId && purchaseItemId !== undefined) {
       return `P${purchaseId}-I${purchaseItemId}`
     }
     if (productId) {
       return `PROD-${productId}`
     }
     return `UNKNOWN-${Date.now()}`
+  }
+
+  // Find purchase item by purchase id and item id (supports synthetic ids: purchaseId*1000000+index)
+  const findPurchaseItem = (purchaseId: number, purchaseItemId: number): { purchase: Purchase; item: PurchaseItem } | null => {
+    const purchase = purchases.find(p => p.id === purchaseId)
+    if (!purchase || !purchase.items.length) return null
+    let item = purchase.items.find(pi => pi.id === purchaseItemId)
+    if (!item && purchaseItemId >= purchaseId * 1000000) {
+      const index = purchaseItemId - purchaseId * 1000000
+      if (index >= 0 && index < purchase.items.length) item = purchase.items[index]
+    }
+    return item ? { purchase, item } : null
   }
 
   const addProductToSale = (product: Product, searchQuery?: string) => {
@@ -734,27 +875,54 @@ const SaleForm = () => {
     let purchaseItemId: number | undefined
     let purchaseId: number | undefined
     let purchaseItemBarcode: string | undefined
-    
+    let resolvedItemFromSearch: PurchaseItem | null = null
+    let searchIndexForUniqueKey: number | undefined
+
     console.log(`🔍 addProductToSale: product="${product.name}" (ID: ${product.id}), searchQuery="${searchQuery}"`)
-    
+
+    // SEARCHINDEX: use exact item from search result list (list order can differ from purchase.items order after sort)
+    const searchIndexMatch = searchQuery && searchQuery.match(/PURCHASE-(\d+)-SEARCHINDEX-(\d+)/)
+    if (searchIndexMatch) {
+      const searchIndex = parseInt(searchIndexMatch[2], 10)
+      const searchList = searchPurchaseItemsRef.current
+      const searchRow = searchList[searchIndex]
+      if (searchRow && searchRow.product?.id === product.id && searchRow.item.product_id === product.id) {
+        purchaseId = searchRow.purchase.id
+        const itemIndexInPurchase = searchRow.purchase.items.indexOf(searchRow.item)
+        purchaseItemId = itemIndexInPurchase >= 0 ? Number(searchRow.purchase.id) * 1000000 + itemIndexInPurchase : Number(searchRow.purchase.id) * 1000000 + searchIndex
+        purchaseItemArticle = searchRow.item.article
+        purchaseItemBarcode = searchRow.item.barcode
+        resolvedItemFromSearch = searchRow.item
+        searchIndexForUniqueKey = searchIndex
+      }
+    }
+
     // Check if searchQuery is a specific purchase item identifier (from multiple purchase items display)
-    if (searchQuery && searchQuery.startsWith('PURCHASE-')) {
-      const match = searchQuery.match(/PURCHASE-(\d+)-ITEM-(\d+)/)
+    if (!resolvedItemFromSearch && searchQuery && searchQuery.startsWith('PURCHASE-')) {
+      const itemMatch = searchQuery.match(/PURCHASE-(\d+)-ITEM-(\d+)/)
+      const indexMatch = searchQuery.match(/PURCHASE-(\d+)-INDEX-(\d+)/)
+      const match = itemMatch || indexMatch
       if (match) {
-        purchaseId = parseInt(match[1])
-        purchaseItemId = parseInt(match[2])
-        console.log(`  → Using specific purchase item: Purchase ${purchaseId}, Item ${purchaseItemId}`)
-        
-        // Get the purchase item details
-        const purchase = purchases.find(p => p.id === purchaseId)
+        purchaseId = parseInt(match[1], 10)
+        const purchase = purchases.find(p => Number(p.id) === purchaseId)
         if (purchase) {
-          const purchaseItem = purchase.items.find(pi => pi.id === purchaseItemId)
+          let purchaseItem: PurchaseItem | undefined
+          if (itemMatch) {
+            purchaseItemId = parseInt(match[2])
+            purchaseItem = purchase.items.find(pi => pi.id === purchaseItemId && pi.product_id === product.id)
+          } else {
+            const itemIndex = parseInt(match[2])
+            purchaseItem = purchase.items[itemIndex] && purchase.items[itemIndex].product_id === product.id
+              ? purchase.items[itemIndex]
+              : undefined
+            if (purchaseItem) purchaseItemId = purchaseId * 1000000 + itemIndex
+          }
           if (purchaseItem && purchaseItem.product_id === product.id) {
+            if (itemMatch && typeof purchaseItem.id === 'number' && purchaseItem.id > 0) purchaseItemId = purchaseItem.id
             purchaseItemArticle = purchaseItem.article
             purchaseItemBarcode = purchaseItem.barcode
-            // Skip FIFO logic and go directly to creating sale item
-    } else {
-            console.warn(`  ⚠️ Purchase item ${purchaseItemId} not found or doesn't match product ${product.id}`)
+          } else {
+            console.warn(`  ⚠️ Purchase item not found or doesn't match product ${product.id}`)
           }
         } else {
           console.warn(`  ⚠️ Purchase ${purchaseId} not found`)
@@ -796,10 +964,10 @@ const SaleForm = () => {
       
       console.log(`  → Found ${availablePurchaseItems.length} purchase items with available stock`)
       
-      // Sort by purchase date (oldest first) for FIFO
+      // Sort by expiry date (oldest first) when present, else by purchase date (FIFO by expiry)
       availablePurchaseItems.sort((a, b) => {
-        const dateA = new Date(a.purchase.purchase_date).getTime()
-        const dateB = new Date(b.purchase.purchase_date).getTime()
+        const dateA = (a.item.expiry_date ? new Date(a.item.expiry_date) : new Date(a.purchase.purchase_date)).getTime()
+        const dateB = (b.item.expiry_date ? new Date(b.item.expiry_date) : new Date(b.purchase.purchase_date)).getTime()
         return dateA - dateB
       })
       
@@ -912,12 +1080,20 @@ const SaleForm = () => {
         }
     }
     
-    // Generate unique key for this purchase item
-    const uniqueKey = getPurchaseItemUniqueKey(purchaseId, purchaseItemId, product.id)
+    // When we used PURCHASE-X-SEARCHINDEX-Y or PURCHASE-X-INDEX-Y but didn't resolve to a valid item, don't add
+    if (searchQuery && searchQuery.startsWith('PURCHASE-') && (purchaseId == null || purchaseItemId == null)) {
+      console.warn('  ⚠️ PURCHASE key could not be resolved (purchase or item not found), skipping add')
+      return
+    }
     
-    // Check if the same purchase item (by unique key) is already in cart
-    // Each purchase item is treated separately, even if same product+article
-    const existingItem = saleItems.find(item => {
+    // Generate unique key: include search row index when from SEARCHINDEX so each "Add" gets its own cart line
+    const uniqueKey = searchIndexForUniqueKey !== undefined && purchaseId != null && purchaseItemId != null
+      ? `P${purchaseId}-I${purchaseItemId}-S${searchIndexForUniqueKey}`
+      : getPurchaseItemUniqueKey(purchaseId, purchaseItemId, product.id)
+    
+    // Use ref so we always see the latest cart (avoids stale closure when clicking Add twice quickly)
+    const currentCart = saleItemsRef.current
+    const existingItem = currentCart.find(item => {
       // Match by unique key first (most accurate)
       if (item.purchase_item_unique_key && uniqueKey) {
         return item.purchase_item_unique_key === uniqueKey
@@ -947,13 +1123,10 @@ const SaleForm = () => {
     })
     
     if (existingItem) {
-      // Increase quantity if the same product with the same article is already in cart
-      // Get maximum allowed quantity for this item
+      // Increase quantity by 1 using current state (avoids stale quantity when Add is clicked rapidly)
       const maxQuantity = getRemainingStockForItem(existingItem)
-      
-      // For returns, check sold_quantity (returnable), for sales check remaining stock
       if (existingItem.quantity < maxQuantity) {
-        updateItemQuantity(existingItem, existingItem.quantity + 1)
+        incrementItemQuantity(existingItem)
       } else {
         if (existingItem.sale_type === 'return') {
           alert(`Only ${maxQuantity} units can be returned${existingItem.purchase_item_article ? ` for article "${existingItem.purchase_item_article}"` : ''} (based on original purchase quantity)`)
@@ -970,26 +1143,17 @@ const SaleForm = () => {
       let barcode = product.barcode || ''
       let purchaseItemBarcode: string | undefined
       
-      // If we found purchase item details above (from FIFO or article/barcode search), use them
-      if (purchaseItemId && purchaseId) {
-        // Get the purchase item to extract MRP, sale_price, etc.
-        const purchase = purchases.find(p => p.id === purchaseId)
-        if (purchase) {
-          const purchaseItem = purchase.items.find(pi => pi.id === purchaseItemId)
-          if (purchaseItem && purchaseItem.product_id === product.id) {
-            // MRP should be from purchase item's mrp, fallback to product selling_price
-            mrp = purchaseItem.mrp || product.selling_price || 0
-            // Sale price should be from purchase item's sale_price, fallback to mrp, then product selling_price
-            unitPrice = purchaseItem.sale_price || (purchaseItem.mrp || product.selling_price || 0)
-            purchasePrice = purchaseItem.unit_price || product.purchase_price || 0
-            barcode = purchaseItem.barcode || product.barcode || ''
-            purchaseItemBarcode = purchaseItem.barcode
-            if (purchaseItem.article) {
-              purchaseItemArticle = purchaseItem.article // Set article if available
-            }
-            console.log(`  → Using purchase item prices: MRP=${mrp}, Sale=${unitPrice}, Purchase=${purchasePrice}`)
-          }
-        }
+      // If we found purchase item details above (from search result, FIFO, or article/barcode search), use them
+      const itemToUse = resolvedItemFromSearch || (purchaseItemId !== undefined && purchaseId ? findPurchaseItem(purchaseId, purchaseItemId)?.item : null)
+      if (itemToUse && itemToUse.product_id === product.id) {
+        const purchaseItem = itemToUse
+        mrp = purchaseItem.mrp || product.selling_price || 0
+        unitPrice = purchaseItem.sale_price || (purchaseItem.mrp || product.selling_price || 0)
+        purchasePrice = purchaseItem.unit_price || product.purchase_price || 0
+        barcode = purchaseItem.barcode || product.barcode || ''
+        purchaseItemBarcode = purchaseItem.barcode
+        if (purchaseItem.article) purchaseItemArticle = purchaseItem.article
+        console.log(`  → Using purchase item prices: MRP=${mrp}, Sale=${unitPrice}, Purchase=${purchasePrice}`)
       } else if (searchQuery) {
         // If we don't have purchase_item_id yet, try to find it by barcode or article
         // Check if searchQuery is a barcode
@@ -1055,19 +1219,14 @@ const SaleForm = () => {
       console.log(`  → Initial stock (product): ${remainingStock}`)
       console.log(`  → purchaseItemId: ${purchaseItemId}, purchaseId: ${purchaseId}`)
       
-      if (purchaseItemId && purchaseId) {
-        const purchase = purchases.find(p => p.id === purchaseId)
-        if (purchase) {
-          const purchaseItem = purchase.items.find(pi => pi.id === purchaseItemId)
-          if (purchaseItem && purchaseItem.product_id === product.id) {
-            const soldQty = purchaseItem.sold_quantity || 0
-            remainingStock = purchaseItem.quantity - soldQty
-            console.log(`  ✅ Stock from purchase item: ${purchaseItem.quantity} - ${soldQty} = ${remainingStock}`)
-          } else {
-            console.warn(`  ⚠️ Purchase item not found: Purchase ${purchaseId}, Item ${purchaseItemId}`)
-          }
+      if (purchaseItemId !== undefined && purchaseId) {
+        const found = findPurchaseItem(purchaseId, purchaseItemId)
+        if (found && found.item.product_id === product.id) {
+          const soldQty = found.item.sold_quantity || 0
+          remainingStock = found.item.quantity - soldQty
+          console.log(`  ✅ Stock from purchase item: ${found.item.quantity} - ${soldQty} = ${remainingStock}`)
         } else {
-          console.warn(`  ⚠️ Purchase not found: ${purchaseId}`)
+          console.warn(`  ⚠️ Purchase item not found: Purchase ${purchaseId}, Item ${purchaseItemId}`)
         }
       } else if (purchaseItemArticle && purchaseItemArticle.trim()) {
         // If we have article but no purchaseItemId, find the purchase item by product_id + article
@@ -1129,7 +1288,7 @@ const SaleForm = () => {
           unitPrice
         })
         
-        setSaleItems([...saleItems, newItem])
+        setSaleItems(prev => [...prev, newItem])
       
       // Only warn if stock is 0 and it's a sale (not a return)
       if (product.stock_quantity === 0) {
@@ -1458,10 +1617,10 @@ const SaleForm = () => {
         }
       }
       
-      // Sort by purchase date (oldest first) for FIFO
+      // Sort by expiry date (oldest first) when present, else by purchase date (FIFO by expiry)
       availablePurchaseItems.sort((a, b) => {
-        const dateA = new Date(a.purchase.purchase_date).getTime()
-        const dateB = new Date(b.purchase.purchase_date).getTime()
+        const dateA = (a.item.expiry_date ? new Date(a.item.expiry_date) : new Date(a.purchase.purchase_date)).getTime()
+        const dateB = (b.item.expiry_date ? new Date(b.item.expiry_date) : new Date(b.purchase.purchase_date)).getTime()
         return dateA - dateB
       })
       
@@ -1509,34 +1668,28 @@ const SaleForm = () => {
 
   // Get maximum returnable quantity for a return item (sold_quantity from purchase)
   const getMaxReturnableQuantity = (item: SaleItem): number => {
-    // Priority 1: If we have unique key, use it to find the exact purchase item
+    // Priority 1: If we have unique key, use it to find the exact purchase item (supports synthetic ids)
     if (item.purchase_item_unique_key) {
       const [purchaseIdStr, itemIdStr] = item.purchase_item_unique_key.split('-I')
       if (purchaseIdStr && itemIdStr) {
         const purchaseId = parseInt(purchaseIdStr.replace('P', ''))
         const purchaseItemId = parseInt(itemIdStr)
-        const purchase = purchases.find(p => p.id === purchaseId)
-        if (purchase) {
-          const purchaseItem = purchase.items.find(pi => pi.id === purchaseItemId)
-          if (purchaseItem && purchaseItem.product_id === item.product_id) {
-            const soldQty = purchaseItem.sold_quantity || 0
-            console.log(`[getMaxReturnableQuantity] Using unique_key ${item.purchase_item_unique_key}: Original Qty = ${purchaseItem.quantity}, Sold = ${soldQty}, Returnable = ${soldQty}`)
-            return soldQty
-          }
+        const found = findPurchaseItem(purchaseId, purchaseItemId)
+        if (found && found.item.product_id === item.product_id) {
+          const soldQty = found.item.sold_quantity || 0
+          console.log(`[getMaxReturnableQuantity] Using unique_key ${item.purchase_item_unique_key}: Original Qty = ${found.item.quantity}, Sold = ${soldQty}, Returnable = ${soldQty}`)
+          return soldQty
         }
       }
     }
     
-    // Priority 2: If we have purchase_item_id, use that (most accurate)
-    if (item.purchase_id && item.purchase_item_id) {
-      const purchase = purchases.find(p => p.id === item.purchase_id)
-      if (purchase) {
-        const purchaseItem = purchase.items.find(pi => pi.id === item.purchase_item_id)
-        if (purchaseItem && purchaseItem.product_id === item.product_id) {
-          const soldQty = purchaseItem.sold_quantity || 0
-          console.log(`[getMaxReturnableQuantity] Using purchase_item_id ${item.purchase_item_id}: Original Qty = ${purchaseItem.quantity}, Sold = ${soldQty}, Returnable = ${soldQty}`)
-          return soldQty
-        }
+    // Priority 2: If we have purchase_item_id, use that (most accurate, supports synthetic ids)
+    if (item.purchase_id != null && item.purchase_item_id != null) {
+      const found = findPurchaseItem(item.purchase_id, item.purchase_item_id)
+      if (found && found.item.product_id === item.product_id) {
+        const soldQty = found.item.sold_quantity || 0
+        console.log(`[getMaxReturnableQuantity] Using purchase_item_id ${item.purchase_item_id}: Original Qty = ${found.item.quantity}, Sold = ${soldQty}, Returnable = ${soldQty}`)
+        return soldQty
       }
     }
     
@@ -1568,36 +1721,30 @@ const SaleForm = () => {
     }
     
     // For sales, use remaining stock (quantity - sold_quantity)
-    // Priority 1: If we have unique key, use it to find the exact purchase item
+    // Priority 1: If we have unique key, use it to find the exact purchase item (supports synthetic ids)
     if (item.purchase_item_unique_key) {
       const [purchaseIdStr, itemIdStr] = item.purchase_item_unique_key.split('-I')
       if (purchaseIdStr && itemIdStr) {
         const purchaseId = parseInt(purchaseIdStr.replace('P', ''))
         const purchaseItemId = parseInt(itemIdStr)
-        const purchase = purchases.find(p => p.id === purchaseId)
-        if (purchase) {
-          const purchaseItem = purchase.items.find(pi => pi.id === purchaseItemId)
-          if (purchaseItem && purchaseItem.product_id === item.product_id) {
-            const soldQty = purchaseItem.sold_quantity || 0
-            const stock = purchaseItem.quantity - soldQty
-            console.log(`[getRemainingStockForItem] Using unique_key ${item.purchase_item_unique_key}: Stock = ${purchaseItem.quantity} - ${soldQty} = ${stock}`)
-            return stock
-          }
+        const found = findPurchaseItem(purchaseId, purchaseItemId)
+        if (found && found.item.product_id === item.product_id) {
+          const soldQty = found.item.sold_quantity || 0
+          const stock = found.item.quantity - soldQty
+          console.log(`[getRemainingStockForItem] Using unique_key ${item.purchase_item_unique_key}: Stock = ${found.item.quantity} - ${soldQty} = ${stock}`)
+          return stock
         }
       }
     }
     
-    // Priority 2: If we have purchase_item_id, use that (most accurate)
-    if (item.purchase_id && item.purchase_item_id) {
-      const purchase = purchases.find(p => p.id === item.purchase_id)
-      if (purchase) {
-        const purchaseItem = purchase.items.find(pi => pi.id === item.purchase_item_id)
-        if (purchaseItem && purchaseItem.product_id === item.product_id) {
-          const soldQty = purchaseItem.sold_quantity || 0
-          const stock = purchaseItem.quantity - soldQty
-          console.log(`[getRemainingStockForItem] Using purchase_item_id ${item.purchase_item_id}: Stock = ${purchaseItem.quantity} - ${soldQty} = ${stock}`)
-          return stock
-        }
+    // Priority 2: If we have purchase_item_id, use that (most accurate, supports synthetic ids)
+    if (item.purchase_id != null && item.purchase_item_id != null) {
+      const found = findPurchaseItem(item.purchase_id, item.purchase_item_id)
+      if (found && found.item.product_id === item.product_id) {
+        const soldQty = found.item.sold_quantity || 0
+        const stock = found.item.quantity - soldQty
+        console.log(`[getRemainingStockForItem] Using purchase_item_id ${item.purchase_item_id}: Stock = ${found.item.quantity} - ${soldQty} = ${stock}`)
+        return stock
       }
     }
     
@@ -1635,6 +1782,40 @@ const SaleForm = () => {
     const productStock = product?.stock_quantity || 0
     console.log(`[getRemainingStockForItem] Fallback to product stock: ${productStock}`)
     return productStock
+  }
+
+  /** Increment quantity by 1 for an existing cart item. Uses current state inside the updater so rapid "Add" clicks each add 1. Updates only the first matching line so different articles are not both incremented. */
+  const incrementItemQuantity = (saleItem: SaleItem) => {
+    setSaleItems(prevItems => {
+      const matchesSaleItem = (item: SaleItem) => {
+        if (saleItem.purchase_item_unique_key && item.purchase_item_unique_key)
+          return item.purchase_item_unique_key === saleItem.purchase_item_unique_key
+        if (saleItem.purchase_item_id && item.purchase_item_id && saleItem.purchase_id && item.purchase_id &&
+            item.product_id === saleItem.product_id && item.purchase_item_id === saleItem.purchase_item_id && item.purchase_id === saleItem.purchase_id) return true
+        if (saleItem.purchase_item_article && item.purchase_item_article && !saleItem.purchase_item_id && !item.purchase_item_id &&
+            item.product_id === saleItem.product_id && item.purchase_item_article.toLowerCase() === saleItem.purchase_item_article.toLowerCase()) return true
+        if (!saleItem.purchase_item_id && !saleItem.purchase_item_article && !item.purchase_item_id && !item.purchase_item_article && item.product_id === saleItem.product_id) return true
+        return false
+      }
+      const idx = prevItems.findIndex(matchesSaleItem)
+      if (idx === -1) return prevItems
+      const item = prevItems[idx]
+      const maxQuantity = getRemainingStockForItem(item)
+      const newQuantity = item.quantity + 1
+      if (newQuantity > maxQuantity) {
+        if (item.sale_type === 'return') {
+          alert(`Only ${maxQuantity} units can be returned${item.purchase_item_article ? ` for article "${item.purchase_item_article}"` : ''} (based on original purchase quantity)`)
+        } else {
+          alert(`Only ${maxQuantity} units remaining in stock${item.purchase_item_article ? ` for article "${item.purchase_item_article}"` : ''}`)
+        }
+        return prevItems
+      }
+      const newTotal = item.unit_price * newQuantity
+      console.log(`[SaleForm] Increment quantity for ${item.product_name}: ${item.quantity} -> ${newQuantity}`)
+      const updated = [...prevItems]
+      updated[idx] = { ...item, quantity: newQuantity, total: newTotal }
+      return updated
+    })
   }
 
   const updateItemQuantity = (saleItem: SaleItem, quantity: number) => {
@@ -1697,7 +1878,7 @@ const SaleForm = () => {
   }
 
   const removeItem = (itemToRemove: SaleItem) => {
-    setSaleItems(saleItems.filter(item => {
+    setSaleItems(prev => prev.filter(item => {
       // Match by unique key first (most accurate)
       if (itemToRemove.purchase_item_unique_key && item.purchase_item_unique_key) {
         return item.purchase_item_unique_key !== itemToRemove.purchase_item_unique_key
@@ -1893,10 +2074,10 @@ const SaleForm = () => {
     const handleSubmitAsync = async () => {
       try {
         const createdSale = await saleService.create(sale)
-        // Navigate to invoice view after successful sale
+        toast.success('Sale created!')
         navigate(`/invoice/${createdSale.id}`)
       } catch (error) {
-        alert('Error creating sale: ' + (error as Error).message)
+        toast.error('Error creating sale: ' + (error as Error).message)
       }
     }
     handleSubmitAsync()
@@ -1916,17 +2097,64 @@ const SaleForm = () => {
               >
                 <Home className="w-6 h-6 text-gray-600" />
               </button>
-              <div>
+              <div className="min-w-0">
+                <Breadcrumbs
+                  items={[
+                    { label: 'Dashboard', path: '/' },
+                    { label: 'New Sale' },
+                  ]}
+                  className="mb-1"
+                />
                 <h1 className="text-3xl font-bold text-gray-900">New Sale</h1>
                 <p className="text-sm text-gray-600 mt-1">Create a new sales transaction</p>
               </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {saleItems.length > 0 && (
+                <button
+                  type="button"
+                  onClick={holdCart}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 text-sm font-medium"
+                  title="Hold cart and resume later"
+                >
+                  <Pause className="w-4 h-4" />
+                  Hold Cart
+                </button>
+              )}
             </div>
           </div>
         </div>
       </header>
 
+      {/* Held cart banner */}
+      {hasHeldCart && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+          <div className="flex items-center justify-between gap-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+            <span className="text-amber-800 font-medium">You have a held cart. Resume or discard?</span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={resumeHeldCart}
+                className="flex items-center gap-2 px-3 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium"
+              >
+                <Play className="w-4 h-4" />
+                Resume
+              </button>
+              <button
+                type="button"
+                onClick={discardHeldCart}
+                className="flex items-center gap-2 px-3 py-2 border border-amber-300 text-amber-800 rounded-lg hover:bg-amber-100 text-sm font-medium"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Discard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form ref={formRef} onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Left Column - Product Search & Cart */}
             <div className="lg:col-span-2 space-y-6">
@@ -1944,6 +2172,45 @@ const SaleForm = () => {
                   />
                 </div>
                 
+                {/* Quick reorder: Last sold / Frequently sold (when search empty) */}
+                {!searchQuery.trim() && (lastSoldProducts.length > 0 || frequentlySoldProducts.length > 0) && (
+                  <div className="mb-4 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                    <p className="text-xs font-semibold text-slate-600 mb-2">Quick add — one tap</p>
+                    <div className="flex flex-wrap gap-2">
+                      {lastSoldProducts.length > 0 && (
+                        <>
+                          <span className="text-xs text-slate-500 self-center">Last sold:</span>
+                          {lastSoldProducts.map(p => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => addProductToSale(p)}
+                              className="px-3 py-1.5 rounded-lg bg-blue-100 text-blue-800 hover:bg-blue-200 text-sm font-medium"
+                            >
+                              {p.name}
+                            </button>
+                          ))}
+                        </>
+                      )}
+                      {frequentlySoldProducts.length > 0 && (
+                        <>
+                          <span className="text-xs text-slate-500 self-center ml-2">Frequently sold:</span>
+                          {frequentlySoldProducts.filter(p => !lastSoldProducts.some(l => l.id === p.id)).map(p => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => addProductToSale(p)}
+                              className="px-3 py-1.5 rounded-lg bg-slate-200 text-slate-800 hover:bg-slate-300 text-sm font-medium"
+                            >
+                              {p.name}
+                            </button>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Purchase Items List - Direct search results */}
                 <div className="max-h-96 overflow-y-auto space-y-2">
                   {!searchQuery.trim() ? (
@@ -1968,12 +2235,12 @@ const SaleForm = () => {
                       <p className="text-xs text-gray-500 mb-2">
                         Found {searchPurchaseItems.length} item{searchPurchaseItems.length !== 1 ? 's' : ''} matching "{searchQuery}"
                       </p>
-                      {searchPurchaseItems.map(({ purchase, item, product, availableStock, matchType, isExactMatch }) => {
+                      {searchPurchaseItems.map(({ purchase, item, product, availableStock, matchType, isExactMatch }, rowIndex) => {
                         if (!product) {
                           // Product not found - still show the item but with limited info
                           return (
                             <div
-                              key={`${purchase.id}-${item.id}`}
+                              key={`${purchase.id}-${(typeof item.id === 'number' && item.id > 0) ? item.id : `idx-${rowIndex}`}`}
                               className="flex items-center justify-between p-4 rounded-lg border border-orange-200 bg-orange-50"
                             >
                               <div className="flex-1">
@@ -1999,9 +2266,6 @@ const SaleForm = () => {
                                       Barcode: <span className="font-bold text-blue-600">{item.barcode}</span>
                                     </span>
                                   )}
-                                  <span className="text-gray-500 text-xs">
-                                    Purchase #{purchase.id} • {new Date(purchase.purchase_date).toLocaleDateString()}
-                                  </span>
                                   <span className="text-xs text-orange-600">
                                     ⚠️ Product not loaded
                                   </span>
@@ -2027,11 +2291,13 @@ const SaleForm = () => {
                         const mrp = item.mrp || product.selling_price || 0
                         const salePrice = item.sale_price || mrp
                         
+                        // SEARCHINDEX = exact item from search list (list order can differ from purchase.items after sort)
+                        const purchaseItemKey = `PURCHASE-${purchase.id}-SEARCHINDEX-${rowIndex}`
                         return (
                           <div
-                            key={`${purchase.id}-${item.id}`}
+                            key={`${purchase.id}-search-${rowIndex}-${item.article ?? ''}-${item.barcode ?? ''}`}
                             onClick={() => {
-                              addProductToSale(product, `PURCHASE-${purchase.id}-ITEM-${item.id}`)
+                              addProductToSale(product, purchaseItemKey)
                             }}
                             className={`flex items-center justify-between p-4 rounded-lg cursor-pointer transition-colors border ${
                               availableStock > 0
@@ -2063,9 +2329,6 @@ const SaleForm = () => {
                                   </span>
                                 )}
                                 {product.sku && <span>SKU: {product.sku}</span>}
-                                <span className="text-gray-500 text-xs">
-                                  Purchase #{purchase.id} • {new Date(purchase.purchase_date).toLocaleDateString()}
-                                </span>
                               </div>
                             </div>
                             <div className="text-right">
@@ -2078,7 +2341,7 @@ const SaleForm = () => {
                                 className="mt-2 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  addProductToSale(product, `PURCHASE-${purchase.id}-ITEM-${item.id}`)
+                                  addProductToSale(product, purchaseItemKey)
                                 }}
                               >
                                 Add
@@ -2103,7 +2366,8 @@ const SaleForm = () => {
                 {saleItems.length === 0 ? (
                   <p className="text-center text-gray-500 py-8">No items in cart</p>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="max-h-[60vh] overflow-y-auto overflow-x-hidden pr-1 border border-gray-200 rounded-lg">
+                    <div className="space-y-3 p-1">
                     {saleItems.map(item => {
                       const product = availableProducts.find(p => p.id === item.product_id)
                       // Calculate per-unit values
@@ -2122,349 +2386,84 @@ const SaleForm = () => {
                                      (item.purchase_id && item.purchase_item_id ? `P${item.purchase_id}-I${item.purchase_item_id}` : 
                                      `PROD-${item.product_id}-${item.purchase_item_article || 'no-article'}-${Date.now()}`)
                       
+                      const remainingStock = item.sale_type === 'return' ? getMaxReturnableQuantity(item) : getRemainingStockForItem(item)
+                      const stockLabel = item.sale_type === 'return' ? 'Max return' : 'Stock'
+
+                      const setCartItemSaleType = (type: 'sale' | 'return') => {
+                        setSaleItems(prev => prev.map(i => {
+                          const match = (item.purchase_item_unique_key && i.purchase_item_unique_key && i.purchase_item_unique_key === item.purchase_item_unique_key) ||
+                            (item.purchase_item_id && i.purchase_item_id && item.purchase_id && i.purchase_id && i.product_id === item.product_id && i.purchase_item_id === item.purchase_item_id && i.purchase_id === item.purchase_id) ||
+                            (item.purchase_item_article && i.purchase_item_article && !item.purchase_item_id && !i.purchase_item_id && i.product_id === item.product_id && i.purchase_item_article.toLowerCase() === item.purchase_item_article.toLowerCase()) ||
+                            (!item.purchase_item_id && !item.purchase_item_article && !i.purchase_item_id && !i.purchase_item_article && i.product_id === item.product_id)
+                          return match ? { ...i, sale_type: type } : i
+                        }))
+                      }
+
                       return (
-                        <div key={itemKey} className={`p-4 rounded-lg space-y-3 border-2 ${
+                        <div key={itemKey} className={`p-3 rounded-lg border ${
                           item.sale_type === 'return' 
                             ? 'bg-red-50 border-red-200' 
                             : 'bg-gray-50 border-gray-200'
                         }`}>
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2">
-                                <h3 className="font-semibold text-gray-900">{item.product_name}</h3>
-                                <span className={`px-2 py-0.5 text-xs font-bold rounded ${
-                                  item.sale_type === 'return'
-                                    ? 'bg-red-100 text-red-700 border border-red-300'
-                                    : 'bg-green-100 text-green-700 border border-green-300'
-                                }`}>
-                                  {item.sale_type === 'return' ? 'RETURN' : 'SALE'}
-                                </span>
-                              </div>
-                              {(() => {
-                                if (item.sale_type === 'return') {
-                                  const maxReturnable = getMaxReturnableQuantity(item)
-                                  return (
-                                    <div className={`text-xs mt-1 ${maxReturnable > 0 ? 'text-gray-500' : 'text-red-600 font-semibold'}`}>
-                                      Max Returnable: {maxReturnable} {product?.unit || 'pcs'}
-                                      {item.purchase_item_article && ` (Article: ${item.purchase_item_article})`}
-                                    </div>
-                                  )
-                                } else {
-                                  const remainingStock = getRemainingStockForItem(item)
-                                  return (
-                                    <div className={`text-xs mt-1 ${remainingStock > 0 ? 'text-gray-500' : 'text-red-600 font-semibold'}`}>
-                                      Remaining Stock: {remainingStock} {product?.unit || 'pcs'}
-                                      {item.purchase_item_article && ` (Article: ${item.purchase_item_article})`}
-                                    </div>
-                                  )
-                                }
-                              })()}
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => removeItem(item)}
-                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            >
-                              <Trash2 className="w-5 h-5" />
-                            </button>
-                          </div>
-                          
-                          {/* Sale/Return Toggle */}
-                          <div className="flex items-center gap-3 p-2 bg-white rounded border border-gray-300">
-                            <span className="text-xs font-semibold text-gray-700">Type:</span>
-                            <div className="flex gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSaleItems(saleItems.map(i => {
-                                    // Match by unique key first (most accurate)
-                                    if (item.purchase_item_unique_key && i.purchase_item_unique_key) {
-                                      return i.purchase_item_unique_key === item.purchase_item_unique_key 
-                                        ? { ...i, sale_type: 'sale' } : i
-                                    }
-                                    
-                                    // Fallback: Match by product_id AND purchase_item_id
-                                    if (item.purchase_item_id && i.purchase_item_id && 
-                                        item.purchase_id && i.purchase_id) {
-                                      return (i.product_id === item.product_id &&
-                                              i.purchase_item_id === item.purchase_item_id &&
-                                              i.purchase_id === item.purchase_id)
-                                        ? { ...i, sale_type: 'sale' } : i
-                                    }
-                                    
-                                    // Fallback: Match by product_id AND article
-                                    if (item.purchase_item_article && i.purchase_item_article &&
-                                        !item.purchase_item_id && !i.purchase_item_id) {
-                                      return (i.product_id === item.product_id &&
-                                              i.purchase_item_article.toLowerCase() === item.purchase_item_article.toLowerCase())
-                                        ? { ...i, sale_type: 'sale' } : i
-                                    }
-                                    
-                                    // Fallback: Match by product_id only
-                                    if (!item.purchase_item_id && !item.purchase_item_article &&
-                                        !i.purchase_item_id && !i.purchase_item_article) {
-                                      return i.product_id === item.product_id 
-                                        ? { ...i, sale_type: 'sale' } : i
-                                    }
-                                    
-                                    return i
-                                  }))
-                                }}
-                                className={`px-3 py-1 text-xs font-semibold rounded transition-colors ${
-                                  item.sale_type === 'sale'
-                                    ? 'bg-green-500 text-white'
-                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                }`}
-                              >
-                                Sale
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSaleItems(saleItems.map(i => {
-                                    // Match by unique key first (most accurate)
-                                    if (item.purchase_item_unique_key && i.purchase_item_unique_key) {
-                                      return i.purchase_item_unique_key === item.purchase_item_unique_key 
-                                        ? { ...i, sale_type: 'return' } : i
-                                    }
-                                    
-                                    // Fallback: Match by product_id AND purchase_item_id
-                                    if (item.purchase_item_id && i.purchase_item_id && 
-                                        item.purchase_id && i.purchase_id) {
-                                      return (i.product_id === item.product_id &&
-                                              i.purchase_item_id === item.purchase_item_id &&
-                                              i.purchase_id === item.purchase_id)
-                                        ? { ...i, sale_type: 'return' } : i
-                                    }
-                                    
-                                    // Fallback: Match by product_id AND article
-                                    if (item.purchase_item_article && i.purchase_item_article &&
-                                        !item.purchase_item_id && !i.purchase_item_id) {
-                                      return (i.product_id === item.product_id &&
-                                              i.purchase_item_article.toLowerCase() === item.purchase_item_article.toLowerCase())
-                                        ? { ...i, sale_type: 'return' } : i
-                                    }
-                                    
-                                    // Fallback: Match by product_id only
-                                    if (!item.purchase_item_id && !item.purchase_item_article &&
-                                        !i.purchase_item_id && !i.purchase_item_article) {
-                                      return i.product_id === item.product_id 
-                                        ? { ...i, sale_type: 'return' } : i
-                                    }
-                                    
-                                    return i
-                                  }))
-                                }}
-                                className={`px-3 py-1 text-xs font-semibold rounded transition-colors ${
-                                  item.sale_type === 'return'
-                                    ? 'bg-red-500 text-white'
-                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                }`}
-                              >
-                                Return
-                              </button>
-                            </div>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <label className="text-xs text-gray-600 mb-1 block">MRP per unit</label>
-                              <input
-                                type="number"
-                                value={item.mrp || item.unit_price}
-                                onChange={(e) => {
-                                  const newMrp = parseFloat(e.target.value) || 0
-                                  const currentPrice = item.unit_price
-                                  const discount = newMrp > currentPrice ? newMrp - currentPrice : 0
-                                  const discountPct = newMrp > 0 ? (discount / newMrp * 100) : 0
-                                  
-                                  console.log(`[SaleForm] Updating MRP for ${item.product_name}: ₹${item.mrp || item.unit_price} -> ₹${newMrp}`)
-                                  
-                                  const updatedItems = saleItems.map(i => {
-                                    // Match by unique key first (most accurate)
-                                    if (item.purchase_item_unique_key && i.purchase_item_unique_key) {
-                                      return i.purchase_item_unique_key === item.purchase_item_unique_key 
-                                        ? { ...i, mrp: newMrp, discount, discount_percentage: discountPct } : i
-                                    }
-                                    
-                                    // Fallback: Match by product_id AND purchase_item_id
-                                    if (item.purchase_item_id && i.purchase_item_id && 
-                                        item.purchase_id && i.purchase_id) {
-                                      return (i.product_id === item.product_id &&
-                                              i.purchase_item_id === item.purchase_item_id &&
-                                              i.purchase_id === item.purchase_id)
-                                        ? { ...i, mrp: newMrp, discount, discount_percentage: discountPct } : i
-                                    }
-                                    
-                                    // Fallback: Match by product_id AND article
-                                    if (item.purchase_item_article && i.purchase_item_article &&
-                                        !item.purchase_item_id && !i.purchase_item_id) {
-                                      return (i.product_id === item.product_id &&
-                                              i.purchase_item_article.toLowerCase() === item.purchase_item_article.toLowerCase())
-                                        ? { ...i, mrp: newMrp, discount, discount_percentage: discountPct } : i
-                                    }
-                                    
-                                    // Fallback: Match by product_id only
-                                    if (!item.purchase_item_id && !item.purchase_item_article &&
-                                        !i.purchase_item_id && !i.purchase_item_article) {
-                                      return i.product_id === item.product_id 
-                                        ? { ...i, mrp: newMrp, discount, discount_percentage: discountPct } : i
-                                    }
-                                    
-                                    return i
-                                  })
-                                  
-                                  setSaleItems(updatedItems)
-                                }}
-                                className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
-                                min="0"
-                                step="0.01"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-xs text-gray-600 mb-1 block">Selling Price per unit</label>
-                              <input
-                                type="number"
-                                value={item.unit_price}
-                                onChange={(e) => {
-                                  const newPrice = parseFloat(e.target.value) || 0
-                                  
-                                  // Use functional update to ensure we have the latest state
-                                  setSaleItems(prevItems => {
-                                    const updatedItems = prevItems.map(i => {
-                                      // Match by unique key first (most accurate)
-                                      if (item.purchase_item_unique_key && i.purchase_item_unique_key) {
-                                        if (i.purchase_item_unique_key === item.purchase_item_unique_key) {
-                                          const mrp = i.mrp || newPrice
-                                          const discount = mrp > newPrice ? mrp - newPrice : 0
-                                          const discountPct = mrp > 0 ? (discount / mrp * 100) : 0
-                                          const newTotal = newPrice * i.quantity
-                                          console.log(`[SaleForm] Updated selling price for ${i.product_name}: ₹${i.unit_price} -> ₹${newPrice}, Qty: ${i.quantity}, Total: ₹${i.total.toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
-                                          return { ...i, unit_price: newPrice, discount, discount_percentage: discountPct, total: newTotal }
-                                        }
-                                        return i
-                                      }
-                                      
-                                      // Fallback: Match by product_id AND purchase_item_id
-                                      if (item.purchase_item_id && i.purchase_item_id && 
-                                          item.purchase_id && i.purchase_id) {
-                                        if (i.product_id === item.product_id &&
-                                            i.purchase_item_id === item.purchase_item_id &&
-                                            i.purchase_id === item.purchase_id) {
-                                          const mrp = i.mrp || newPrice
-                                          const discount = mrp > newPrice ? mrp - newPrice : 0
-                                          const discountPct = mrp > 0 ? (discount / mrp * 100) : 0
-                                          const newTotal = newPrice * i.quantity
-                                          console.log(`[SaleForm] Updated selling price for ${i.product_name}: ₹${i.unit_price} -> ₹${newPrice}, Qty: ${i.quantity}, Total: ₹${i.total.toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
-                                          return { ...i, unit_price: newPrice, discount, discount_percentage: discountPct, total: newTotal }
-                                        }
-                                        return i
-                                      }
-                                      
-                                      // Fallback: Match by product_id AND article
-                                      if (item.purchase_item_article && i.purchase_item_article &&
-                                          !item.purchase_item_id && !i.purchase_item_id) {
-                                        if (i.product_id === item.product_id &&
-                                            i.purchase_item_article.toLowerCase() === item.purchase_item_article.toLowerCase()) {
-                                          const mrp = i.mrp || newPrice
-                                          const discount = mrp > newPrice ? mrp - newPrice : 0
-                                          const discountPct = mrp > 0 ? (discount / mrp * 100) : 0
-                                          const newTotal = newPrice * i.quantity
-                                          console.log(`[SaleForm] Updated selling price for ${i.product_name}: ₹${i.unit_price} -> ₹${newPrice}, Qty: ${i.quantity}, Total: ₹${i.total.toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
-                                          return { ...i, unit_price: newPrice, discount, discount_percentage: discountPct, total: newTotal }
-                                        }
-                                        return i
-                                      }
-                                      
-                                      // Fallback: Match by product_id only
-                                      if (!item.purchase_item_id && !item.purchase_item_article &&
-                                          !i.purchase_item_id && !i.purchase_item_article) {
-                                        if (i.product_id === item.product_id) {
-                                          const mrp = i.mrp || newPrice
-                                          const discount = mrp > newPrice ? mrp - newPrice : 0
-                                          const discountPct = mrp > 0 ? (discount / mrp * 100) : 0
-                                          const newTotal = newPrice * i.quantity
-                                          console.log(`[SaleForm] Updated selling price for ${i.product_name}: ₹${i.unit_price} -> ₹${newPrice}, Qty: ${i.quantity}, Total: ₹${i.total.toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
-                                          return { ...i, unit_price: newPrice, discount, discount_percentage: discountPct, total: newTotal }
-                                        }
-                                        return i
-                                      }
-                                      
-                                      return i
-                                    })
-                                    
-                                    const newSubtotal = updatedItems.reduce((sum, i) => sum + i.total, 0)
-                                    console.log(`[SaleForm] ✅ Updated all items, new subtotal: ₹${newSubtotal.toFixed(2)}`)
-                                    return updatedItems
-                                  })
-                                }}
-                                className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
-                                min="0"
-                                step="0.01"
-                              />
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center justify-between text-sm">
-                            <div className="flex items-center gap-4">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-600">Qty:</span>
-                                <button
-                                  type="button"
-                                  onClick={() => updateItemQuantity(item, item.quantity - 1)}
-                                  className="w-6 h-6 flex items-center justify-center bg-gray-200 hover:bg-gray-300 rounded"
-                                >
-                                  -
-                                </button>
-                                <span className="w-8 text-center font-semibold">{item.quantity}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => updateItemQuantity(item, item.quantity + 1)}
-                                  className="w-6 h-6 flex items-center justify-center bg-gray-200 hover:bg-gray-300 rounded"
-                                >
-                                  +
-                                </button>
-                              </div>
-                              {item.mrp && item.mrp > item.unit_price && (
-                                <div className="text-xs text-green-600 font-medium">
-                                  {discountPercent}% OFF
-                                </div>
+                          {/* Line 1: Name, badge, article, stock, type toggle, qty, remove */}
+                          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                            <div className="flex items-center gap-2 flex-wrap min-w-0">
+                              <h3 className="font-semibold text-gray-900 truncate">{item.product_name}</h3>
+                              <span className={`shrink-0 px-1.5 py-0.5 text-xs font-bold rounded ${
+                                item.sale_type === 'return'
+                                  ? 'bg-red-100 text-red-700'
+                                  : 'bg-green-100 text-green-700'
+                              }`}>
+                                {item.sale_type === 'return' ? 'RETURN' : 'SALE'}
+                              </span>
+                              {item.purchase_item_article && (
+                                <span className="text-xs text-gray-500 shrink-0">(Article: {item.purchase_item_article})</span>
                               )}
+                              <span className={`text-xs shrink-0 ${remainingStock > 0 ? 'text-gray-500' : 'text-red-600 font-semibold'}`}>
+                                {stockLabel}: {remainingStock} {product?.unit || 'pcs'}
+                              </span>
                             </div>
-                            <div className="text-right">
-                              {item.mrp && item.mrp > item.unit_price && (
+                            <div className="flex items-center gap-2 shrink-0">
+                              <div className="flex gap-0.5">
+                                <button type="button" onClick={() => setCartItemSaleType('sale')} className={`px-2 py-0.5 text-xs font-medium rounded ${item.sale_type === 'sale' ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600'}`}>Sale</button>
+                                <button type="button" onClick={() => setCartItemSaleType('return')} className={`px-2 py-0.5 text-xs font-medium rounded ${item.sale_type === 'return' ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-600'}`}>Return</button>
+                              </div>
+                              <span className="text-xs text-gray-500">Qty</span>
+                              <button type="button" onClick={() => updateItemQuantity(item, item.quantity - 1)} className="w-6 h-6 flex items-center justify-center bg-gray-200 hover:bg-gray-300 rounded text-sm">−</button>
+                              <span className="w-6 text-center text-sm font-semibold">{item.quantity}</span>
+                              <button type="button" onClick={() => updateItemQuantity(item, item.quantity + 1)} className="w-6 h-6 flex items-center justify-center bg-gray-200 hover:bg-gray-300 rounded text-sm">+</button>
+                              <button type="button" onClick={() => removeItem(item)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Remove"><Trash2 className="w-4 h-4" /></button>
+                            </div>
+                          </div>
+                          {/* Line 2: MRP, sale price, total — when qty > 1 show "per unit × qty = total" */}
+                          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 mt-2 text-sm">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <input type="number" value={item.mrp || item.unit_price || ''} onChange={(e) => { const v = e.target.value === '' ? 0 : parseFloat(e.target.value) || 0; const disc = v > item.unit_price ? v - item.unit_price : 0; const pct = v > 0 ? (disc / v * 100) : 0; setSaleItems(prev => prev.map(i => (i.purchase_item_unique_key === item.purchase_item_unique_key && item.purchase_item_unique_key) || (i.product_id === item.product_id && i.purchase_item_id === item.purchase_item_id && i.purchase_id === item.purchase_id && item.purchase_item_id && item.purchase_id) || (i.product_id === item.product_id && i.purchase_item_article && item.purchase_item_article && !item.purchase_item_id && !i.purchase_item_id && i.purchase_item_article.toLowerCase() === item.purchase_item_article.toLowerCase()) || (!item.purchase_item_id && !item.purchase_item_article && !i.purchase_item_id && !i.purchase_item_article && i.product_id === item.product_id) ? ({ ...i, mrp: v, discount: disc, discount_percentage: pct }) : i )) }} className="w-16 px-1.5 py-0.5 text-xs border border-gray-300 rounded" min="0" step="0.01" placeholder="MRP" />
+                              <span className="text-gray-400">→</span>
+                              <input type="number" value={item.unit_price || ''} onChange={(e) => { const newPrice = e.target.value === '' ? 0 : parseFloat(e.target.value) || 0; setSaleItems(prev => prev.map(i => { const match = (i.purchase_item_unique_key === item.purchase_item_unique_key && item.purchase_item_unique_key) || (i.product_id === item.product_id && i.purchase_item_id === item.purchase_item_id && i.purchase_id === item.purchase_id) || (i.product_id === item.product_id && i.purchase_item_article && item.purchase_item_article && !item.purchase_item_id && !i.purchase_item_id && i.purchase_item_article.toLowerCase() === item.purchase_item_article.toLowerCase()) || (!item.purchase_item_id && !item.purchase_item_article && !i.purchase_item_id && !i.purchase_item_article && i.product_id === item.product_id); if (!match) return i; const mrp = i.mrp || newPrice; const discount = mrp > newPrice ? mrp - newPrice : 0; const discountPct = mrp > 0 ? (discount / mrp * 100) : 0; return { ...i, unit_price: newPrice, discount, discount_percentage: discountPct, total: newPrice * i.quantity }; })); }} className="w-16 px-1.5 py-0.5 text-xs border border-gray-300 rounded" min="0" step="0.01" placeholder="Price" />
+                              {item.quantity > 1 ? (
                                 <>
-                                  <div className="text-xs text-gray-500 line-through">
-                                    MRP: ₹{mrpTotal.toFixed(2)}
-                                  </div>
-                                  <div className="text-xs text-gray-400">
-                                    {item.quantity > 1 
-                                      ? `(₹${mrpPerUnit.toFixed(2)} × ${item.quantity})`
-                                      : `(₹${mrpPerUnit.toFixed(2)} per unit)`}
-                                  </div>
+                                  <span className="text-xs text-gray-600">MRP: ₹{mrpPerUnit.toFixed(2)} × {item.quantity} = ₹{mrpTotal.toFixed(2)}</span>
+                                  <span className="text-gray-400">|</span>
+                                  <span className="text-xs text-gray-600">Sale: ₹{sellingPricePerUnit.toFixed(2)} × {item.quantity} = ₹{item.total.toFixed(2)}</span>
+                                  <span className="text-gray-400">|</span>
+                                  <span className="font-semibold text-gray-900">Total: ₹{item.total.toFixed(2)}</span>
                                 </>
+                              ) : (
+                                <span className="font-semibold text-gray-900">Total: ₹{item.total.toFixed(2)}</span>
                               )}
-                              <div className="font-bold text-gray-900">₹{item.total.toFixed(2)}</div>
-                              <div className="text-xs text-gray-400">
-                                {item.quantity > 1 
-                                  ? `(₹${sellingPricePerUnit.toFixed(2)} × ${item.quantity})`
-                                  : `(₹${sellingPricePerUnit.toFixed(2)} per unit)`}
-                              </div>
+                              {item.mrp != null && item.mrp > item.unit_price && (
+                                <span className="text-green-600 text-xs font-medium">{discountPercent}% OFF</span>
+                              )}
                               {totalSavings > 0 && (
-                                <div className="text-xs text-green-600 font-medium">
-                                  You save: ₹{totalSavings.toFixed(2)}
-                                  <span className="text-gray-500">
-                                    {item.quantity > 1 
-                                      ? ` (₹${(totalSavings / item.quantity).toFixed(2)} per unit)`
-                                      : ` (₹${totalSavings.toFixed(2)} per unit)`}
-                                  </span>
-                                </div>
+                                <span className="text-green-600 text-xs">Save ₹{totalSavings.toFixed(2)}</span>
                               )}
                             </div>
                           </div>
                         </div>
                       )
                     })}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2475,6 +2474,23 @@ const SaleForm = () => {
               {/* Customer Details */}
               <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6 border border-white/50">
                 <h2 className="text-xl font-bold text-gray-900 mb-4">Customer Details</h2>
+                {/* Customer display: name, phone, outstanding (credit control) */}
+                {customerId && (() => {
+                  const selected = customers.find(c => c.id === customerId)
+                  if (!selected) return null
+                  const outstanding = selected.outstanding_amount ?? 0
+                  return (
+                    <div className="mb-4 p-3 rounded-xl bg-indigo-50 border border-indigo-200">
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                        <span className="font-semibold text-gray-900">{selected.name}</span>
+                        {selected.phone && <span className="text-gray-600">Phone: {selected.phone}</span>}
+                        <span className={outstanding > 0 ? 'font-semibold text-amber-700' : 'text-gray-500'}>
+                          Outstanding: {outstanding > 0 ? `₹${outstanding.toFixed(2)}` : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })()}
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Customer</label>

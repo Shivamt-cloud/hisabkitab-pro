@@ -1,10 +1,12 @@
-import { useState, useEffect, FormEvent } from 'react'
+import { useState, useEffect, useRef, FormEvent } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { useNavigate, useParams } from 'react-router-dom'
 import { purchaseService, supplierService } from '../services/purchaseService'
 import { productService } from '../services/productService'
 import { companyService } from '../services/companyService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
+import { Breadcrumbs } from '../components/Breadcrumbs'
 import { SimplePurchase, PurchaseItem, Supplier } from '../types/purchase'
 import { Product } from '../services/productService'
 import { ArrowLeft, Save, Plus, Trash2, Package, Home, Calculator, RefreshCw, Barcode, Printer } from 'lucide-react'
@@ -15,9 +17,11 @@ import BarcodePrintModal from '../components/BarcodePrintModal'
 
 const SimplePurchaseForm = () => {
   const { hasPermission, user, getCurrentCompanyId } = useAuth()
+  const { toast } = useToast()
   const navigate = useNavigate()
   const { id } = useParams<{ id?: string }>()
   const isEditing = !!id
+  const formRef = useRef<HTMLFormElement>(null)
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -25,6 +29,7 @@ const SimplePurchaseForm = () => {
   const [supplierName, setSupplierName] = useState('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0])
+  const [dueDate, setDueDate] = useState('')
   const [items, setItems] = useState<PurchaseItem[]>([])
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'pending' | 'partial'>('pending')
   const [paymentMethod, setPaymentMethod] = useState('')
@@ -130,16 +135,19 @@ const SimplePurchaseForm = () => {
         }
         setInvoiceNumber(simplePurchase.invoice_number || '')
         setPurchaseDate(simplePurchase.purchase_date)
+        setDueDate(simplePurchase.due_date ? simplePurchase.due_date.split('T')[0] : '')
         setItems(simplePurchase.items.map(item => ({
           ...item,
           purchase_type: item.purchase_type || 'purchase',
           barcode: item.barcode || '',
+          batch_no: item.batch_no || '',
+          expiry_date: item.expiry_date ? item.expiry_date.split('T')[0] : '',
           mrp: item.mrp || 0,
           sale_price: item.sale_price || 0,
           margin_percentage: item.margin_percentage || 0,
           margin_amount: item.margin_amount || 0,
           min_stock_level: item.min_stock_level,
-          sold_quantity: item.sold_quantity || 0, // Ensure sold_quantity is initialized
+          sold_quantity: item.sold_quantity || 0,
           color: item.color || '',
           size: item.size || '',
         })))
@@ -164,6 +172,13 @@ const SimplePurchaseForm = () => {
     })))
   }, [isEditing, products, items.length])
 
+  // Quick Win #2: Ctrl+S to save
+  useEffect(() => {
+    const onAppSave = () => formRef.current?.requestSubmit()
+    window.addEventListener('app-save', onAppSave)
+    return () => window.removeEventListener('app-save', onAppSave)
+  }, [])
+
   const addItem = () => {
     // Only add if last item is empty or all items have products
     if (items.length === 0 || items[items.length - 1].product_id > 0) {
@@ -172,6 +187,8 @@ const SimplePurchaseForm = () => {
         purchase_type: 'purchase',
         article: '',
         barcode: '',
+        batch_no: '',
+        expiry_date: '',
         quantity: 1,
         unit_price: 0,
         mrp: 0,
@@ -288,6 +305,8 @@ const SimplePurchaseForm = () => {
             product_id: 0,
             article: '',
             barcode: '',
+            batch_no: '',
+            expiry_date: '',
             quantity: 1,
             unit_price: 0,
             mrp: 0,
@@ -382,6 +401,7 @@ const SimplePurchaseForm = () => {
         const itemsWithBarcodes = ensureBarcodesGenerated(items.filter(item => item.product_id > 0))
         await purchaseService.update(parseInt(id), {
           purchase_date: purchaseDate,
+          due_date: dueDate.trim() || undefined,
           supplier_id: supplierId ? supplierId as number : undefined,
           supplier_name: supplierId ? undefined : supplierName.trim() || undefined,
           invoice_number: invoiceNumber.trim() || undefined,
@@ -396,7 +416,7 @@ const SimplePurchaseForm = () => {
           return_remarks: items.some(item => item.purchase_type === 'return') ? returnRemarks.trim() || undefined : undefined,
         } as Partial<SimplePurchase>)
         
-        alert('Purchase updated successfully!')
+        toast.success('Purchase updated successfully!')
         navigate('/purchases/history')
       } else {
         const itemsWithBarcodes = ensureBarcodesGenerated(items.filter(item => item.product_id > 0))
@@ -408,6 +428,7 @@ const SimplePurchaseForm = () => {
         await purchaseService.createSimple({
           type: 'simple',
           purchase_date: purchaseDate,
+          due_date: dueDate.trim() || undefined,
           supplier_id: supplierId ? supplierId as number : undefined,
           supplier_name: supplier?.name || supplierName,
           invoice_number: invoiceNumber || undefined,
@@ -421,7 +442,7 @@ const SimplePurchaseForm = () => {
           created_by: parseInt(user?.id || '1'),
         })
         
-        alert('Purchase created successfully!')
+        toast.success('Purchase created successfully!')
         // Optionally show print modal after save
         const itemsWithNames = finalItems.map(item => ({
           ...item,
@@ -432,7 +453,7 @@ const SimplePurchaseForm = () => {
       }
     } catch (error) {
       console.error('Error creating purchase:', error)
-      alert('Failed to create purchase. Please try again.')
+      toast.error('Failed to create purchase. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -461,9 +482,17 @@ const SimplePurchaseForm = () => {
                 >
                   <Home className="w-5 h-5 text-gray-600" />
                 </button>
-                <div>
+                <div className="min-w-0">
+                  <Breadcrumbs
+                    items={[
+                      { label: 'Dashboard', path: '/' },
+                      { label: 'Purchase History', path: '/purchases/history' },
+                      { label: isEditing ? `Edit Simple Purchase #${id}` : 'New Simple Purchase' },
+                    ]}
+                    className="mb-1"
+                  />
                   <h1 className="text-3xl font-bold text-gray-900">
-                    {isEditing ? 'Edit Simple Purchase' : 'Simple Purchase'}
+                    {isEditing ? `Edit Simple Purchase #${id}` : 'Simple Purchase'}
                   </h1>
                   <p className="text-sm text-gray-600 mt-1">
                     {isEditing ? 'Update purchase without GST details' : 'Create a purchase without GST details'}
@@ -475,7 +504,7 @@ const SimplePurchaseForm = () => {
         </header>
 
         <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <form onSubmit={handleSubmit} className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-8 border border-white/50">
+          <form ref={formRef} onSubmit={handleSubmit} className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-8 border border-white/50">
             {/* Supplier & Invoice Details */}
             <div className="mb-8">
               <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
@@ -555,6 +584,17 @@ const SimplePurchaseForm = () => {
                     value={purchaseDate}
                     onChange={(e) => setPurchaseDate(e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Due Date (optional)</label>
+                  <input
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                    title="When bill payment is due (for reminders)"
                   />
                 </div>
 
@@ -657,6 +697,8 @@ const SimplePurchaseForm = () => {
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[200px]">Product</th>
                       <th className="px-6 py-5 text-center text-xs font-semibold text-gray-700 uppercase min-w-[120px]">Type</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[140px]">Article</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[100px]">Batch No</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[110px]">Expiry</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[170px]">Barcode</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[100px]">Color</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[100px]">Size</th>
@@ -749,6 +791,25 @@ const SimplePurchaseForm = () => {
                         <td className="px-6 py-5">
                           <input
                             type="text"
+                            value={item.batch_no || ''}
+                            onChange={(e) => updateItem(index, 'batch_no', e.target.value)}
+                            className="w-full min-w-[100px] px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                            placeholder="Batch"
+                            title="Batch number (optional)"
+                          />
+                        </td>
+                        <td className="px-6 py-5">
+                          <input
+                            type="date"
+                            value={item.expiry_date ? (item.expiry_date as string).split('T')[0] : ''}
+                            onChange={(e) => updateItem(index, 'expiry_date', e.target.value || undefined)}
+                            className="w-full min-w-[110px] px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                            title="Expiry date (optional)"
+                          />
+                        </td>
+                        <td className="px-6 py-5">
+                          <input
+                            type="text"
                             value={item.barcode || ''}
                             onChange={(e) => updateItem(index, 'barcode', e.target.value)}
                             className="w-full min-w-[140px] px-5 py-4 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
@@ -794,8 +855,9 @@ const SimplePurchaseForm = () => {
                           <input
                             type="number"
                             min="1"
-                            value={item.quantity}
-                            onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 0)}
+                            value={item.quantity === 0 || item.quantity === undefined ? '' : item.quantity}
+                            onChange={(e) => updateItem(index, 'quantity', e.target.value === '' ? 0 : parseInt(e.target.value) || 0)}
+                            placeholder="0"
                             className={`w-full min-w-[100px] px-5 py-4 text-base border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none ${
                               errors[`item_${index}_quantity`] ? 'border-red-300' : 'border-gray-300'
                             }`}
@@ -811,8 +873,9 @@ const SimplePurchaseForm = () => {
                             type="number"
                             step="0.01"
                             min="0"
-                            value={item.unit_price}
-                            onChange={(e) => updateItem(index, 'unit_price', parseFloat(e.target.value) || 0)}
+                            value={item.unit_price === 0 || item.unit_price === undefined ? '' : item.unit_price}
+                            onChange={(e) => updateItem(index, 'unit_price', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
+                            placeholder="0"
                             className={`w-full min-w-[140px] px-5 py-4 text-base border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none ${
                               errors[`item_${index}_price`] ? 'border-red-300' : 'border-gray-300'
                             }`}
@@ -823,8 +886,9 @@ const SimplePurchaseForm = () => {
                             type="number"
                             step="0.01"
                             min="0"
-                            value={item.mrp || 0}
-                            onChange={(e) => updateItem(index, 'mrp', parseFloat(e.target.value) || 0)}
+                            value={item.mrp === 0 || item.mrp === undefined ? '' : item.mrp}
+                            onChange={(e) => updateItem(index, 'mrp', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
+                            placeholder="0"
                             className="w-full min-w-[140px] px-5 py-4 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                           />
                         </td>
@@ -833,8 +897,9 @@ const SimplePurchaseForm = () => {
                             type="number"
                             step="0.01"
                             min="0"
-                            value={item.sale_price || 0}
-                            onChange={(e) => updateItem(index, 'sale_price', parseFloat(e.target.value) || 0)}
+                            value={item.sale_price === 0 || item.sale_price === undefined ? '' : item.sale_price}
+                            onChange={(e) => updateItem(index, 'sale_price', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
+                            placeholder="0"
                             className="w-full min-w-[140px] px-5 py-4 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                           />
                         </td>

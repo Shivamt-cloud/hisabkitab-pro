@@ -26,7 +26,7 @@ const defaultSettings: SystemSettings = {
     show_tax_breakdown: true,
     show_payment_instructions: false,
     payment_instructions_text: '',
-    invoice_template: 'standard',
+    invoice_template: 'detailed',
   },
   tax: {
     default_gst_rate: 18,
@@ -47,6 +47,8 @@ const defaultSettings: SystemSettings = {
     auto_archive_products_after_sale: true,
     enable_barcode_generation: true,
     default_barcode_format: 'EAN13',
+    sales_target_daily: undefined,
+    sales_target_monthly: undefined,
   },
   barcode_label: {
     label_size: 'standard', // 1.46" x 1.02"
@@ -164,9 +166,14 @@ export const settingsService = {
       const stored = record.settings
       if (stored) {
         // Merge with defaults to ensure all fields exist
+        const invoice = { ...defaultSettings.invoice, ...stored.invoice }
+        // Normalize legacy invoice_template values for new layout options
+        const legacyTemplate = (invoice as any).invoice_template as string | undefined
+        if (legacyTemplate === 'standard') invoice.invoice_template = 'detailed'
+        else if (legacyTemplate === 'minimal') invoice.invoice_template = 'compact'
         return {
           company: { ...defaultSettings.company, ...stored.company },
-          invoice: { ...defaultSettings.invoice, ...stored.invoice },
+          invoice,
           tax: { ...defaultSettings.tax, ...stored.tax },
           general: { ...defaultSettings.general, ...stored.general },
           barcode_label: stored.barcode_label ? { ...defaultSettings.barcode_label!, ...stored.barcode_label } : defaultSettings.barcode_label,

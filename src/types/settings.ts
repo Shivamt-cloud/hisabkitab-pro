@@ -23,7 +23,8 @@ export interface InvoiceSettings {
   show_tax_breakdown: boolean
   show_payment_instructions: boolean
   payment_instructions_text?: string
-  invoice_template: 'standard' | 'detailed' | 'minimal'
+  /** compact = minimal layout; detailed = full layout; with_logo = detailed + prominent company logo */
+  invoice_template: 'compact' | 'detailed' | 'with_logo'
 }
 
 export interface TaxSettings {
@@ -46,6 +47,10 @@ export interface GeneralSettings {
   auto_archive_products_after_sale: boolean
   enable_barcode_generation: boolean
   default_barcode_format: 'EAN13' | 'CODE128' | 'UPCA' | 'CODE39'
+  /** Optional daily sales target (₹) – shown on dashboard as progress */
+  sales_target_daily?: number
+  /** Optional monthly sales target (₹) – shown on dashboard as progress */
+  sales_target_monthly?: number
 }
 
 export interface BarcodeLabelSettings {

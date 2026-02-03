@@ -1,8 +1,10 @@
-import { useRef } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { InvoiceData } from '../types/invoice'
 import { Printer, Download, X, Share2, Plus, Receipt } from 'lucide-react'
 import { exportInvoiceToPDF, exportHTMLToPDF, printReceipt, buildReceiptHTML } from '../utils/exportUtils'
 import { settingsService } from '../services/settingsService'
+
+type InvoiceTemplateType = 'compact' | 'detailed' | 'with_logo'
 
 interface InvoiceProps {
   invoiceData: InvoiceData
@@ -13,6 +15,18 @@ interface InvoiceProps {
 
 const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: InvoiceProps) => {
   const invoiceRef = useRef<HTMLDivElement>(null)
+  const [template, setTemplate] = useState<InvoiceTemplateType>('detailed')
+
+  useEffect(() => {
+    settingsService.getAll()
+      .then(s => {
+        const t = s?.invoice?.invoice_template
+        if (t === 'compact' || t === 'detailed' || t === 'with_logo') setTemplate(t)
+        else if (t === 'standard') setTemplate('detailed')
+        else if (t === 'minimal') setTemplate('compact')
+      })
+      .catch(() => {})
+  }, [])
 
   const handlePrint = () => {
     window.print()
@@ -181,11 +195,27 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
       )}
 
       {/* Invoice Content */}
-      <div ref={invoiceRef} className="invoice-container bg-white shadow-xl rounded-lg p-8 max-w-4xl mx-auto">
+      <div
+        ref={invoiceRef}
+        className={`invoice-container bg-white shadow-xl rounded-lg max-w-4xl mx-auto ${
+          template === 'compact' ? 'p-4' : 'p-8'
+        }`}
+      >
         {/* Header */}
-        <div className="invoice-header border-b-2 border-gray-200 pb-6 mb-8">
+        <div className={`invoice-header border-b-2 border-gray-200 ${template === 'compact' ? 'pb-4 mb-4' : 'pb-6 mb-8'}`}>
           <div className="company-info">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            {/* With Logo template: show company logo prominently */}
+            {template === 'with_logo' && invoiceData.company_info?.logo && (
+              <div className="mb-4">
+                <img
+                  src={invoiceData.company_info.logo}
+                  alt="Company logo"
+                  className="h-16 object-contain object-left"
+                  style={{ maxWidth: '200px' }}
+                />
+              </div>
+            )}
+            <h1 className={`font-bold text-gray-900 mb-2 ${template === 'compact' ? 'text-xl' : 'text-3xl'}`}>
               {invoiceData.company_info?.name || 'HisabKitab'}
             </h1>
             {invoiceData.company_info?.address && (
@@ -237,10 +267,10 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
         </div>
 
         {/* Billing Information */}
-        <div className="billing-section grid grid-cols-2 gap-8 mb-8">
+        <div className={`billing-section grid grid-cols-2 ${template === 'compact' ? 'gap-4 mb-4' : 'gap-8 mb-8'}`}>
           <div>
             <h3 className="text-xs font-semibold text-gray-500 uppercase mb-3">Bill To</h3>
-            <div className="space-y-1">
+            <div className={`space-y-1 ${template === 'compact' ? 'text-sm' : ''}`}>
               <p className="font-semibold text-gray-900">{invoiceData.customer?.name || 'Walk-in Customer'}</p>
               {invoiceData.customer?.address && (
                 <p className="text-gray-600 text-sm">{invoiceData.customer.address}</p>
@@ -274,15 +304,19 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
         </div>
 
         {/* Items Table */}
-        <table className="w-full border-collapse mb-8">
+        <table className={`w-full border-collapse ${template === 'compact' ? 'mb-4 text-sm' : 'mb-8'}`}>
           <thead>
             <tr className="bg-gray-50">
-              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase">Item</th>
-              <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase">Qty</th>
-              <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase">MRP</th>
-              <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase">Rate</th>
-              <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase">Discount</th>
-              <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase">Amount</th>
+              <th className="text-left py-2 px-3 text-xs font-semibold text-gray-600 uppercase">Item</th>
+              <th className="text-right py-2 px-3 text-xs font-semibold text-gray-600 uppercase">Qty</th>
+              {template !== 'compact' && (
+                <th className="text-right py-2 px-3 text-xs font-semibold text-gray-600 uppercase">MRP</th>
+              )}
+              <th className="text-right py-2 px-3 text-xs font-semibold text-gray-600 uppercase">Rate</th>
+              {template !== 'compact' && (
+                <th className="text-right py-2 px-3 text-xs font-semibold text-gray-600 uppercase">Discount</th>
+              )}
+              <th className="text-right py-2 px-3 text-xs font-semibold text-gray-600 uppercase">Amount</th>
             </tr>
           </thead>
           <tbody>
@@ -292,40 +326,44 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
                 : 0
               return (
                 <tr key={index} className="border-b border-gray-200">
-                  <td className="py-3 px-4">
+                  <td className="py-2 px-3">
                     <div>
                       <p className="font-medium text-gray-900">{item.product_name}</p>
-                      {item.gst_rate !== undefined && (
+                      {template !== 'compact' && item.gst_rate !== undefined && (
                         <p className="text-xs text-gray-500">GST @ {item.gst_rate}%</p>
                       )}
                     </div>
                   </td>
-                  <td className="py-3 px-4 text-right text-gray-900">
+                  <td className="py-2 px-3 text-right text-gray-900">
                     {item.quantity} {item.unit || 'pcs'}
                   </td>
-                  <td className="py-3 px-4 text-right">
-                    {item.mrp && item.mrp > item.unit_price ? (
-                      <span className="text-gray-400 line-through">₹{(item.mrp * item.quantity).toFixed(2)}</span>
-                    ) : (
-                      <span className="text-gray-600">₹{(item.unit_price * item.quantity).toFixed(2)}</span>
-                    )}
-                  </td>
-                  <td className="py-3 px-4 text-right text-gray-900">
+                  {template !== 'compact' && (
+                    <td className="py-2 px-3 text-right">
+                      {item.mrp && item.mrp > item.unit_price ? (
+                        <span className="text-gray-400 line-through">₹{(item.mrp * item.quantity).toFixed(2)}</span>
+                      ) : (
+                        <span className="text-gray-600">₹{(item.unit_price * item.quantity).toFixed(2)}</span>
+                      )}
+                    </td>
+                  )}
+                  <td className="py-2 px-3 text-right text-gray-900">
                     ₹{item.unit_price.toFixed(2)}
-                    {item.mrp && item.mrp > item.unit_price && (
+                    {template !== 'compact' && item.mrp && item.mrp > item.unit_price && (
                       <span className="block text-xs text-green-600 font-medium">
                         {item.discount_percentage?.toFixed(1)}% OFF
                       </span>
                     )}
                   </td>
-                  <td className="py-3 px-4 text-right">
-                    {itemDiscount > 0 ? (
-                      <span className="text-green-600 font-medium">-₹{itemDiscount.toFixed(2)}</span>
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
-                  </td>
-                  <td className="py-3 px-4 text-right font-semibold text-gray-900">
+                  {template !== 'compact' && (
+                    <td className="py-2 px-3 text-right">
+                      {itemDiscount > 0 ? (
+                        <span className="text-green-600 font-medium">-₹{itemDiscount.toFixed(2)}</span>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                  )}
+                  <td className="py-2 px-3 text-right font-semibold text-gray-900">
                     ₹{item.total.toFixed(2)}
                   </td>
                 </tr>

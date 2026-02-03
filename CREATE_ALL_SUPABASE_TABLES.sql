@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS purchases (
   payment_method TEXT,
   notes TEXT,
   return_remarks TEXT, -- Remarks/details for purchase returns to supplier
+  due_date DATE, -- When bill payment is due (for reminders: Overdue / Due for payment)
   company_id INTEGER,
   created_by BIGINT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

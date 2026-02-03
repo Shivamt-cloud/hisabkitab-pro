@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { productService } from '../services/productService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { StockAlert } from '../types/stock'
-import { AlertTriangle, Package, Home, TrendingDown, ShoppingCart } from 'lucide-react'
+import { AlertTriangle, Package, Home, TrendingDown, ShoppingCart, ListOrdered } from 'lucide-react'
 
 const StockAlerts = () => {
   const { hasPermission, getCurrentCompanyId } = useAuth()
@@ -279,6 +279,14 @@ const StockAlerts = () => {
                   <p className="text-sm text-gray-600 mt-1">Monitor low stock and out of stock products</p>
                 </div>
               </div>
+              <button
+                onClick={() => navigate('/stock/reorder')}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-sm font-medium"
+                title="Reorder list: products below min stock with last purchase qty/rate"
+              >
+                <ListOrdered className="w-4 h-4" />
+                Reorder List
+              </button>
             </div>
           </div>
         </header>

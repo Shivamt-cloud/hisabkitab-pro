@@ -17,12 +17,16 @@ export interface PurchaseItem {
   margin_percentage?: number // Margin percentage
   margin_amount?: number // Margin amount per unit
   min_stock_level?: number // Minimum stock level for alerts
+  discount_percentage?: number // Item-wise supplier discount (e.g. 5%)
   gst_rate?: number
   tax_amount?: number
   total: number
   color?: string // Color variant (e.g., for clothing business)
   size?: string // Size variant (e.g., S, M, L, XL for clothing business)
   purchase_type?: 'purchase' | 'return' // Whether this item is a purchase or return to supplier
+  // Optional batch/expiry for FMCG/medicines (FIFO by expiry in sale)
+  batch_no?: string
+  expiry_date?: string // ISO date (YYYY-MM-DD)
 }
 
 export interface GSTPurchase {
@@ -44,6 +48,7 @@ export interface GSTPurchase {
   payment_method?: string
   notes?: string
   return_remarks?: string // Remarks/details for purchase returns to supplier
+  due_date?: string // ISO date – when bill payment is due (for reminders)
   company_id?: number
   created_by: number
   created_at: string
@@ -63,6 +68,7 @@ export interface SimplePurchase {
   payment_method?: string
   notes?: string
   return_remarks?: string // Remarks/details for purchase returns to supplier
+  due_date?: string // ISO date – when bill payment is due (for reminders)
   company_id?: number
   created_by: number
   created_at: string

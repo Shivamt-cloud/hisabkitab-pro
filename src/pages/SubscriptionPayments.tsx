@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Home, ReceiptText, Download, Eye, RefreshCw } from 'lucide-react'
+import { Home, ReceiptText, Download, Eye, RefreshCw, CreditCard } from 'lucide-react'
 import { ProtectedRoute } from '../components/ProtectedRoute'
+import { LoadingState } from '../components/LoadingState'
+import { EmptyState } from '../components/EmptyState'
 import { useAuth } from '../context/AuthContext'
 import { subscriptionPaymentService } from '../services/subscriptionPaymentService'
 import type { SubscriptionPayment } from '../types/subscriptionPayment'
@@ -113,9 +115,13 @@ const SubscriptionPaymentsPage = () => {
             </div>
 
             {loading ? (
-              <div className="p-8 text-center text-gray-600">Loading payments...</div>
+              <LoadingState message="Loading payments..." />
             ) : items.length === 0 ? (
-              <div className="p-8 text-center text-gray-600">No subscription payments found.</div>
+              <EmptyState
+                icon={CreditCard}
+                title="No subscription payments"
+                description="Subscription payment history will appear here once you have made a payment."
+              />
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">

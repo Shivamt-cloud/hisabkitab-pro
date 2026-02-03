@@ -29,9 +29,11 @@ import Customers from './pages/Customers'
 import CustomerForm from './pages/CustomerForm'
 import InvoiceView from './pages/InvoiceView'
 import StockAlerts from './pages/StockAlerts'
+import ReorderList from './pages/ReorderList'
 import StockAdjustmentForm from './pages/StockAdjustmentForm'
 import StockAdjustmentHistory from './pages/StockAdjustmentHistory'
 import SalesReports from './pages/SalesReports'
+import CAReports from './pages/CAReports'
 import OutstandingPayments from './pages/OutstandingPayments'
 import SystemSettings from './pages/SystemSettings'
 import BackupRestore from './pages/BackupRestore'
@@ -54,6 +56,11 @@ import { LicenseGuard } from './components/LicenseGuard'
 import { LicenseExpiredBanner } from './components/LicenseExpiredBanner'
 import { UpdateBanner } from './components/UpdateBanner'
 import { UpgradeBanner } from './components/UpgradeBanner'
+import { OfflineBanner } from './components/OfflineBanner'
+import { GlobalSearch } from './components/GlobalSearch'
+import { KeyboardShortcuts } from './components/KeyboardShortcuts'
+import { ToastProvider } from './context/ToastContext'
+import { Toast } from './components/Toast'
 
 // Lazy load to prevent import errors from breaking the app
 // const BackupRestore = lazy(() => import('./pages/BackupRestore'))
@@ -62,11 +69,13 @@ function App() {
   return (
     <DatabaseProvider>
       <AuthProvider>
+        <ToastProvider>
         <Router>
           <LicenseGuard>
             <LicenseExpiredBanner />
             <UpdateBanner />
             <UpgradeBanner />
+            <OfflineBanner />
             <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/user-manual" element={<UserManual />} />
@@ -399,6 +408,14 @@ function App() {
             }
           />
           <Route
+            path="/stock/reorder"
+            element={
+              <ProtectedRoute requiredPermission="products:read">
+                <ReorderList />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/stock/adjust"
             element={
               <ProtectedRoute requiredPermission="products:update">
@@ -419,6 +436,14 @@ function App() {
             element={
               <ProtectedRoute requiredPermission="reports:read">
                 <SalesReports />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reports/ca"
+            element={
+              <ProtectedRoute requiredPermission="reports:read">
+                <CAReports />
               </ProtectedRoute>
             }
           />
@@ -552,8 +577,12 @@ function App() {
           />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            <GlobalSearch />
+            <KeyboardShortcuts />
+            <Toast />
           </LicenseGuard>
         </Router>
+        </ToastProvider>
       </AuthProvider>
     </DatabaseProvider>
   )

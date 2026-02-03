@@ -4,7 +4,9 @@ import { saleService } from '../services/saleService'
 import { customerService } from '../services/customerService'
 import { productService } from '../services/productService'
 import { companyService } from '../services/companyService'
+import { settingsService } from '../services/settingsService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
+import { Breadcrumbs } from '../components/Breadcrumbs'
 import Invoice from '../components/Invoice'
 import { InvoiceData } from '../types/invoice'
 import { Sale } from '../types/sale'
@@ -21,6 +23,13 @@ const InvoiceView = () => {
       loadInvoiceData(parseInt(id))
     }
   }, [id])
+
+  // Quick Win #2: Ctrl+P to print invoice
+  useEffect(() => {
+    const onAppPrint = () => window.print()
+    window.addEventListener('app-print', onAppPrint)
+    return () => window.removeEventListener('app-print', onAppPrint)
+  }, [])
 
   const loadInvoiceData = async (saleId: number) => {
     setLoading(true)
@@ -78,8 +87,11 @@ const InvoiceView = () => {
       
       const invoiceItems = await Promise.all(invoiceItemsPromises)
 
-      // Load company information from sale
+      // Load company information from sale (and logo from settings for invoice template)
       let companyInfo
+      const settings = await settingsService.getAll().catch(() => null)
+      const companyLogo = settings?.company?.company_logo
+
       if (sale.company_id) {
         const company = await companyService.getById(sale.company_id)
         if (company) {
@@ -99,8 +111,9 @@ const InvoiceView = () => {
             pincode: company.pincode,
             phone: company.phone,
             email: company.email,
-            gstin: company.gstin, // Show GST if company has it
+            gstin: company.gstin,
             website: company.website,
+            logo: companyLogo || (company as any).logo,
           }
         }
       }
@@ -109,6 +122,7 @@ const InvoiceView = () => {
       if (!companyInfo) {
         companyInfo = {
           name: 'HisabKitab',
+          logo: companyLogo,
         }
       }
 
@@ -186,7 +200,15 @@ const InvoiceView = () => {
               >
                 <Home className="w-5 h-5 text-gray-700" />
               </button>
-              <div>
+              <div className="min-w-0">
+                <Breadcrumbs
+                  items={[
+                    { label: 'Dashboard', path: '/' },
+                    { label: 'Sales History', path: '/sales/history' },
+                    { label: `Invoice #${invoiceData.invoice_number}` },
+                  ]}
+                  className="mb-1"
+                />
                 <h1 className="text-2xl font-bold text-gray-900">Invoice #{invoiceData.invoice_number}</h1>
                 <p className="text-sm text-gray-600">View and print invoice</p>
               </div>

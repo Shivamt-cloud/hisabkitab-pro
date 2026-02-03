@@ -1,8 +1,10 @@
-import { useState, useEffect, FormEvent } from 'react'
+import { useState, useEffect, useRef, FormEvent } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { useNavigate, useParams } from 'react-router-dom'
 import { productService, categoryService, Product, Category } from '../services/productService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
+import { Breadcrumbs } from '../components/Breadcrumbs'
 import { ArrowLeft, Save, Package, RefreshCw, Calculator, Home, Upload, X, Image as ImageIcon } from 'lucide-react'
 import { validateBarcode } from '../utils/barcodeGenerator'
 import { calculateTax, GST_RATES, getSplitGSTRates, validateHSNCode } from '../utils/taxCalculator'
@@ -10,9 +12,11 @@ import { compressImage, fileToBase64, validateImageFile } from '../utils/imageUt
 
 const ProductForm = () => {
   const { hasPermission, getCurrentCompanyId } = useAuth()
+  const { toast } = useToast()
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
   const isEdit = !!id
+  const formRef = useRef<HTMLFormElement>(null)
 
   const [formData, setFormData] = useState<Partial<Product>>({
     name: '',
@@ -151,6 +155,12 @@ const ProductForm = () => {
     return Object.keys(newErrors).length === 0
   }
 
+  // Quick Win #2: Ctrl+S to save
+  useEffect(() => {
+    const onAppSave = () => formRef.current?.requestSubmit()
+    window.addEventListener('app-save', onAppSave)
+    return () => window.removeEventListener('app-save', onAppSave)
+  }, [])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -179,10 +189,11 @@ const ProductForm = () => {
         } as Omit<Product, 'id' | 'created_at' | 'updated_at' | 'category_name'>
         await productService.create(productData)
       }
+      toast.success(isEdit ? 'Product updated!' : 'Product created!')
       navigate('/products')
     } catch (error) {
       console.error('Error saving product:', error)
-      alert('Failed to save product. Please try again.')
+      toast.error('Failed to save product. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -210,7 +221,15 @@ const ProductForm = () => {
                 >
                   <Home className="w-5 h-5 text-gray-600" />
                 </button>
-                <div>
+                <div className="min-w-0">
+                  <Breadcrumbs
+                    items={[
+                      { label: 'Dashboard', path: '/' },
+                      { label: 'Products', path: '/products' },
+                      { label: isEdit ? `Edit Product${id ? ` #${id}` : ''}` : 'New Product' },
+                    ]}
+                    className="mb-1"
+                  />
                   <h1 className="text-3xl font-bold text-gray-900">
                     {isEdit ? 'Edit Product' : 'Add New Product'}
                   </h1>
@@ -225,7 +244,7 @@ const ProductForm = () => {
 
         {/* Main Content */}
         <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <form onSubmit={handleSubmit} className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-8 border border-white/50">
+          <form ref={formRef} onSubmit={handleSubmit} className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-8 border border-white/50">
             {/* Basic Information */}
             <div className="mb-8">
               <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">

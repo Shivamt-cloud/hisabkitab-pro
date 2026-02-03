@@ -12,6 +12,7 @@ import {
   Home
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { getDateRangeForPreset } from '../utils/datePresets'
 import { SalesPersonCommission } from '../types/salesperson'
 
 interface CommissionSummary {
@@ -229,6 +230,22 @@ const CommissionReports = () => {
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Select Date
                 </label>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDate(getDateRangeForPreset('today').startDate!)}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300"
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDate(getDateRangeForPreset('yesterday').startDate!)}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300"
+                  >
+                    Yesterday
+                  </button>
+                </div>
                 <div className="relative">
                   <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                   <input
@@ -240,6 +257,25 @@ const CommissionReports = () => {
                 </div>
               </div>
             ) : (
+              <div className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                {(['today', 'yesterday', 'thisWeek', 'lastWeek', 'thisMonth', 'lastMonth'] as const).map((preset) => {
+                  const { startDate: s, endDate: e } = getDateRangeForPreset(preset)
+                  return (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        if (s) setStartDate(s)
+                        if (e) setEndDate(e)
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300"
+                    >
+                      {preset === 'thisWeek' ? 'This Week' : preset === 'lastWeek' ? 'Last Week' : preset === 'thisMonth' ? 'This Month' : preset === 'lastMonth' ? 'Last Month' : preset === 'yesterday' ? 'Yesterday' : 'Today'}
+                    </button>
+                  )
+                })}
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -270,6 +306,7 @@ const CommissionReports = () => {
                     />
                   </div>
                 </div>
+              </div>
               </div>
             )}
 

@@ -1,7 +1,24 @@
 // Cloud Purchase Service - Handles purchase operations with Supabase
 import { supabase, isSupabaseAvailable, isOnline } from './supabaseClient'
-import { Purchase, GSTPurchase, SimplePurchase, PurchaseType } from '../types/purchase'
+import { Purchase, GSTPurchase, SimplePurchase, PurchaseType, PurchaseItem } from '../types/purchase'
 import { getAll, put, getById, deleteById, STORES } from '../database/db'
+
+/**
+ * Ensure every purchase item has a unique numeric id (for JSONB storage and sale form).
+ * Use when saving/reading so each article (A, B, C…) is treated uniquely.
+ * - Keeps existing id if it's a positive number; otherwise assigns a unique id.
+ * - When purchaseId is provided: id = purchaseId*1000000+index (stable per purchase).
+ * - When creating (no id yet): id = Date.now()+index.
+ */
+function normalizePurchaseItems(items: PurchaseItem[] | undefined, purchaseId?: number): PurchaseItem[] {
+  if (!items || !items.length) return []
+  const base = purchaseId != null ? purchaseId * 1000000 : Date.now()
+  return items.map((item: any, index: number) => ({
+    ...item,
+    id: (typeof item.id === 'number' && item.id > 0) ? item.id : (base + index),
+    sold_quantity: item.sold_quantity !== undefined ? item.sold_quantity : 0
+  }))
+}
 
 /**
  * Cloud Purchase Service
@@ -24,7 +41,7 @@ export const cloudPurchaseService = {
       if (type) {
         purchases = purchases.filter(p => p.type === type)
       }
-      return purchases
+      return purchases.map(p => ({ ...p, items: normalizePurchaseItems(p.items, p.id) }))
     }
 
     try {
@@ -55,24 +72,19 @@ export const cloudPurchaseService = {
         return purchases
       }
 
+      const normalized = (data || []).map((purchase: Purchase) => ({
+        ...purchase,
+        items: normalizePurchaseItems(purchase.items, purchase.id)
+      }))
+
       // Sync to local storage for offline access
-      // IMPORTANT: This overwrites local data with cloud data, so ensure cloud is up-to-date
-      if (data) {
-        for (const purchase of data) {
-          // Deep clone to avoid reference issues
-          const purchaseClone = JSON.parse(JSON.stringify(purchase)) as Purchase
-          // Ensure all purchase items have sold_quantity initialized
-          if (purchaseClone.items) {
-            purchaseClone.items = purchaseClone.items.map(item => ({
-              ...item,
-              sold_quantity: item.sold_quantity !== undefined ? item.sold_quantity : 0
-            }))
-          }
-          await put(STORES.PURCHASES, purchaseClone)
+      if (normalized.length) {
+        for (const purchase of normalized) {
+          await put(STORES.PURCHASES, purchase)
         }
       }
 
-      return (data as Purchase[]) || []
+      return normalized
     } catch (error) {
       console.error('Error in cloudPurchaseService.getAll:', error)
       // Fallback to local storage
@@ -85,7 +97,7 @@ export const cloudPurchaseService = {
       if (type) {
         purchases = purchases.filter(p => p.type === type)
       }
-      return purchases
+      return purchases.map(p => ({ ...p, items: normalizePurchaseItems(p.items, p.id) }))
     }
   },
 
@@ -93,9 +105,10 @@ export const cloudPurchaseService = {
    * Get purchase by ID from cloud
    */
   getById: async (id: number): Promise<Purchase | undefined> => {
-    // If Supabase not available or offline, use local storage
     if (!isSupabaseAvailable() || !isOnline()) {
-      return await getById<Purchase>(STORES.PURCHASES, id)
+      const local = await getById<Purchase>(STORES.PURCHASES, id)
+      if (local) return { ...local, items: normalizePurchaseItems(local.items, local.id) }
+      return undefined
     }
 
     try {
@@ -111,16 +124,17 @@ export const cloudPurchaseService = {
         return await getById<Purchase>(STORES.PURCHASES, id)
       }
 
-      // Sync to local storage
-      if (data) {
-        await put(STORES.PURCHASES, data as Purchase)
+      const purchase = data as Purchase
+      if (purchase) {
+        purchase.items = normalizePurchaseItems(purchase.items, purchase.id)
+        await put(STORES.PURCHASES, purchase)
       }
-
-      return data as Purchase | undefined
+      return purchase
     } catch (error) {
       console.error('Error in cloudPurchaseService.getById:', error)
-      // Fallback to local storage
-      return await getById<Purchase>(STORES.PURCHASES, id)
+      const local = await getById<Purchase>(STORES.PURCHASES, id)
+      if (local) return { ...local, items: normalizePurchaseItems(local.items, local.id) }
+      return undefined
     }
   },
 
@@ -138,7 +152,7 @@ export const cloudPurchaseService = {
           supplier_name: purchaseData.type === 'gst' ? (purchaseData as GSTPurchase).supplier_name : (purchaseData as SimplePurchase).supplier_name || null,
           supplier_gstin: purchaseData.type === 'gst' ? (purchaseData as GSTPurchase).supplier_gstin : null,
           invoice_number: purchaseData.type === 'gst' ? (purchaseData as GSTPurchase).invoice_number : (purchaseData as SimplePurchase).invoice_number || null,
-          items: purchaseData.items, // JSONB array
+          items: normalizePurchaseItems(purchaseData.items), // JSONB: each item has unique id for sale form
           subtotal: purchaseData.type === 'gst' ? (purchaseData as GSTPurchase).subtotal : null,
           total_tax: purchaseData.type === 'gst' ? (purchaseData as GSTPurchase).total_tax : null,
           cgst_amount: purchaseData.type === 'gst' ? (purchaseData as GSTPurchase).cgst_amount : null,
@@ -149,6 +163,8 @@ export const cloudPurchaseService = {
           payment_status: purchaseData.payment_status,
           payment_method: purchaseData.payment_method || null,
           notes: purchaseData.notes || null,
+          return_remarks: (purchaseData as any).return_remarks || null,
+          due_date: (purchaseData as any).due_date || null,
           company_id: purchaseData.company_id || null,
           created_by: purchaseData.created_by,
         }
@@ -165,9 +181,10 @@ export const cloudPurchaseService = {
         }
 
         if (data) {
-          // Save to local storage
-          await put(STORES.PURCHASES, data as Purchase)
-          return data as Purchase
+          const purchase = data as Purchase
+          purchase.items = normalizePurchaseItems(purchase.items, purchase.id)
+          await put(STORES.PURCHASES, purchase)
+          return purchase
         }
       } catch (error) {
         console.error('Error in cloudPurchaseService.create:', error)
@@ -175,10 +192,11 @@ export const cloudPurchaseService = {
       }
     }
 
-    // Fallback to local creation
+    const newId = Date.now()
     const newPurchase: Purchase = {
       ...purchaseData,
-      id: Date.now(),
+      id: newId,
+      items: normalizePurchaseItems(purchaseData.items, newId),
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     } as Purchase
@@ -190,17 +208,16 @@ export const cloudPurchaseService = {
    * Update purchase in cloud
    */
   update: async (id: number, purchaseData: Partial<Omit<Purchase, 'id'>>): Promise<Purchase | null> => {
-    // Get existing purchase
     const existing = await getById<Purchase>(STORES.PURCHASES, id)
     if (!existing) return null
 
     const updated: Purchase = {
       ...existing,
       ...purchaseData,
+      items: normalizePurchaseItems(purchaseData.items ?? existing.items, id),
       updated_at: new Date().toISOString(),
     } as Purchase
 
-    // Always update local storage first
     await put(STORES.PURCHASES, updated)
 
     // If Supabase available and online, sync to cloud
@@ -224,6 +241,8 @@ export const cloudPurchaseService = {
           payment_status: updated.payment_status,
           payment_method: updated.payment_method || null,
           notes: updated.notes || null,
+          return_remarks: (updated as any).return_remarks || null,
+          due_date: (updated as any).due_date || null,
           company_id: updated.company_id || null,
           created_by: updated.created_by,
           updated_at: updated.updated_at,

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { reportService } from '../services/reportService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import {
@@ -26,6 +27,7 @@ type ReportView = 'product' | 'category' | 'customer' | 'salesperson' | 'sales'
 
 const SalesReports = () => {
   const { hasPermission, getCurrentCompanyId } = useAuth()
+  const { toast } = useToast()
   const navigate = useNavigate()
   const [activeView, setActiveView] = useState<ReportView>('product')
   const [timePeriod, setTimePeriod] = useState<ReportTimePeriod>('thisMonth')
@@ -336,6 +338,7 @@ const SalesReports = () => {
 
     const filename = `sales_report_${activeView}_${timePeriod}_${new Date().toISOString().split('T')[0]}`
     exportExcel(rows, headers, filename, sheetName)
+    toast.success('Report exported to Excel')
   }
 
   const exportToPDF = () => {
@@ -417,6 +420,7 @@ const SalesReports = () => {
     const filename = `sales_report_${activeView}_${timePeriod}_${new Date().toISOString().split('T')[0]}`
     
     exportDataToPDF(rows, headers, filename, fullTitle)
+    toast.success('Report exported to PDF')
   }
 
   const renderProductReport = () => (

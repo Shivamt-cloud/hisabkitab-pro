@@ -90,7 +90,7 @@ const SystemSettings = () => {
     show_tax_breakdown: true,
     show_payment_instructions: false,
     payment_instructions_text: '',
-    invoice_template: 'standard',
+    invoice_template: 'detailed',
   })
   const [tax, setTax] = useState<TaxSettings>({
     default_gst_rate: 18,
@@ -2257,12 +2257,12 @@ const SystemSettings = () => {
                       </label>
                       <select
                         value={invoice.invoice_template}
-                        onChange={(e) => setInvoice({ ...invoice, invoice_template: e.target.value as any })}
+                        onChange={(e) => setInvoice({ ...invoice, invoice_template: e.target.value as 'compact' | 'detailed' | 'with_logo' })}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                       >
-                        <option value="standard">Standard</option>
+                        <option value="compact">Compact</option>
                         <option value="detailed">Detailed</option>
-                        <option value="minimal">Minimal</option>
+                        <option value="with_logo">With Logo</option>
                       </select>
                     </div>
                   </div>
@@ -2622,6 +2622,38 @@ const SystemSettings = () => {
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                       />
                       <p className="text-xs text-gray-500 mt-1">Percentage of min stock level to show warning</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Daily sales target (₹)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="100"
+                        value={general.sales_target_daily ?? ''}
+                        onChange={(e) => setGeneral({ ...general, sales_target_daily: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        placeholder="Optional"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Optional. Shows “₹X of ₹Y” progress on dashboard</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Monthly sales target (₹)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1000"
+                        value={general.sales_target_monthly ?? ''}
+                        onChange={(e) => setGeneral({ ...general, sales_target_monthly: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        placeholder="Optional"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Optional. Shows monthly target progress on dashboard</p>
                     </div>
                   </div>
 

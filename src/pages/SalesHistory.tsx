@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { useNavigate } from 'react-router-dom'
 import { saleService } from '../services/saleService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
@@ -7,10 +8,11 @@ import { Sale } from '../types/sale'
 import { Eye, ShoppingCart, TrendingUp, DollarSign, Archive, Home, FileSpreadsheet, FileText, Trash2 } from 'lucide-react'
 import { exportToExcel as exportExcel, exportDataToPDF } from '../utils/exportUtils'
 
-type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
+type TimePeriod = 'all' | 'today' | 'yesterday' | 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom'
 
 const SalesHistory = () => {
   const { user, hasPermission, getCurrentCompanyId } = useAuth()
+  const { toast } = useToast()
   const navigate = useNavigate()
   const [sales, setSales] = useState<Sale[]>([])
   const [loading, setLoading] = useState(true)
@@ -43,26 +45,44 @@ const SalesHistory = () => {
     let endDate: string | undefined
 
     switch (timePeriod) {
-      case 'today':
+      case 'today': {
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-        startDate = today.toISOString().split('T')[0]
-        endDate = today.toISOString().split('T')[0]
+        startDate = endDate = today.toISOString().split('T')[0]
         break
-      case 'thisWeek':
+      }
+      case 'yesterday': {
+        const yesterday = new Date(now)
+        yesterday.setDate(yesterday.getDate() - 1)
+        startDate = endDate = yesterday.toISOString().split('T')[0]
+        break
+      }
+      case 'thisWeek': {
         const weekStart = new Date(now)
         weekStart.setDate(now.getDate() - now.getDay())
         weekStart.setHours(0, 0, 0, 0)
         startDate = weekStart.toISOString().split('T')[0]
         endDate = now.toISOString().split('T')[0]
         break
+      }
+      case 'lastWeek': {
+        const lastWeekEnd = new Date(now)
+        lastWeekEnd.setDate(now.getDate() - now.getDay() - 1)
+        const lastWeekStart = new Date(lastWeekEnd)
+        lastWeekStart.setDate(lastWeekStart.getDate() - 6)
+        startDate = lastWeekStart.toISOString().split('T')[0]
+        endDate = lastWeekEnd.toISOString().split('T')[0]
+        break
+      }
       case 'thisMonth':
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-        startDate = monthStart.toISOString().split('T')[0]
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
         endDate = now.toISOString().split('T')[0]
         break
+      case 'lastMonth':
+        startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0]
+        endDate = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0]
+        break
       case 'thisYear':
-        const yearStart = new Date(now.getFullYear(), 0, 1)
-        startDate = yearStart.toISOString().split('T')[0]
+        startDate = new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0]
         endDate = now.toISOString().split('T')[0]
         break
       case 'custom':
@@ -70,8 +90,7 @@ const SalesHistory = () => {
         endDate = customEndDate || undefined
         break
       default: // 'all'
-        startDate = undefined
-        endDate = undefined
+        startDate = endDate = undefined
     }
 
     return { startDate, endDate }
@@ -218,6 +237,7 @@ const SalesHistory = () => {
 
     const filename = `sales_history_${timePeriod}_${new Date().toISOString().split('T')[0]}`
     exportExcel(rows, headers, filename, 'Sales History')
+    toast.success('Sales history exported to Excel')
   }
 
   const exportToPDF = () => {
@@ -239,6 +259,7 @@ const SalesHistory = () => {
     const filename = `sales_history_${timePeriod}_${new Date().toISOString().split('T')[0]}`
     
     exportDataToPDF(rows, headers, filename, title)
+    toast.success('Sales history exported to PDF')
   }
 
   // Block non-admin access
@@ -337,6 +358,16 @@ const SalesHistory = () => {
                   Today
                 </button>
                 <button
+                  onClick={() => setTimePeriod('yesterday')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    timePeriod === 'yesterday'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
+                  }`}
+                >
+                  Yesterday
+                </button>
+                <button
                   onClick={() => setTimePeriod('thisWeek')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                     timePeriod === 'thisWeek'
@@ -347,6 +378,16 @@ const SalesHistory = () => {
                   This Week
                 </button>
                 <button
+                  onClick={() => setTimePeriod('lastWeek')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    timePeriod === 'lastWeek'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
+                  }`}
+                >
+                  Last Week
+                </button>
+                <button
                   onClick={() => setTimePeriod('thisMonth')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                     timePeriod === 'thisMonth'
@@ -355,6 +396,16 @@ const SalesHistory = () => {
                   }`}
                 >
                   This Month
+                </button>
+                <button
+                  onClick={() => setTimePeriod('lastMonth')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    timePeriod === 'lastMonth'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
+                  }`}
+                >
+                  Last Month
                 </button>
                 <button
                   onClick={() => setTimePeriod('thisYear')}

@@ -1,7 +1,7 @@
 import { useState, FormEvent, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate, Link } from 'react-router-dom'
-import { LogIn, Mail, Lock, AlertCircle, User, Package, ShoppingCart, TrendingUp, Users, BarChart3, Shield, CheckCircle, MessageCircle, Globe, X, Building2, Phone, MapPin, FileText, UserPlus, BookOpen } from 'lucide-react'
+import { LogIn, Mail, Lock, AlertCircle, User, Package, ShoppingCart, TrendingUp, Users, BarChart3, Shield, CheckCircle, MessageCircle, Globe, X, Building2, Phone, MapPin, FileText, UserPlus, BookOpen, Search, Target, WifiOff, Download } from 'lucide-react'
 import { COUNTRY_OPTIONS, detectCountry, formatPrice, getCountryPricing, getSavedCountry, isSupportedCountryCode, saveCountry, type CountryPricing } from '../utils/pricing'
 import { calculateTierPrice, getTierPricing } from '../utils/tierPricing'
 import { getMaxUsersForPlan } from '../utils/planUserLimits'
@@ -489,6 +489,12 @@ Please review and process this registration request.
                   <p className="text-blue-50 font-medium flex-1 pt-1">Real-time analytics, reports & profit analysis</p>
                 </div>
                 <div className="flex items-start gap-4 bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all group">
+                  <div className="p-2 bg-gradient-to-br from-violet-400 to-purple-600 rounded-lg group-hover:scale-110 transition-transform">
+                    <FileText className="w-5 h-5 text-white" />
+                  </div>
+                  <p className="text-blue-50 font-medium flex-1 pt-1"><strong className="text-white">CA reports</strong> – GSTR-1, GSTR-2, GSTR-3B & Tally-style exports for GST filing</p>
+                </div>
+                <div className="flex items-start gap-4 bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all group">
                   <div className="p-2 bg-gradient-to-br from-orange-400 to-red-600 rounded-lg group-hover:scale-110 transition-transform">
                     <Users className="w-5 h-5 text-white" />
                   </div>
@@ -505,6 +511,30 @@ Please review and process this registration request.
                     <Shield className="w-5 h-5 text-white" />
                   </div>
                   <p className="text-blue-50 font-medium flex-1 pt-1">Secure offline-first architecture with automatic backups</p>
+                </div>
+                <div className="flex items-start gap-4 bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all group">
+                  <div className="p-2 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-lg group-hover:scale-110 transition-transform">
+                    <Search className="w-5 h-5 text-white" />
+                  </div>
+                  <p className="text-blue-50 font-medium flex-1 pt-1"><strong className="text-white">Global search</strong> (Ctrl+K) – find products, customers, sales & purchases in one place</p>
+                </div>
+                <div className="flex items-start gap-4 bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all group">
+                  <div className="p-2 bg-gradient-to-br from-emerald-400 to-teal-600 rounded-lg group-hover:scale-110 transition-transform">
+                    <Target className="w-5 h-5 text-white" />
+                  </div>
+                  <p className="text-blue-50 font-medium flex-1 pt-1"><strong className="text-white">Sales target</strong> – set daily & monthly goals, track progress and stay focused</p>
+                </div>
+                <div className="flex items-start gap-4 bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all group">
+                  <div className="p-2 bg-gradient-to-br from-amber-400 to-orange-600 rounded-lg group-hover:scale-110 transition-transform">
+                    <WifiOff className="w-5 h-5 text-white" />
+                  </div>
+                  <p className="text-blue-50 font-medium flex-1 pt-1">Offline indicator & one-click export – backup to Excel/JSON or Tally-friendly format</p>
+                </div>
+                <div className="flex items-start gap-4 bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all group">
+                  <div className="p-2 bg-gradient-to-br from-slate-400 to-blue-600 rounded-lg group-hover:scale-110 transition-transform">
+                    <Download className="w-5 h-5 text-white" />
+                  </div>
+                  <p className="text-blue-50 font-medium flex-1 pt-1">Top products & customers, outstanding summary – quick business insight on dashboard</p>
                 </div>
               </div>
             </div>

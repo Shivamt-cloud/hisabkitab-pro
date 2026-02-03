@@ -1,10 +1,12 @@
-import { useState, useEffect, FormEvent } from 'react'
+import { useState, useEffect, useRef, FormEvent } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { useNavigate, useParams } from 'react-router-dom'
 import { purchaseService, supplierService } from '../services/purchaseService'
 import { productService } from '../services/productService'
 import { companyService } from '../services/companyService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
+import { Breadcrumbs } from '../components/Breadcrumbs'
 import { GSTPurchase, PurchaseItem, Supplier } from '../types/purchase'
 import { Product } from '../services/productService'
 import { ArrowLeft, Save, Plus, Trash2, Calculator, Package, Home, RefreshCw, Barcode, Camera, Printer } from 'lucide-react'
@@ -17,15 +19,18 @@ import BarcodePrintModal from '../components/BarcodePrintModal'
 
 const GSTPurchaseForm = () => {
   const { hasPermission, user, getCurrentCompanyId } = useAuth()
+  const { toast } = useToast()
   const navigate = useNavigate()
   const { id } = useParams<{ id?: string }>()
   const isEditing = !!id
+  const formRef = useRef<HTMLFormElement>(null)
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [selectedSupplier, setSelectedSupplier] = useState<number | ''>('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0])
+  const [dueDate, setDueDate] = useState('')
   const [items, setItems] = useState<PurchaseItem[]>([])
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'pending' | 'partial'>('pending')
   const [paymentMethod, setPaymentMethod] = useState('')
@@ -122,6 +127,7 @@ const GSTPurchaseForm = () => {
         setSelectedSupplier(gstPurchase.supplier_id)
         setInvoiceNumber(gstPurchase.invoice_number)
         setPurchaseDate(gstPurchase.purchase_date)
+        setDueDate(gstPurchase.due_date ? gstPurchase.due_date.split('T')[0] : '')
         const mappedItems = gstPurchase.items.map(item => ({
           ...item,
           purchase_type: item.purchase_type || 'purchase',
@@ -130,9 +136,11 @@ const GSTPurchaseForm = () => {
           margin_percentage: item.margin_percentage || 0,
           margin_amount: item.margin_amount || 0,
           min_stock_level: item.min_stock_level,
-          sold_quantity: item.sold_quantity || 0, // Ensure sold_quantity is initialized
+          sold_quantity: item.sold_quantity || 0,
           color: item.color || '',
           size: item.size || '',
+          batch_no: item.batch_no || '',
+          expiry_date: item.expiry_date ? item.expiry_date.split('T')[0] : '',
         }))
         setItems(mappedItems)
         setPaymentStatus(gstPurchase.payment_status)
@@ -156,6 +164,13 @@ const GSTPurchaseForm = () => {
     })))
   }, [isEditing, products, items.length])
 
+  // Quick Win #2: Ctrl+S to save
+  useEffect(() => {
+    const onAppSave = () => formRef.current?.requestSubmit()
+    window.addEventListener('app-save', onAppSave)
+    return () => window.removeEventListener('app-save', onAppSave)
+  }, [])
+
   const addItem = () => {
     // Only add if last item is empty or all items have products
     if (items.length === 0 || items[items.length - 1].product_id > 0) {
@@ -164,6 +179,8 @@ const GSTPurchaseForm = () => {
         purchase_type: 'purchase',
         article: '',
         barcode: '',
+        batch_no: '',
+        expiry_date: '',
         quantity: 1,
         unit_price: 0,
         mrp: 0,
@@ -171,6 +188,7 @@ const GSTPurchaseForm = () => {
         margin_percentage: 0,
         margin_amount: 0,
         min_stock_level: undefined,
+        discount_percentage: 0,
         gst_rate: 18,
         tax_amount: 0,
         color: '',
@@ -287,6 +305,8 @@ const GSTPurchaseForm = () => {
             product_id: 0,
             article: '',
             barcode: '',
+            batch_no: '',
+            expiry_date: '',
             quantity: 1,
             unit_price: 0,
             mrp: 0,
@@ -294,6 +314,7 @@ const GSTPurchaseForm = () => {
             margin_percentage: 0,
             margin_amount: 0,
             min_stock_level: undefined,
+            discount_percentage: 0,
             gst_rate: 18,
             tax_amount: 0,
             color: '',
@@ -319,16 +340,19 @@ const GSTPurchaseForm = () => {
       item.margin_amount = margin.amount
     }
 
-    // Calculate total
-    if (field === 'quantity' || field === 'unit_price' || field === 'gst_rate') {
+    // Calculate total (with item-wise discount before GST)
+    if (field === 'quantity' || field === 'unit_price' || field === 'gst_rate' || field === 'discount_percentage') {
       const quantity = field === 'quantity' ? value : item.quantity
       const unitPrice = field === 'unit_price' ? value : item.unit_price
       const gstRate = field === 'gst_rate' ? value : item.gst_rate
+      const discountPct = field === 'discount_percentage' ? value : (item.discount_percentage ?? 0)
 
-      const subtotal = quantity * unitPrice
-      const tax = (subtotal * gstRate) / 100
+      const subtotalBeforeDiscount = quantity * unitPrice
+      const discountAmount = (subtotalBeforeDiscount * (discountPct || 0)) / 100
+      const subtotalAfterDiscount = subtotalBeforeDiscount - discountAmount
+      const tax = (subtotalAfterDiscount * (gstRate || 0)) / 100
       item.tax_amount = tax
-      item.total = subtotal + tax
+      item.total = subtotalAfterDiscount + tax
     }
 
     newItems[index] = item
@@ -336,11 +360,10 @@ const GSTPurchaseForm = () => {
   }
 
   const calculateTotals = () => {
-    const subtotal = items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0)
+    const grandTotal = items.reduce((sum, item) => sum + item.total, 0)
     const totalTax = items.reduce((sum, item) => sum + (item.tax_amount || 0), 0)
-    const grandTotal = subtotal + totalTax
+    const subtotal = grandTotal - totalTax // Net after discount (before tax)
 
-    // Calculate CGST/SGST (assuming intrastate - split GST)
     const cgstAmount = totalTax / 2
     const sgstAmount = totalTax / 2
 
@@ -401,6 +424,7 @@ const GSTPurchaseForm = () => {
         const itemsWithBarcodes = ensureBarcodesGenerated(items.filter(item => item.product_id > 0))
         await purchaseService.update(parseInt(id), {
           purchase_date: purchaseDate,
+          due_date: dueDate.trim() || undefined,
           supplier_id: selectedSupplier as number,
           supplier_name: supplier?.name,
           supplier_gstin: supplier?.gstin,
@@ -419,7 +443,7 @@ const GSTPurchaseForm = () => {
           notes,
           return_remarks: items.some(item => item.purchase_type === 'return') ? returnRemarks.trim() || undefined : undefined,
         })
-        alert('Purchase updated successfully!')
+        toast.success('Purchase updated successfully!')
       } else {
         // Create new purchase
         const itemsWithBarcodes = ensureBarcodesGenerated(items.filter(item => item.product_id > 0))
@@ -431,6 +455,7 @@ const GSTPurchaseForm = () => {
         await purchaseService.createGST({
           type: 'gst',
           purchase_date: purchaseDate,
+          due_date: dueDate.trim() || undefined,
           supplier_id: selectedSupplier as number,
           supplier_name: supplier?.name,
           supplier_gstin: supplier?.gstin,
@@ -449,7 +474,7 @@ const GSTPurchaseForm = () => {
           created_by: parseInt(user?.id || '1'),
         })
         
-        alert('Purchase created successfully!')
+        toast.success('Purchase created successfully!')
         // Optionally show print modal after save
         const itemsWithNames = finalItems.map(item => ({
           ...item,
@@ -460,7 +485,7 @@ const GSTPurchaseForm = () => {
       }
     } catch (error) {
       console.error('Error saving purchase:', error)
-      alert('Failed to save purchase. Please try again.')
+      toast.error('Failed to save purchase. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -489,9 +514,17 @@ const GSTPurchaseForm = () => {
                 >
                   <Home className="w-5 h-5 text-gray-600" />
                 </button>
-                <div>
+                <div className="min-w-0">
+                  <Breadcrumbs
+                    items={[
+                      { label: 'Dashboard', path: '/' },
+                      { label: 'Purchase History', path: '/purchases/history' },
+                      { label: isEditing ? `Edit GST Purchase #${id}` : 'New GST Purchase' },
+                    ]}
+                    className="mb-1"
+                  />
                   <h1 className="text-3xl font-bold text-gray-900">
-                    {isEditing ? 'Edit GST Purchase' : 'GST Purchase'}
+                    {isEditing ? `Edit GST Purchase #${id}` : 'GST Purchase'}
                   </h1>
                   <p className="text-sm text-gray-600 mt-1">
                     {isEditing ? 'Update purchase with GST details' : 'Create a purchase with GST details'}
@@ -503,7 +536,7 @@ const GSTPurchaseForm = () => {
         </header>
 
         <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <form onSubmit={handleSubmit} className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-8 border border-white/50">
+          <form ref={formRef} onSubmit={handleSubmit} className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-8 border border-white/50">
             {/* Supplier & Invoice Details */}
             <div className="mb-8">
               <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
@@ -588,6 +621,17 @@ const GSTPurchaseForm = () => {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Due Date (optional)</label>
+                  <input
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                    title="When bill payment is due (for reminders)"
+                  />
+                </div>
+
+                <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Payment Status</label>
                   <select
                     value={paymentStatus}
@@ -654,6 +698,8 @@ const GSTPurchaseForm = () => {
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[200px]">Product</th>
                       <th className="px-6 py-5 text-center text-xs font-semibold text-gray-700 uppercase min-w-[120px]">Type</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[140px]">Article</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[100px]">Batch No</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[110px]">Expiry</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[170px]">Barcode</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[100px]">Color</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[100px]">Size</th>
@@ -662,6 +708,7 @@ const GSTPurchaseForm = () => {
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[160px]">Purchase Price</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[160px]">MRP</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[160px]">Sale Price</th>
+                      <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[100px]">Discount %</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[120px]">GST%</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[140px]">Margin</th>
                       <th className="px-6 py-5 text-left text-xs font-semibold text-gray-700 uppercase min-w-[120px]">Min Stock</th>
@@ -745,6 +792,25 @@ const GSTPurchaseForm = () => {
                           />
                         </td>
                         <td className="px-6 py-5">
+                          <input
+                            type="text"
+                            value={item.batch_no || ''}
+                            onChange={(e) => updateItem(index, 'batch_no', e.target.value)}
+                            className="w-full min-w-[100px] px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                            placeholder="Batch"
+                            title="Batch number (optional, for FMCG/medicines)"
+                          />
+                        </td>
+                        <td className="px-6 py-5">
+                          <input
+                            type="date"
+                            value={item.expiry_date ? (item.expiry_date as string).split('T')[0] : ''}
+                            onChange={(e) => updateItem(index, 'expiry_date', e.target.value || undefined)}
+                            className="w-full min-w-[110px] px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                            title="Expiry date (optional, FIFO by expiry in sale)"
+                          />
+                        </td>
+                        <td className="px-6 py-5">
                           <div className="flex gap-1">
                             <input
                               type="text"
@@ -804,8 +870,9 @@ const GSTPurchaseForm = () => {
                           <input
                             type="number"
                             min="1"
-                            value={item.quantity}
-                            onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 0)}
+                            value={item.quantity === 0 || item.quantity === undefined ? '' : item.quantity}
+                            onChange={(e) => updateItem(index, 'quantity', e.target.value === '' ? 0 : parseInt(e.target.value) || 0)}
+                            placeholder="0"
                             className={`w-full min-w-[100px] px-5 py-4 text-base border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none ${
                               errors[`item_${index}_quantity`] ? 'border-red-300' : 'border-gray-300'
                             }`}
@@ -821,8 +888,9 @@ const GSTPurchaseForm = () => {
                             type="number"
                             step="0.01"
                             min="0"
-                            value={item.unit_price}
-                            onChange={(e) => updateItem(index, 'unit_price', parseFloat(e.target.value) || 0)}
+                            value={item.unit_price === 0 || item.unit_price === undefined ? '' : item.unit_price}
+                            onChange={(e) => updateItem(index, 'unit_price', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
+                            placeholder="0"
                             className={`w-full min-w-[140px] px-5 py-4 text-base border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none ${
                               errors[`item_${index}_price`] ? 'border-red-300' : 'border-gray-300'
                             }`}
@@ -833,8 +901,9 @@ const GSTPurchaseForm = () => {
                             type="number"
                             step="0.01"
                             min="0"
-                            value={item.mrp || 0}
-                            onChange={(e) => updateItem(index, 'mrp', parseFloat(e.target.value) || 0)}
+                            value={item.mrp === 0 || item.mrp === undefined ? '' : item.mrp}
+                            onChange={(e) => updateItem(index, 'mrp', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
+                            placeholder="0"
                             className="w-full min-w-[140px] px-5 py-4 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                           />
                         </td>
@@ -843,9 +912,23 @@ const GSTPurchaseForm = () => {
                             type="number"
                             step="0.01"
                             min="0"
-                            value={item.sale_price || 0}
-                            onChange={(e) => updateItem(index, 'sale_price', parseFloat(e.target.value) || 0)}
+                            value={item.sale_price === 0 || item.sale_price === undefined ? '' : item.sale_price}
+                            onChange={(e) => updateItem(index, 'sale_price', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
+                            placeholder="0"
                             className="w-full min-w-[140px] px-5 py-4 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                          />
+                        </td>
+                        <td className="px-6 py-5">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            max="100"
+                            value={item.discount_percentage === 0 || item.discount_percentage === undefined ? '' : item.discount_percentage}
+                            onChange={(e) => updateItem(index, 'discount_percentage', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
+                            placeholder="0"
+                            className="w-full min-w-[100px] px-5 py-4 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                            title="Supplier discount % (e.g. 5)"
                           />
                         </td>
                         <td className="px-6 py-5">

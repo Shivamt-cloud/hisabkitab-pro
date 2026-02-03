@@ -78,6 +78,35 @@ export const cloudBackupService = {
   },
 
   /**
+   * Compress backup from already-serialized JSON string (avoids double stringify in backup flow).
+   */
+  compressBackupFromString: async (jsonString: string): Promise<Blob> => {
+    const encoder = new TextEncoder()
+    const data = encoder.encode(jsonString)
+    if ('CompressionStream' in window) {
+      const stream = new CompressionStream('gzip')
+      const writer = stream.writable.getWriter()
+      writer.write(data)
+      writer.close()
+      const chunks: Uint8Array[] = []
+      const reader = stream.readable.getReader()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        chunks.push(value)
+      }
+      const compressed = new Uint8Array(chunks.reduce((acc, chunk) => acc + chunk.length, 0))
+      let offset = 0
+      for (const chunk of chunks) {
+        compressed.set(chunk, offset)
+        offset += chunk.length
+      }
+      return new Blob([compressed], { type: 'application/gzip' })
+    }
+    return new Blob([jsonString], { type: 'application/json' })
+  },
+
+  /**
    * Compress backup data using gzip
    */
   compressBackup: async (backupData: BackupData): Promise<Blob> => {
@@ -165,6 +194,49 @@ export const cloudBackupService = {
   },
 
   /**
+   * Upload backup from already-serialized JSON string (faster: no double stringify, no ensureBucket round-trip).
+   */
+  uploadBackupFromString: async (
+    jsonString: string,
+    companyId: number | null,
+    backupTime: '12:00' | '18:00' = '12:00'
+  ): Promise<{ success: boolean; filePath?: string; error?: string }> => {
+    if (!isSupabaseAvailable() || !isOnline()) {
+      return {
+        success: false,
+        error: 'Supabase not available or offline. Backup saved locally only.',
+      }
+    }
+    try {
+      const bucketName = cloudBackupService.getBucketName(companyId)
+      const compressedBlob = await cloudBackupService.compressBackupFromString(jsonString)
+      const isCompressed = compressedBlob.type === 'application/gzip'
+      const now = new Date()
+      const dateStr = now.toISOString().split('T')[0]
+      const timeStr = backupTime.replace(':', '-')
+      const timestamp = Date.now()
+      const extension = isCompressed ? 'json.gz' : 'json'
+      const fileName = `backup_${dateStr}_${timeStr}_${timestamp}.${extension}`
+      const filePath = `${dateStr}/${fileName}`
+      const { data, error } = await supabase!.storage
+        .from(bucketName)
+        .upload(filePath, compressedBlob, {
+          contentType: isCompressed ? 'application/gzip' : 'application/json',
+          upsert: false,
+        })
+      if (error) {
+        console.error('Error uploading backup to cloud:', error)
+        return { success: false, error: error.message || 'Failed to upload backup to cloud' }
+      }
+      console.log('✅ Backup uploaded to cloud successfully:', filePath)
+      return { success: true, filePath: data.path }
+    } catch (error: any) {
+      console.error('Error in cloudBackupService.uploadBackupFromString:', error)
+      return { success: false, error: error.message || 'Unknown error uploading backup' }
+    }
+  },
+
+  /**
    * Upload backup to cloud storage
    */
   uploadBackup: async (
@@ -180,16 +252,9 @@ export const cloudBackupService = {
     }
 
     try {
-      // Ensure bucket exists
-      const bucketExists = await cloudBackupService.ensureBucket(companyId)
-      if (!bucketExists) {
-        console.warn('Bucket might not exist. Please create it in Supabase dashboard.')
-        // Continue anyway - might work if bucket exists but ensureBucket failed
-      }
-
       const bucketName = cloudBackupService.getBucketName(companyId)
       
-      // Compress backup
+      // Compress backup (skip ensureBucket to save 1 API round-trip; upload will fail clearly if bucket missing)
       const compressedBlob = await cloudBackupService.compressBackup(backupData)
       const isCompressed = compressedBlob.type === 'application/gzip'
       

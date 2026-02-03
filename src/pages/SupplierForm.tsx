@@ -1,13 +1,16 @@
 import { useState, useEffect, FormEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { ProtectedRoute } from '../components/ProtectedRoute'
+import { Breadcrumbs } from '../components/Breadcrumbs'
 import { supplierService } from '../services/purchaseService'
 import { Supplier } from '../types/purchase'
 import { ArrowLeft, Save, Building2 } from 'lucide-react'
 
 const SupplierForm = () => {
   const { hasPermission, getCurrentCompanyId } = useAuth()
+  const { toast } = useToast()
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
   const isEditing = !!id
@@ -118,23 +121,22 @@ const SupplierForm = () => {
 
       if (isEditing) {
         if (!hasPermission('purchases:update')) {
-          alert('You do not have permission to update suppliers')
+          toast.error('You do not have permission to update suppliers')
           return
         }
         await supplierService.update(parseInt(id!), supplierData)
-        alert('Supplier updated successfully!')
+        toast.success('Supplier updated successfully!')
       } else {
         if (!hasPermission('purchases:create')) {
-          alert('You do not have permission to create suppliers')
+          toast.error('You do not have permission to create suppliers')
           return
         }
         await supplierService.create(supplierData)
-        alert('Supplier created successfully!')
+        toast.success('Supplier created successfully!')
       }
-
       navigate('/suppliers')
     } catch (error) {
-      alert('Error saving supplier: ' + (error as Error).message)
+      toast.error('Error saving supplier: ' + (error as Error).message)
     }
   }
 
@@ -153,7 +155,15 @@ const SupplierForm = () => {
                 >
                   <ArrowLeft className="w-6 h-6 text-gray-600" />
                 </button>
-                <div>
+                <div className="min-w-0">
+                  <Breadcrumbs
+                    items={[
+                      { label: 'Dashboard', path: '/' },
+                      { label: 'Suppliers', path: '/suppliers' },
+                      { label: isEditing ? 'Edit Supplier' : 'New Supplier' },
+                    ]}
+                    className="mb-1"
+                  />
                   <h1 className="text-3xl font-bold text-gray-900">
                     {isEditing ? 'Edit Supplier' : 'Add New Supplier'}
                   </h1>

@@ -1,16 +1,18 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { useNavigate } from 'react-router-dom'
 import { purchaseService } from '../services/purchaseService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Purchase, PurchaseType } from '../types/purchase'
-import { Plus, Eye, Edit, Filter, FileText, TrendingUp, Home, FileSpreadsheet, Search, X, Trash2 } from 'lucide-react'
+import { Plus, Eye, Edit, Filter, FileText, TrendingUp, Home, FileSpreadsheet, Search, X, Trash2, AlertCircle, CalendarClock } from 'lucide-react'
 import { exportToExcel as exportExcel } from '../utils/exportUtils'
 
-type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
+type TimePeriod = 'all' | 'today' | 'yesterday' | 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom'
 
 const PurchaseHistory = () => {
   const { hasPermission, getCurrentCompanyId } = useAuth()
+  const { toast } = useToast()
   const navigate = useNavigate()
   const [purchases, setPurchases] = useState<Purchase[]>([])
   const [allPurchases, setAllPurchases] = useState<Purchase[]>([]) // Store all purchases for filtering
@@ -199,26 +201,44 @@ const PurchaseHistory = () => {
     let endDate: string | undefined
 
     switch (timePeriod) {
-      case 'today':
+      case 'today': {
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-        startDate = today.toISOString().split('T')[0]
-        endDate = today.toISOString().split('T')[0]
+        startDate = endDate = today.toISOString().split('T')[0]
         break
-      case 'thisWeek':
+      }
+      case 'yesterday': {
+        const yesterday = new Date(now)
+        yesterday.setDate(yesterday.getDate() - 1)
+        startDate = endDate = yesterday.toISOString().split('T')[0]
+        break
+      }
+      case 'thisWeek': {
         const weekStart = new Date(now)
         weekStart.setDate(now.getDate() - now.getDay())
         weekStart.setHours(0, 0, 0, 0)
         startDate = weekStart.toISOString().split('T')[0]
         endDate = now.toISOString().split('T')[0]
         break
+      }
+      case 'lastWeek': {
+        const lastWeekEnd = new Date(now)
+        lastWeekEnd.setDate(now.getDate() - now.getDay() - 1)
+        const lastWeekStart = new Date(lastWeekEnd)
+        lastWeekStart.setDate(lastWeekStart.getDate() - 6)
+        startDate = lastWeekStart.toISOString().split('T')[0]
+        endDate = lastWeekEnd.toISOString().split('T')[0]
+        break
+      }
       case 'thisMonth':
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-        startDate = monthStart.toISOString().split('T')[0]
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
         endDate = now.toISOString().split('T')[0]
         break
+      case 'lastMonth':
+        startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0]
+        endDate = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0]
+        break
       case 'thisYear':
-        const yearStart = new Date(now.getFullYear(), 0, 1)
-        startDate = yearStart.toISOString().split('T')[0]
+        startDate = new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0]
         endDate = now.toISOString().split('T')[0]
         break
       case 'custom':
@@ -226,8 +246,7 @@ const PurchaseHistory = () => {
         endDate = customEndDate || undefined
         break
       default: // 'all'
-        startDate = undefined
-        endDate = undefined
+        startDate = endDate = undefined
     }
 
     return { startDate, endDate }
@@ -347,6 +366,27 @@ const PurchaseHistory = () => {
     return filtered
   }, [allPurchases, debouncedSearchQuery, selectedSupplier, selectedProduct, filterType, timePeriod, customStartDate, customEndDate, selectedDate])
   
+  // Due for payment / Overdue (bills with due_date set and not paid)
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const overdueBills = useMemo(() => {
+    return allPurchases.filter(p => {
+      const due = (p as any).due_date
+      if (!due || p.payment_status === 'paid') return false
+      return due < today
+    }).sort((a, b) => (a as any).due_date.localeCompare((b as any).due_date))
+  }, [allPurchases, today])
+  const dueSoonBills = useMemo(() => {
+    return allPurchases.filter(p => {
+      const due = (p as any).due_date
+      if (!due || p.payment_status === 'paid') return false
+      return due >= today
+    }).sort((a, b) => (a as any).due_date.localeCompare((b as any).due_date))
+  }, [allPurchases, today])
+  // Unpaid bills without due date (hint: add due date to see them in reminders)
+  const unpaidWithoutDueDate = useMemo(() => {
+    return allPurchases.filter(p => p.payment_status !== 'paid' && !(p as any).due_date)
+  }, [allPurchases])
+
   // Group purchases by supplier
   const groupedPurchases = useMemo(() => {
     if (!groupBySupplier) {
@@ -469,6 +509,7 @@ const PurchaseHistory = () => {
 
     const filename = `purchase_history_${timePeriod}_${new Date().toISOString().split('T')[0]}`
     exportExcel(rows, headers, filename, 'Purchase History')
+    toast.success('Purchase history exported to Excel')
   }
 
   const exportToPDF = () => {
@@ -583,6 +624,18 @@ const PurchaseHistory = () => {
                 </div>
               </div>
               <div className="flex gap-3">
+                {overdueBills.length > 0 && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm font-medium" title="Bills past due date">
+                    <AlertCircle className="w-4 h-4" />
+                    Overdue: {overdueBills.length}
+                  </div>
+                )}
+                {dueSoonBills.length > 0 && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm font-medium" title="Bills due for payment">
+                    <CalendarClock className="w-4 h-4" />
+                    Due for payment: {dueSoonBills.length}
+                  </div>
+                )}
                 {hasPermission('purchases:create') && (
                   <>
                     <button
@@ -664,6 +717,109 @@ const PurchaseHistory = () => {
                 <FileText className="w-10 h-10 text-green-500" />
               </div>
             </div>
+          </div>
+
+          {/* Purchase reminders: Overdue / Due for payment (always visible so user can see the section) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            {overdueBills.length > 0 ? (
+              <div className="bg-red-50/80 border border-red-200 rounded-xl p-4">
+                <h3 className="flex items-center gap-2 text-red-800 font-semibold mb-3">
+                  <AlertCircle className="w-5 h-5" />
+                  Overdue ({overdueBills.length})
+                </h3>
+                <ul className="space-y-2 max-h-40 overflow-y-auto">
+                  {overdueBills.slice(0, 10).map(p => {
+                    const due = (p as any).due_date
+                    const amount = p.type === 'gst' ? (p as any).grand_total : (p as any).total_amount
+                    return (
+                      <li key={p.id} className="flex items-center justify-between text-sm">
+                        <span className="text-gray-700">
+                          {(p as any).supplier_name || 'N/A'} · {(p as any).invoice_number || `#${p.id}`}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-600 font-medium">
+                            Due {due ? new Date(due).toLocaleDateString('en-IN') : ''}
+                          </span>
+                          <span>₹{amount?.toFixed(2)}</span>
+                          <button
+                            type="button"
+                            onClick={() => navigate(p.type === 'gst' ? `/purchases/${p.id}/edit-gst` : `/purchases/${p.id}/edit-simple`)}
+                            className="text-indigo-600 hover:underline font-medium"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+                {overdueBills.length > 10 && (
+                  <p className="text-xs text-red-600 mt-2">+{overdueBills.length - 10} more</p>
+                )}
+              </div>
+            ) : (
+              <div className="bg-gray-50/80 border border-gray-200 rounded-xl p-4">
+                <h3 className="flex items-center gap-2 text-gray-700 font-semibold mb-2">
+                  <AlertCircle className="w-5 h-5 text-gray-500" />
+                  Overdue (0)
+                </h3>
+                <p className="text-sm text-gray-500">
+                  Bills with <strong>Due date</strong> in the past and payment not Paid appear here. Edit a purchase and set <strong>Due date (optional)</strong> to use reminders.
+                </p>
+              </div>
+            )}
+            {dueSoonBills.length > 0 ? (
+              <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-4">
+                <h3 className="flex items-center gap-2 text-amber-800 font-semibold mb-3">
+                  <CalendarClock className="w-5 h-5" />
+                  Due for payment ({dueSoonBills.length})
+                </h3>
+                <ul className="space-y-2 max-h-40 overflow-y-auto">
+                  {dueSoonBills.slice(0, 10).map(p => {
+                    const due = (p as any).due_date
+                    const amount = p.type === 'gst' ? (p as any).grand_total : (p as any).total_amount
+                    return (
+                      <li key={p.id} className="flex items-center justify-between text-sm">
+                        <span className="text-gray-700">
+                          {(p as any).supplier_name || 'N/A'} · {(p as any).invoice_number || `#${p.id}`}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-amber-700 font-medium">
+                            Due {due ? new Date(due).toLocaleDateString('en-IN') : ''}
+                          </span>
+                          <span>₹{amount?.toFixed(2)}</span>
+                          <button
+                            type="button"
+                            onClick={() => navigate(p.type === 'gst' ? `/purchases/${p.id}/edit-gst` : `/purchases/${p.id}/edit-simple`)}
+                            className="text-indigo-600 hover:underline font-medium"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+                {dueSoonBills.length > 10 && (
+                  <p className="text-xs text-amber-600 mt-2">+{dueSoonBills.length - 10} more</p>
+                )}
+              </div>
+            ) : (
+              <div className="bg-gray-50/80 border border-gray-200 rounded-xl p-4">
+                <h3 className="flex items-center gap-2 text-gray-700 font-semibold mb-2">
+                  <CalendarClock className="w-5 h-5 text-gray-500" />
+                  Due for payment (0)
+                </h3>
+                <p className="text-sm text-gray-500 mb-2">
+                  A bill appears here only when <strong>both</strong> are set: <strong>Due date</strong> and Payment status <strong>Pending</strong> or <strong>Partial</strong>.
+                </p>
+                {unpaidWithoutDueDate.length > 0 && (
+                  <p className="text-sm text-amber-700 font-medium">
+                    You have {unpaidWithoutDueDate.length} unpaid bill{unpaidWithoutDueDate.length !== 1 ? 's' : ''} with no due date. Edit each purchase and set <strong>Due date (optional)</strong> to see them here.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Search and Filters */}
@@ -825,6 +981,16 @@ const PurchaseHistory = () => {
                   Today
                 </button>
                 <button
+                  onClick={() => setTimePeriod('yesterday')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    timePeriod === 'yesterday'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
+                  }`}
+                >
+                  Yesterday
+                </button>
+                <button
                   onClick={() => setTimePeriod('thisWeek')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                     timePeriod === 'thisWeek'
@@ -835,6 +1001,16 @@ const PurchaseHistory = () => {
                   This Week
                 </button>
                 <button
+                  onClick={() => setTimePeriod('lastWeek')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    timePeriod === 'lastWeek'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
+                  }`}
+                >
+                  Last Week
+                </button>
+                <button
                   onClick={() => setTimePeriod('thisMonth')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                     timePeriod === 'thisMonth'
@@ -843,6 +1019,16 @@ const PurchaseHistory = () => {
                   }`}
                 >
                   This Month
+                </button>
+                <button
+                  onClick={() => setTimePeriod('lastMonth')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    timePeriod === 'lastMonth'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
+                  }`}
+                >
+                  Last Month
                 </button>
                 <button
                   onClick={() => setTimePeriod('thisYear')}
@@ -1020,6 +1206,7 @@ const PurchaseHistory = () => {
                               </th>
                             )}
                             <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date</th>
+                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden sm:table-cell">Purchase #</th>
                             <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden sm:table-cell">Type</th>
                             <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Invoice</th>
                             <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden md:table-cell">Products</th>
@@ -1055,6 +1242,9 @@ const PurchaseHistory = () => {
                                     year: 'numeric'
                                   })}
                                 </div>
+                              </td>
+                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden sm:table-cell">
+                                <span className="text-xs sm:text-sm font-semibold text-gray-700">#{purchase.id}</span>
                               </td>
                               <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden sm:table-cell">
                                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -1409,6 +1599,7 @@ const PurchaseHistory = () => {
                           </th>
                         )}
                         <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date</th>
+                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden sm:table-cell">Purchase #</th>
                         <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden sm:table-cell">Type</th>
                         <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Invoice</th>
                         <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden md:table-cell">Supplier</th>
@@ -1445,6 +1636,9 @@ const PurchaseHistory = () => {
                               year: 'numeric'
                             })}
                           </div>
+                        </td>
+                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden sm:table-cell">
+                          <span className="text-xs sm:text-sm font-semibold text-gray-700">#{purchase.id}</span>
                         </td>
                         <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden sm:table-cell">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${

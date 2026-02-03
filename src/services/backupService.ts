@@ -11,6 +11,7 @@ import { companyService } from './companyService'
 import { put, getAll, deleteById, getById, STORES } from '../database/db'
 import { AutomaticBackup, BackupSettings } from '../types/backup'
 import { cloudBackupService, CloudBackupMetadata } from './cloudBackupService'
+import { exportMultiSheetExcel, exportTallyFriendlyExcel } from '../utils/exportUtils'
 
 export interface BackupData {
   version: string
@@ -98,7 +99,7 @@ export const backupService = {
     return backup
   },
 
-  // Export to JSON file
+  // Export to JSON file (append link to body so download triggers reliably)
   exportToFile: async (userId?: string, companyId?: number | null): Promise<void> => {
     const backup = await backupService.exportAll(userId, companyId)
     const jsonString = JSON.stringify(backup, null, 2)
@@ -107,8 +108,56 @@ export const backupService = {
     const link = document.createElement('a')
     link.href = url
     link.download = `hisabkitab_backup_${new Date().toISOString().split('T')[0]}_${Date.now()}.json`
+    link.style.display = 'none'
+    document.body.appendChild(link)
     link.click()
-    URL.revokeObjectURL(url)
+    document.body.removeChild(link)
+    setTimeout(() => URL.revokeObjectURL(url), 200)
+  },
+
+  // Export all data to Excel (one-click backup / migration – multiple sheets)
+  exportAllToExcel: async (userId?: string, companyId?: number | null): Promise<void> => {
+    const backup = await backupService.exportAll(userId, companyId)
+    const { data } = backup
+
+    const sheet = (name: string, headers: string[], rows: any[][]) => ({ sheetName: name, headers, rows })
+
+    const productHeaders = ['id', 'name', 'sku', 'barcode', 'category_id', 'purchase_price', 'selling_price', 'stock_quantity', 'min_stock_level', 'unit', 'status', 'company_id']
+    const productRows = (data.products || []).map((p: any) => productHeaders.map(h => (p[h] != null ? p[h] : '')))
+
+    const customerHeaders = ['id', 'name', 'phone', 'email', 'address', 'gstin', 'outstanding_amount', 'company_id']
+    const customerRows = (data.customers || []).map((c: any) => customerHeaders.map(h => (c[h] != null ? c[h] : '')))
+
+    const supplierHeaders = ['id', 'name', 'phone', 'email', 'address', 'gstin', 'company_id']
+    const supplierRows = (data.suppliers || []).map((s: any) => supplierHeaders.map(h => (s[h] != null ? s[h] : '')))
+
+    const saleHeaders = ['id', 'sale_date', 'invoice_number', 'customer_name', 'subtotal', 'discount', 'tax_amount', 'grand_total', 'payment_status', 'company_id']
+    const saleRows = (data.sales || []).map((s: any) => saleHeaders.map(h => (s[h] != null ? s[h] : '')))
+
+    const purchaseHeaders = ['id', 'purchase_date', 'invoice_number', 'supplier_name', 'type', 'subtotal', 'total_tax', 'grand_total', 'total_amount', 'payment_status', 'company_id']
+    const purchaseRows = (data.purchases || []).map((p: any) =>
+      purchaseHeaders.map(h => (h === 'total_amount' ? (p.total_amount ?? p.grand_total ?? '') : (p[h] != null ? p[h] : '')))
+    )
+
+    const sheets = [
+      sheet('Products', productHeaders, productRows),
+      sheet('Customers', customerHeaders, customerRows),
+      sheet('Suppliers', supplierHeaders, supplierRows),
+      sheet('Sales', saleHeaders, saleRows),
+      sheet('Purchases', purchaseHeaders, purchaseRows),
+    ]
+    const filename = `hisabkitab_export_all_${new Date().toISOString().split('T')[0]}_${Date.now()}`
+    exportMultiSheetExcel(sheets, filename)
+  },
+
+  // Export for Tally (Excel with Sales and Purchases in Tally-import-friendly structure)
+  exportTallyFriendly: async (companyId?: number | null): Promise<void> => {
+    const [sales, purchases] = await Promise.all([
+      saleService.getAll(true, companyId),
+      purchaseService.getAll(undefined, companyId),
+    ])
+    const filename = `hisabkitab_tally_export_${new Date().toISOString().split('T')[0]}_${Date.now()}`
+    exportTallyFriendlyExcel(sales, purchases, filename)
   },
 
   // Export to CSV (summary data)
@@ -134,8 +183,11 @@ export const backupService = {
     const link = document.createElement('a')
     link.href = url
     link.download = `hisabkitab_summary_${new Date().toISOString().split('T')[0]}.csv`
+    link.style.display = 'none'
+    document.body.appendChild(link)
     link.click()
-    URL.revokeObjectURL(url)
+    document.body.removeChild(link)
+    setTimeout(() => URL.revokeObjectURL(url), 200)
   },
 
   // Import data from JSON
@@ -1064,23 +1116,15 @@ export const backupService = {
       const backup = await backupService.exportAll(userId, companyId)
       const backupDataString = JSON.stringify(backup)
       const now = new Date()
-      
-      const automaticBackup: AutomaticBackup = {
-        backup_date: now.toISOString().split('T')[0],
-        created_at: now.toISOString(),
-        backup_data: backupDataString,
-        file_name: `hisabkitab_auto_backup_${now.toISOString().split('T')[0]}_${Date.now()}.json`,
-        size_bytes: new Blob([backupDataString]).size,
-      }
+      const file_name = `hisabkitab_auto_backup_${now.toISOString().split('T')[0]}_${Date.now()}.json`
+      const size_bytes = new Blob([backupDataString]).size
 
-      const saved = await put(STORES.AUTOMATIC_BACKUPS, automaticBackup)
-      
-      // Upload to cloud if available
+      // Upload to cloud first (no IndexedDB write yet – avoids blocking; uses pre-serialized string so no double stringify)
       let cloudUploaded = false
       try {
         const { cloudBackupService } = await import('./cloudBackupService')
-        const uploadResult = await cloudBackupService.uploadBackup(
-          backup,
+        const uploadResult = await cloudBackupService.uploadBackupFromString(
+          backupDataString,
           companyId ?? null,
           backupTime || '12:00'
         )
@@ -1093,6 +1137,16 @@ export const backupService = {
       } catch (cloudError) {
         console.warn('⚠️ Cloud backup service not available, backup saved locally only:', cloudError)
       }
+
+      // Save to local IndexedDB after upload (so slow write doesn't delay upload)
+      const automaticBackup: AutomaticBackup = {
+        backup_date: now.toISOString().split('T')[0],
+        created_at: now.toISOString(),
+        backup_data: backupDataString,
+        file_name,
+        size_bytes,
+      }
+      const saved = await put(STORES.AUTOMATIC_BACKUPS, automaticBackup)
       
       // Auto-download backup file (only if cloud upload failed or disabled)
       if (!cloudUploaded) {
@@ -1101,9 +1155,12 @@ export const backupService = {
           const url = URL.createObjectURL(blob)
           const link = document.createElement('a')
           link.href = url
-          link.download = automaticBackup.file_name
+          link.download = file_name
+          link.style.display = 'none'
+          document.body.appendChild(link)
           link.click()
-          URL.revokeObjectURL(url)
+          document.body.removeChild(link)
+          setTimeout(() => URL.revokeObjectURL(url), 200)
         } catch (downloadError) {
           console.warn('Could not auto-download backup:', downloadError)
         }
@@ -1112,7 +1169,7 @@ export const backupService = {
       return { 
         success: true, 
         backupId: saved.id, 
-        fileName: automaticBackup.file_name,
+        fileName: file_name,
         cloudUploaded
       }
     } catch (error: any) {

@@ -47,6 +47,214 @@ export function exportToExcel(
 }
 
 /**
+ * Export multiple sheets to one Excel file (for full backup / export all data).
+ */
+export function exportMultiSheetExcel(
+  sheets: { sheetName: string; headers: string[]; rows: any[][] }[],
+  filename: string
+): void {
+  const workbook = XLSX.utils.book_new()
+  for (const { sheetName, headers, rows } of sheets) {
+    const worksheetData = [headers, ...rows]
+    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData)
+    const maxWidths = headers.map((header, colIndex) => {
+      const dataWidth = Math.max(
+        ...rows.map(row => (row[colIndex] != null ? String(row[colIndex]).length : 0)),
+        header.length
+      )
+      return Math.min(dataWidth + 2, 50)
+    })
+    worksheet['!cols'] = maxWidths.map(wch => ({ wch }))
+    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.substring(0, 31)) // Excel sheet name max 31 chars
+  }
+  XLSX.writeFile(workbook, `${filename}.xlsx`)
+}
+
+/**
+ * Tally-friendly export: Sales and Purchases in a structure suitable for TallyPrime import.
+ * Columns align with common Tally voucher import (Date, Voucher Type, Voucher Number, Party, Amount, Tax, Total).
+ * CA can use mapping template in Tally if column names differ.
+ */
+export const TALLY_SALES_HEADERS = [
+  'Date',
+  'Voucher Type',
+  'Voucher Number',
+  'Party Name',
+  'Party GSTIN',
+  'Subtotal',
+  'Tax Amount',
+  'Discount',
+  'Total Amount',
+  'Payment Status',
+  'Notes',
+]
+export const TALLY_PURCHASE_HEADERS = [
+  'Date',
+  'Voucher Type',
+  'Voucher Number',
+  'Party Name',
+  'Party GSTIN',
+  'Subtotal',
+  'Tax Amount',
+  'Total Amount',
+  'Payment Status',
+  'Notes',
+]
+
+export function exportTallyFriendlyExcel(
+  sales: Array<{
+    sale_date?: string
+    invoice_number?: string
+    customer_name?: string
+    subtotal?: number
+    tax_amount?: number
+    discount?: number
+    grand_total?: number
+    payment_status?: string
+    notes?: string
+    items?: Array<{ product_name?: string; quantity?: number; unit_price?: number; total?: number }>
+  }>,
+  purchases: Array<{
+    purchase_date?: string
+    invoice_number?: string
+    supplier_name?: string
+    supplier_gstin?: string
+    subtotal?: number
+    total_tax?: number
+    grand_total?: number
+    total_amount?: number
+    payment_status?: string
+    notes?: string
+  }>,
+  filename: string
+): void {
+  const salesRows = sales.map(s => [
+    s.sale_date ?? '',
+    'Sales',
+    s.invoice_number ?? '',
+    s.customer_name ?? '',
+    '', // Party GSTIN - could be from customer if available
+    s.subtotal ?? 0,
+    s.tax_amount ?? 0,
+    s.discount ?? 0,
+    s.grand_total ?? 0,
+    s.payment_status ?? '',
+    s.notes ?? '',
+  ])
+  const purchaseRows = purchases.map(p => [
+    p.purchase_date ?? '',
+    'Purchase',
+    p.invoice_number ?? '',
+    p.supplier_name ?? '',
+    p.supplier_gstin ?? '',
+    p.subtotal ?? (p as any).total_amount ?? 0,
+    p.total_tax ?? (p as any).total_tax ?? 0,
+    (p.grand_total ?? p.total_amount ?? 0),
+    p.payment_status ?? '',
+    p.notes ?? '',
+  ])
+  exportMultiSheetExcel(
+    [
+      { sheetName: 'Sales', headers: TALLY_SALES_HEADERS, rows: salesRows },
+      { sheetName: 'Purchases', headers: TALLY_PURCHASE_HEADERS, rows: purchaseRows },
+    ],
+    filename
+  )
+}
+
+/**
+ * GSTR-1 B2B Excel format for GST portal upload.
+ * Columns aligned with common GSTR-1 B2B template (adjust if portal template differs).
+ */
+export const GSTR1_B2B_HEADERS = [
+  'GSTIN of Recipient',
+  'Receiver Name',
+  'Invoice Number',
+  'Invoice Date',
+  'Invoice Value',
+  'Place of Supply (State Code)',
+  'Taxable Value',
+  'CGST Rate',
+  'CGST Amount',
+  'SGST Rate',
+  'SGST Amount',
+  'IGST Rate',
+  'IGST Amount',
+  'Cess Amount',
+  'Total',
+]
+
+/**
+ * Export sales register data in GSTR-1 B2B portal upload format (Excel).
+ * dataRows: each row [gstin, receiverName, invNo, invDate, invValue, placeOfSupply, taxableValue, cgstRate, cgstAmt, sgstRate, sgstAmt, igstRate, igstAmt, cessAmt, total]
+ */
+export function exportGSTR1PortalExcel(dataRows: any[][], filename: string): void {
+  const sheetName = 'B2B'
+  const worksheetData = [GSTR1_B2B_HEADERS, ...dataRows]
+  const worksheet = XLSX.utils.aoa_to_sheet(worksheetData)
+  worksheet['!cols'] = GSTR1_B2B_HEADERS.map((_, i) => ({ wch: Math.min(i === 1 ? 30 : 18, 50) }))
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName)
+  XLSX.writeFile(workbook, `${filename}.xlsx`)
+}
+
+/**
+ * GSTR-2 B2B Excel format for GST portal upload (inward supplies).
+ */
+export const GSTR2_B2B_HEADERS = [
+  'Supplier GSTIN',
+  'Supplier Name',
+  'Invoice Number',
+  'Invoice Date',
+  'Invoice Value',
+  'Taxable Value',
+  'CGST Amount',
+  'SGST Amount',
+  'IGST Amount',
+  'Total',
+]
+
+/**
+ * Export purchase register data in GSTR-2 B2B portal upload format (Excel).
+ */
+export function exportGSTR2PortalExcel(dataRows: any[][], filename: string): void {
+  const sheetName = 'B2B'
+  const worksheetData = [GSTR2_B2B_HEADERS, ...dataRows]
+  const worksheet = XLSX.utils.aoa_to_sheet(worksheetData)
+  worksheet['!cols'] = GSTR2_B2B_HEADERS.map((_, i) => ({ wch: Math.min(i === 1 ? 30 : 18, 50) }))
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName)
+  XLSX.writeFile(workbook, `${filename}.xlsx`)
+}
+
+/**
+ * GSTR-3B monthly summary Excel format for CA / GST filing.
+ * One row per period: Outward taxable, Outward tax, Inward taxable, ITC, Net tax payable.
+ */
+export const GSTR3B_HEADERS = [
+  'Period (Month)',
+  'Outward Taxable Value',
+  'Outward Tax (CGST+SGST+IGST)',
+  'Inward Taxable Value',
+  'ITC (Input Tax Credit)',
+  'Net Tax Payable',
+]
+
+/**
+ * Export GSTR-3B style monthly summary (Excel).
+ * dataRows: each row [period, outwardTaxable, outwardTax, inwardTaxable, itc, netTaxPayable]
+ */
+export function exportGSTR3BExcel(dataRows: any[][], filename: string): void {
+  const sheetName = 'GSTR-3B Summary'
+  const worksheetData = [GSTR3B_HEADERS, ...dataRows]
+  const worksheet = XLSX.utils.aoa_to_sheet(worksheetData)
+  worksheet['!cols'] = GSTR3B_HEADERS.map((_, i) => ({ wch: Math.min(i === 0 ? 12 : 22, 50) }))
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName)
+  XLSX.writeFile(workbook, `${filename}.xlsx`)
+}
+
+/**
  * Export HTML element to PDF
  */
 export async function exportHTMLToPDF(

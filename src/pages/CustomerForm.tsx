@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { customerService } from '../services/customerService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
+import { Breadcrumbs } from '../components/Breadcrumbs'
 import { Home, Save, X } from 'lucide-react'
 import { Customer } from '../types/customer'
 
@@ -25,6 +27,7 @@ const CustomerForm = () => {
   const location = useLocation()
   const { id } = useParams<{ id: string }>()
   const { hasPermission, getCurrentCompanyId } = useAuth()
+  const { toast } = useToast()
   const isEditing = !!id
   
   // Check if we should return to sale page after adding customer
@@ -144,15 +147,14 @@ const CustomerForm = () => {
       } else {
         await customerService.create(customerData)
       }
-
-      // If we came from sale page, return there; otherwise go to customers list
+      toast.success(isEditing ? 'Customer updated!' : 'Customer saved!')
       if (returnTo === 'sale') {
         navigate('/sales/new')
       } else {
         navigate('/customers')
       }
     } catch (error: any) {
-      alert(error.message || 'Error saving customer')
+      toast.error(error.message || 'Error saving customer')
     }
   }
 
@@ -179,7 +181,15 @@ const CustomerForm = () => {
                 >
                   <Home className="w-5 h-5 text-gray-700" />
                 </button>
-                <div>
+                <div className="min-w-0">
+                  <Breadcrumbs
+                    items={[
+                      { label: 'Dashboard', path: '/' },
+                      { label: 'Customers', path: '/customers' },
+                      { label: isEditing ? 'Edit Customer' : 'New Customer' },
+                    ]}
+                    className="mb-1"
+                  />
                   <h1 className="text-3xl font-bold text-gray-900">
                     {isEditing ? 'Edit Customer' : 'Add New Customer'}
                   </h1>

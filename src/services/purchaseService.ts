@@ -57,18 +57,18 @@ export const purchaseService = {
       invoiceNumber = await generatePurchaseInvoiceNumber(purchase.company_id, existingInvoiceNumbers)
     }
     
-    // Assign IDs to purchase items if they don't have them, and initialize sold_quantity
+    const baseId = Date.now()
     const itemsWithIds = purchase.items.map((item, index) => ({
       ...item,
-      id: item.id || Date.now() + index, // Assign unique ID if not present
-      sold_quantity: item.sold_quantity || 0, // Initialize sold_quantity to 0
+      id: (typeof item.id === 'number' && item.id > 0) ? item.id : (baseId + index),
+      sold_quantity: item.sold_quantity ?? 0,
     }))
     
     const newPurchase: GSTPurchase = {
       ...purchase,
       items: itemsWithIds,
       invoice_number: invoiceNumber,
-      id: Date.now(),
+      id: baseId,
       type: 'gst',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -115,18 +115,18 @@ export const purchaseService = {
       invoiceNumber = await generatePurchaseInvoiceNumber(purchase.company_id, existingInvoiceNumbers)
     }
     
-    // Assign IDs to purchase items if they don't have them, and initialize sold_quantity
+    const baseId = Date.now()
     const itemsWithIds = purchase.items.map((item, index) => ({
       ...item,
-      id: item.id || Date.now() + index, // Assign unique ID if not present
-      sold_quantity: item.sold_quantity || 0, // Initialize sold_quantity to 0
+      id: (typeof item.id === 'number' && item.id > 0) ? item.id : (baseId + index),
+      sold_quantity: item.sold_quantity ?? 0,
     }))
     
     const newPurchase: SimplePurchase = {
       ...purchase,
       items: itemsWithIds,
       invoice_number: invoiceNumber || undefined,
-      id: Date.now(),
+      id: baseId,
       type: 'simple',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
