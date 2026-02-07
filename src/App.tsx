@@ -4,12 +4,14 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 import Dashboard from './pages/Dashboard'
 import Login from './pages/Login'
 import Products from './pages/Products'
+import BulkOperations from './pages/BulkOperations'
 import ProductForm from './pages/ProductForm'
 import PurchaseHistory from './pages/PurchaseHistory'
 import GSTPurchaseForm from './pages/GSTPurchaseForm'
 import SimplePurchaseForm from './pages/SimplePurchaseForm'
 import SalesHistory from './pages/SalesHistory'
 import SaleForm from './pages/SaleForm'
+import QuickSale from './pages/QuickSale'
 import Suppliers from './pages/Suppliers'
 import SupplierForm from './pages/SupplierForm'
 import SupplierAccount from './pages/SupplierAccount'
@@ -26,13 +28,23 @@ import SalesPersonCategoryAssignmentForm from './pages/SalesPersonCategoryAssign
 import CommissionReports from './pages/CommissionReports'
 import SalesPersonManagement from './pages/SalesPersonManagement'
 import Customers from './pages/Customers'
+import CustomerInsights from './pages/CustomerInsights'
 import CustomerForm from './pages/CustomerForm'
 import InvoiceView from './pages/InvoiceView'
 import StockAlerts from './pages/StockAlerts'
 import ReorderList from './pages/ReorderList'
+import ReorderForm from './pages/ReorderForm'
+import ReorderEditForm from './pages/ReorderEditForm'
+import PurchaseReorders from './pages/PurchaseReorders'
 import StockAdjustmentForm from './pages/StockAdjustmentForm'
 import StockAdjustmentHistory from './pages/StockAdjustmentHistory'
 import SalesReports from './pages/SalesReports'
+import PurchaseReports from './pages/PurchaseReports'
+import ProfitAnalysis from './pages/ProfitAnalysis'
+import ExpenseReports from './pages/ExpenseReports'
+import ComparativeReports from './pages/ComparativeReports'
+import PriceLists from './pages/PriceLists'
+import AutomatedExports from './pages/AutomatedExports'
 import CAReports from './pages/CAReports'
 import OutstandingPayments from './pages/OutstandingPayments'
 import SystemSettings from './pages/SystemSettings'
@@ -60,6 +72,7 @@ import { OfflineBanner } from './components/OfflineBanner'
 import { GlobalSearch } from './components/GlobalSearch'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
 import { ToastProvider } from './context/ToastContext'
+import { PlanUpgradeProvider } from './context/PlanUpgradeContext'
 import { Toast } from './components/Toast'
 
 // Lazy load to prevent import errors from breaking the app
@@ -67,9 +80,10 @@ import { Toast } from './components/Toast'
 
 function App() {
   return (
-    <DatabaseProvider>
-      <AuthProvider>
+    <AuthProvider>
+      <DatabaseProvider>
         <ToastProvider>
+        <PlanUpgradeProvider>
         <Router>
           <LicenseGuard>
             <LicenseExpiredBanner />
@@ -112,9 +126,33 @@ function App() {
             }
           />
           <Route
+            path="/products/bulk-operations"
+            element={
+              <ProtectedRoute requiredPermission="products:update">
+                <BulkOperations />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/price-lists"
+            element={
+              <ProtectedRoute requiredPermission="products:read">
+                <PriceLists />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/automated-exports"
+            element={
+              <ProtectedRoute requiredPermission="settings:update" requiredRole="admin">
+                <AutomatedExports />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/purchases/history"
             element={
-              <ProtectedRoute requiredPermission="purchases:read">
+              <ProtectedRoute requiredPermission="purchases:read" requiredPlanFeature="purchase_history">
                 <PurchaseHistory />
               </ProtectedRoute>
             }
@@ -122,8 +160,32 @@ function App() {
           <Route
             path="/purchases/new-gst"
             element={
-              <ProtectedRoute requiredPermission="purchases:create">
+              <ProtectedRoute requiredPermission="purchases:create" requiredPlanFeature="purchase_gst">
                 <GSTPurchaseForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/purchases/reorder/:id/edit"
+            element={
+              <ProtectedRoute requiredPermission="purchases:create" requiredPlanFeature="purchase_reorder">
+                <ReorderEditForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/purchases/reorder"
+            element={
+              <ProtectedRoute requiredPermission="purchases:create" requiredPlanFeature="purchase_reorder">
+                <ReorderForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/purchases/reorders"
+            element={
+              <ProtectedRoute requiredPlanFeature="purchase_reorder">
+                <PurchaseReorders />
               </ProtectedRoute>
             }
           />
@@ -163,7 +225,7 @@ function App() {
             path="/sales/quick"
             element={
               <ProtectedRoute requiredPermission="sales:create">
-                <SaleForm />
+                <QuickSale />
               </ProtectedRoute>
             }
           />
@@ -362,7 +424,7 @@ function App() {
           <Route
             path="/sales-category-management"
             element={
-              <ProtectedRoute requiredPermission="users:read">
+              <ProtectedRoute requiredPermission="users:read" requiredPlanFeature="purchase_sales_category_mgmt">
                 <SalesPersonManagement />
               </ProtectedRoute>
             }
@@ -372,6 +434,14 @@ function App() {
             element={
               <ProtectedRoute requiredPermission="sales:read">
                 <Customers />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/customers/insights"
+            element={
+              <ProtectedRoute requiredPermission="sales:read">
+                <CustomerInsights />
               </ProtectedRoute>
             }
           />
@@ -410,7 +480,7 @@ function App() {
           <Route
             path="/stock/reorder"
             element={
-              <ProtectedRoute requiredPermission="products:read">
+              <ProtectedRoute requiredPermission="products:read" requiredPlanFeature="purchase_reorder">
                 <ReorderList />
               </ProtectedRoute>
             }
@@ -440,6 +510,38 @@ function App() {
             }
           />
           <Route
+            path="/reports/purchases"
+            element={
+              <ProtectedRoute requiredPermission="reports:read">
+                <PurchaseReports />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reports/profit-analysis"
+            element={
+              <ProtectedRoute requiredPermission="reports:read">
+                <ProfitAnalysis />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reports/expenses"
+            element={
+              <ProtectedRoute requiredPermission="reports:read">
+                <ExpenseReports />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reports/comparative"
+            element={
+              <ProtectedRoute requiredPermission="reports:read" requiredPlanFeature="report_comparative">
+                <ComparativeReports />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/reports/ca"
             element={
               <ProtectedRoute requiredPermission="reports:read">
@@ -450,7 +552,7 @@ function App() {
           <Route
             path="/payments/outstanding"
             element={
-              <ProtectedRoute requiredPermission="sales:read">
+              <ProtectedRoute requiredPermission="sales:read" requiredPlanFeature="report_outstanding">
                 <OutstandingPayments />
               </ProtectedRoute>
             }
@@ -474,7 +576,7 @@ function App() {
           <Route
             path="/debug/indexeddb"
             element={
-              <ProtectedRoute requiredPermission="settings:update">
+              <ProtectedRoute requiredPermission="settings:update" requiredRole="admin">
                 <IndexedDBInspector />
               </ProtectedRoute>
             }
@@ -490,7 +592,7 @@ function App() {
           <Route
             path="/settings/barcode-label"
             element={
-              <ProtectedRoute requiredPermission="barcode_label_settings:read">
+              <ProtectedRoute requiredPermission="barcode_label_settings:read" requiredRole="admin">
                 <BarcodeLabelSettings />
               </ProtectedRoute>
             }
@@ -498,7 +600,7 @@ function App() {
           <Route
             path="/settings/receipt-printer"
             element={
-              <ProtectedRoute requiredPermission="receipt_printer_settings:read">
+              <ProtectedRoute requiredPermission="receipt_printer_settings:read" requiredRole="admin">
                 <ReceiptPrinterSettings />
               </ProtectedRoute>
             }
@@ -562,7 +664,7 @@ function App() {
           <Route
             path="/daily-report"
             element={
-              <ProtectedRoute requiredPermission="expenses:read">
+              <ProtectedRoute requiredPermission="expenses:read" requiredPlanFeature="expense_daily_report">
                 <DailyReport />
               </ProtectedRoute>
             }
@@ -570,7 +672,7 @@ function App() {
           <Route
             path="/checks/upcoming"
             element={
-              <ProtectedRoute requiredPermission="purchases:read">
+              <ProtectedRoute requiredPermission="purchases:read" requiredPlanFeature="purchase_upcoming_checks">
                 <UpcomingChecks />
               </ProtectedRoute>
             }
@@ -582,9 +684,10 @@ function App() {
             <Toast />
           </LicenseGuard>
         </Router>
+        </PlanUpgradeProvider>
         </ToastProvider>
-      </AuthProvider>
-    </DatabaseProvider>
+      </DatabaseProvider>
+    </AuthProvider>
   )
 }
 

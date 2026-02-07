@@ -10,11 +10,15 @@ export interface User {
   company_id?: number // Company this user belongs to (undefined for admin means all companies)
 }
 
+import type { PlanFeature } from '../utils/planFeatures'
+
 export interface AuthContextType {
   user: User | null
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>
   logout: () => void
   hasPermission: (permission: string) => boolean
+  hasPlanFeature: (feature: PlanFeature) => boolean
+  subscriptionTier: 'basic' | 'standard' | 'premium' | null
   isLoading: boolean
   currentCompanyId: number | null
   switchCompany: (companyId: number | null) => void
@@ -33,6 +37,7 @@ export const RolePermissions: Record<UserRole, Permission[]> = {
     { resource: 'products', actions: ['create', 'read', 'update', 'delete'] },
     { resource: 'reports', actions: ['read', 'export'] },
     { resource: 'users', actions: ['create', 'read', 'update', 'delete'] },
+    // System settings: admin only (plan-based features do not include settings)
     { resource: 'settings', actions: ['read', 'update'] },
     { resource: 'barcode_label_settings', actions: ['read', 'update'] },
     { resource: 'receipt_printer_settings', actions: ['read', 'update'] },
@@ -44,10 +49,10 @@ export const RolePermissions: Record<UserRole, Permission[]> = {
     { resource: 'purchases', actions: ['create', 'read', 'update'] },
     { resource: 'products', actions: ['create', 'read', 'update'] },
     { resource: 'reports', actions: ['read', 'export'] },
-    { resource: 'users', actions: ['create', 'read', 'update', 'delete'] }, // Allow managers to fully manage sales persons, commissions, and assignments
-    { resource: 'settings', actions: ['read'] }, // Full system settings only for admin; use Custom Permissions for Barcode Label / Receipt Printer
-    { resource: 'business_overview', actions: ['read', 'export'] }, // Manager: employees, expenses, sales, cost, P&L
-    { resource: 'expenses', actions: ['create', 'read', 'update', 'delete'] }, // Managers can manage expenses
+    { resource: 'users', actions: ['create', 'read', 'update', 'delete'] },
+    // settings removed – admin only
+    { resource: 'business_overview', actions: ['read', 'export'] },
+    { resource: 'expenses', actions: ['create', 'read', 'update', 'delete'] },
   ],
   staff: [
     { resource: 'sales', actions: ['create', 'read'] },

@@ -97,7 +97,12 @@ export function GlobalSearch() {
       )
     : []
   const filteredCustomers = q
-    ? customers.filter(c => (c.name || '').toLowerCase().includes(q))
+    ? customers.filter(
+        c =>
+          (c.name || '').toLowerCase().includes(q) ||
+          (c.phone || '').replace(/\s/g, '').includes(q.replace(/\s/g, '')) ||
+          (c.email || '').toLowerCase().includes(q)
+      )
     : []
   const filteredSales = q
     ? sales.filter(s => (s.invoice_number || '').toLowerCase().includes(q) || String(s.id).includes(q))

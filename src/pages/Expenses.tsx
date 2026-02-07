@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { expenseService } from '../services/expenseService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Expense, ExpenseType } from '../types/expense'
-import { Plus, Search, Edit, Trash2, Home, DollarSign, Calendar, User } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, Home, DollarSign, Calendar, User, BarChart3 } from 'lucide-react'
 
 const Expenses = () => {
   const navigate = useNavigate()
@@ -103,10 +103,21 @@ const Expenses = () => {
                   <p className="text-sm text-gray-600 mt-1">Manage and track daily expenses</p>
                 </div>
               </div>
-              {hasPermission('expenses:create') && (
-                <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3">
+                {hasPermission('reports:read') && (
                   <button
-                    onClick={() => navigate('/expenses/new?type=opening')}
+                    onClick={() => navigate('/reports/expenses')}
+                    className="bg-gradient-to-r from-slate-600 to-slate-700 text-white font-semibold py-3 px-4 rounded-xl hover:shadow-lg transition-all flex items-center gap-2"
+                    title="Expense Reports"
+                  >
+                    <BarChart3 className="w-5 h-5" />
+                    Reports
+                  </button>
+                )}
+                {hasPermission('expenses:create') && (
+                  <>
+                    <button
+                      onClick={() => navigate('/expenses/new?type=opening')}
                     className="bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold py-3 px-4 rounded-xl hover:shadow-lg transition-all flex items-center gap-2 transform hover:scale-105"
                     title="Add Opening Balance"
                   >
@@ -128,8 +139,9 @@ const Expenses = () => {
                     <Plus className="w-5 h-5" />
                     Add Expense
                   </button>
-                </div>
-              )}
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </header>

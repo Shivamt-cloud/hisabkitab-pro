@@ -102,7 +102,7 @@ export default defineConfig({
         ]
       },
       devOptions: {
-        enabled: true,
+        enabled: false, // Disable in dev – avoids dev-sw.js CORS errors and Supabase fetch failures
         type: 'module'
       }
     })

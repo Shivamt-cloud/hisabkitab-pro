@@ -1588,9 +1588,33 @@ const SystemSettings = () => {
                         </div>
 
                         {useCustomPermissions && (
-                          <div className="bg-gray-50 rounded-lg p-4 space-y-4 max-h-96 overflow-y-auto">
+                          <div className="bg-gray-50 rounded-lg p-4 space-y-4 max-h-[28rem] overflow-y-auto">
+                            <div className="flex flex-wrap gap-2 mb-3">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const all: ModulePermission[] = (Object.keys(PERMISSION_MODULES) as PermissionModule[])
+                                  .filter((module) => module !== 'settings')
+                                  .map((module) => ({
+                                    module,
+                                    actions: [...PERMISSION_MODULES[module].actions],
+                                  }))
+                                  setCustomPermissions(all)
+                                }}
+                                className="px-3 py-1.5 text-sm font-medium rounded-lg bg-green-100 text-green-800 hover:bg-green-200"
+                              >
+                                Grant all
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setCustomPermissions([])}
+                                className="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-200 text-gray-800 hover:bg-gray-300"
+                              >
+                                Revoke all
+                              </button>
+                            </div>
                             {(Object.keys(PERMISSION_MODULES) as PermissionModule[])
-                              .filter((module) => module !== 'settings') // System Settings only for admin, not in custom permissions
+                              .filter((module) => module !== 'settings')
                               .map((module) => {
                               const moduleInfo = PERMISSION_MODULES[module]
                               const modulePerm = customPermissions.find(p => p.module === module)

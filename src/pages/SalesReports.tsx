@@ -11,7 +11,7 @@ import {
   SalesBySalesPersonReport,
   ReportTimePeriod,
 } from '../types/reports'
-import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText, Eye, ShoppingCart, Search, X } from 'lucide-react'
+import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText, Eye, ShoppingCart, Search, X, Columns3 } from 'lucide-react'
 import { saleService } from '../services/saleService'
 import { Sale } from '../types/sale'
 import { exportToExcel as exportExcel, exportDataToPDF } from '../utils/exportUtils'
@@ -22,8 +22,14 @@ import { salesPersonService } from '../services/salespersonService'
 import type { Category } from '../services/productService'
 import type { Customer } from '../types/customer'
 import type { SalesPerson } from '../types/salesperson'
+import {
+  SALES_REPORT_COLUMNS,
+  DEFAULT_VISIBLE_COLUMNS,
+  getStorageKey,
+  type SalesReportView,
+} from '../utils/salesReportColumns'
 
-type ReportView = 'product' | 'category' | 'customer' | 'salesperson' | 'sales'
+type ReportView = SalesReportView
 
 const SalesReports = () => {
   const { hasPermission, getCurrentCompanyId } = useAuth()
@@ -41,6 +47,7 @@ const SalesReports = () => {
   const [filterCustomerId, setFilterCustomerId] = useState<number | ''>('')
   const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false)
   const [customerSearchQuery, setCustomerSearchQuery] = useState('')
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('')
   const [filterSalesPersonId, setFilterSalesPersonId] = useState<number | ''>('')
 
   // Options for filter dropdowns
@@ -54,6 +61,31 @@ const SalesReports = () => {
   const [customerReports, setCustomerReports] = useState<SalesByCustomerReport[]>([])
   const [salesPersonReports, setSalesPersonReports] = useState<SalesBySalesPersonReport[]>([])
   const [sales, setSales] = useState<Sale[]>([])
+  const [showColumnSettings, setShowColumnSettings] = useState(false)
+  const [visibleColumns, setVisibleColumns] = useState<Record<ReportView, Set<string>>>(() => {
+    const init: Record<ReportView, Set<string>> = {} as Record<ReportView, Set<string>>
+    ;(['product', 'category', 'customer', 'salesperson', 'sales'] as ReportView[]).forEach(view => {
+      try {
+        const stored = localStorage.getItem(getStorageKey(view))
+        init[view] = stored ? new Set(JSON.parse(stored) as string[]) : new Set(DEFAULT_VISIBLE_COLUMNS[view])
+      } catch (_) {
+        init[view] = new Set(DEFAULT_VISIBLE_COLUMNS[view])
+      }
+    })
+    return init
+  })
+  const toggleColumnVisibility = (view: ReportView, key: string) => {
+    setVisibleColumns(prev => {
+      const next = { ...prev }
+      const set = new Set(next[view])
+      if (set.has(key)) set.delete(key)
+      else set.add(key)
+      next[view] = set
+      localStorage.setItem(getStorageKey(view), JSON.stringify([...set]))
+      return next
+    })
+  }
+  const isColumnVisible = (view: ReportView, key: string) => visibleColumns[view]?.has(key) ?? true
 
   // Load filter options (products, categories, customers, sales persons)
   useEffect(() => {
@@ -229,6 +261,28 @@ const SalesReports = () => {
       fSales = fSales.filter(s => s.sales_person_id === filterSalesPersonId)
     }
 
+    // Global search across all views
+    const q = globalSearchQuery.trim().toLowerCase()
+    if (q) {
+      fProduct = fProduct.filter(
+        r =>
+          r.product_name.toLowerCase().includes(q) ||
+          (products.find(p => p.id === r.product_id)?.category_name || 'Uncategorized').toLowerCase().includes(q)
+      )
+      fCategory = fCategory.filter(r => r.category_name.toLowerCase().includes(q))
+      fCustomer = fCustomer.filter(r => r.customer_name.toLowerCase().includes(q))
+      fSalesPerson = fSalesPerson.filter(r => r.sales_person_name.toLowerCase().includes(q))
+      fSales = fSales.filter(s => {
+        const invMatch = (s.invoice_number || '').toLowerCase().includes(q)
+        const custMatch = (s.customer_name || '').toLowerCase().includes(q)
+        const cust = s.customer_id ? customers.find(c => c.id === s.customer_id) : null
+        const phoneMatch = cust?.phone ? cust.phone.replace(/\D/g, '').includes(q.replace(/\D/g, '')) : false
+        const salesPersonMatch = (s.sales_person_name || '').toLowerCase().includes(q)
+        const productMatch = s.items.some(it => (it.product_name || '').toLowerCase().includes(q))
+        return invMatch || custMatch || phoneMatch || salesPersonMatch || productMatch
+      })
+    }
+
     return {
       filteredProductReports: fProduct,
       filteredCategoryReports: fCategory,
@@ -243,10 +297,12 @@ const SalesReports = () => {
     salesPersonReports,
     sales,
     products,
+    customers,
     filterProductId,
     filterCategoryName,
     filterCustomerId,
     filterSalesPersonId,
+    globalSearchQuery,
   ])
 
   const exportToExcel = () => {
@@ -424,41 +480,33 @@ const SalesReports = () => {
   }
 
   const renderProductReport = () => (
-    <div className="overflow-x-auto">
-      <table className="w-full">
-        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+    <div className="overflow-x-auto overflow-y-auto max-h-[55vh] border border-gray-200 rounded-lg" style={{ scrollbarGutter: 'stable' }}>
+      <table className="w-full min-w-[700px]">
+        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 sticky top-0 z-10">
           <tr>
-            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Product</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Quantity</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Revenue</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Cost</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Profit</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Margin %</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Avg Price</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Sales Count</th>
+            {isColumnVisible('product', 'product_name') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Product</th>}
+            {isColumnVisible('product', 'total_quantity') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Quantity</th>}
+            {isColumnVisible('product', 'total_revenue') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Revenue</th>}
+            {isColumnVisible('product', 'total_cost') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Cost</th>}
+            {isColumnVisible('product', 'total_profit') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Profit</th>}
+            {isColumnVisible('product', 'profit_margin') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Margin %</th>}
+            {isColumnVisible('product', 'average_price') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Avg Price</th>}
+            {isColumnVisible('product', 'sale_count') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Sales Count</th>}
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-200">
+        <tbody className="divide-y divide-gray-200 bg-white">
           {filteredProductReports.map((report) => (
             <tr key={report.product_id} className="hover:bg-gray-50 transition-colors">
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm font-medium text-gray-900">{report.product_name}</div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">{report.total_quantity}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold text-green-600">₹{report.total_revenue.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600">₹{report.total_cost.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-blue-600">₹{report.total_profit.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  report.profit_margin >= 30 ? 'bg-green-100 text-green-700' :
-                  report.profit_margin >= 15 ? 'bg-yellow-100 text-yellow-700' :
-                  'bg-red-100 text-red-700'
-                }`}>
-                  {report.profit_margin.toFixed(2)}%
-                </span>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600">₹{report.average_price.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600">{report.sale_count}</td>
+              {isColumnVisible('product', 'product_name') && <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{report.product_name}</td>}
+              {isColumnVisible('product', 'total_quantity') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-900">{report.total_quantity}</td>}
+              {isColumnVisible('product', 'total_revenue') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-semibold text-green-600">₹{report.total_revenue.toFixed(2)}</td>}
+              {isColumnVisible('product', 'total_cost') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">₹{report.total_cost.toFixed(2)}</td>}
+              {isColumnVisible('product', 'total_profit') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-bold text-blue-600">₹{report.total_profit.toFixed(2)}</td>}
+              {isColumnVisible('product', 'profit_margin') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm">
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${report.profit_margin >= 30 ? 'bg-green-100 text-green-700' : report.profit_margin >= 15 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>{report.profit_margin.toFixed(2)}%</span>
+              </td>}
+              {isColumnVisible('product', 'average_price') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">₹{report.average_price.toFixed(2)}</td>}
+              {isColumnVisible('product', 'sale_count') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">{report.sale_count}</td>}
             </tr>
           ))}
         </tbody>
@@ -467,84 +515,68 @@ const SalesReports = () => {
   )
 
   const renderCategoryReport = () => (
-    <div className="overflow-x-auto">
-      <table className="w-full">
-        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+    <div className="overflow-x-auto overflow-y-auto max-h-[55vh] border border-gray-200 rounded-lg" style={{ scrollbarGutter: 'stable' }}>
+      <table className="w-full min-w-[700px]">
+        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 sticky top-0 z-10">
           <tr>
-            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Category</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Quantity</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Revenue</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Cost</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Profit</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Margin %</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Products</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Sales Count</th>
+            {isColumnVisible('category', 'category_name') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Category</th>}
+            {isColumnVisible('category', 'total_quantity') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Quantity</th>}
+            {isColumnVisible('category', 'total_revenue') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Revenue</th>}
+            {isColumnVisible('category', 'total_cost') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Cost</th>}
+            {isColumnVisible('category', 'total_profit') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Profit</th>}
+            {isColumnVisible('category', 'profit_margin') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Margin %</th>}
+            {isColumnVisible('category', 'product_count') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Products</th>}
+            {isColumnVisible('category', 'sale_count') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Sales Count</th>}
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-200">
+        <tbody className="divide-y divide-gray-200 bg-white">
           {filteredCategoryReports.map((report) => (
             <tr key={report.category_name} className="hover:bg-gray-50 transition-colors">
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm font-medium text-gray-900">{report.category_name}</div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">{report.total_quantity}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold text-green-600">₹{report.total_revenue.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600">₹{report.total_cost.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-blue-600">₹{report.total_profit.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  report.profit_margin >= 30 ? 'bg-green-100 text-green-700' :
-                  report.profit_margin >= 15 ? 'bg-yellow-100 text-yellow-700' :
-                  'bg-red-100 text-red-700'
-                }`}>
-                  {report.profit_margin.toFixed(2)}%
-                </span>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600">{report.product_count}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600">{report.sale_count}</td>
+              {isColumnVisible('category', 'category_name') && <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{report.category_name}</td>}
+              {isColumnVisible('category', 'total_quantity') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-900">{report.total_quantity}</td>}
+              {isColumnVisible('category', 'total_revenue') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-semibold text-green-600">₹{report.total_revenue.toFixed(2)}</td>}
+              {isColumnVisible('category', 'total_cost') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">₹{report.total_cost.toFixed(2)}</td>}
+              {isColumnVisible('category', 'total_profit') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-bold text-blue-600">₹{report.total_profit.toFixed(2)}</td>}
+              {isColumnVisible('category', 'profit_margin') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm">
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${report.profit_margin >= 30 ? 'bg-green-100 text-green-700' : report.profit_margin >= 15 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>{report.profit_margin.toFixed(2)}%</span>
+              </td>}
+              {isColumnVisible('category', 'product_count') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">{report.product_count}</td>}
+              {isColumnVisible('category', 'sale_count') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">{report.sale_count}</td>}
             </tr>
           ))}
         </tbody>
       </table>
-  </div>
+    </div>
   )
 
   const renderCustomerReport = () => (
-    <div className="overflow-x-auto">
-      <table className="w-full">
-        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+    <div className="overflow-x-auto overflow-y-auto max-h-[55vh] border border-gray-200 rounded-lg" style={{ scrollbarGutter: 'stable' }}>
+      <table className="w-full min-w-[700px]">
+        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 sticky top-0 z-10">
           <tr>
-            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Customer</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Quantity</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Revenue</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Cost</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Profit</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Margin %</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Orders</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Avg Order</th>
+            {isColumnVisible('customer', 'customer_name') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Customer</th>}
+            {isColumnVisible('customer', 'total_quantity') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Quantity</th>}
+            {isColumnVisible('customer', 'total_revenue') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Revenue</th>}
+            {isColumnVisible('customer', 'total_cost') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Cost</th>}
+            {isColumnVisible('customer', 'total_profit') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Profit</th>}
+            {isColumnVisible('customer', 'profit_margin') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Margin %</th>}
+            {isColumnVisible('customer', 'sale_count') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Orders</th>}
+            {isColumnVisible('customer', 'average_order_value') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Avg Order</th>}
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-200">
+        <tbody className="divide-y divide-gray-200 bg-white">
           {filteredCustomerReports.map((report) => (
             <tr key={report.customer_name} className="hover:bg-gray-50 transition-colors">
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm font-medium text-gray-900">{report.customer_name}</div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">{report.total_quantity}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold text-green-600">₹{report.total_revenue.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600">₹{report.total_cost.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-blue-600">₹{report.total_profit.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  report.profit_margin >= 30 ? 'bg-green-100 text-green-700' :
-                  report.profit_margin >= 15 ? 'bg-yellow-100 text-yellow-700' :
-                  'bg-red-100 text-red-700'
-                }`}>
-                  {report.profit_margin.toFixed(2)}%
-                </span>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600">{report.sale_count}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600">₹{report.average_order_value.toFixed(2)}</td>
+              {isColumnVisible('customer', 'customer_name') && <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{report.customer_name}</td>}
+              {isColumnVisible('customer', 'total_quantity') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-900">{report.total_quantity}</td>}
+              {isColumnVisible('customer', 'total_revenue') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-semibold text-green-600">₹{report.total_revenue.toFixed(2)}</td>}
+              {isColumnVisible('customer', 'total_cost') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">₹{report.total_cost.toFixed(2)}</td>}
+              {isColumnVisible('customer', 'total_profit') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-bold text-blue-600">₹{report.total_profit.toFixed(2)}</td>}
+              {isColumnVisible('customer', 'profit_margin') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm">
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${report.profit_margin >= 30 ? 'bg-green-100 text-green-700' : report.profit_margin >= 15 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>{report.profit_margin.toFixed(2)}%</span>
+              </td>}
+              {isColumnVisible('customer', 'sale_count') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">{report.sale_count}</td>}
+              {isColumnVisible('customer', 'average_order_value') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">₹{report.average_order_value.toFixed(2)}</td>}
             </tr>
           ))}
         </tbody>
@@ -553,41 +585,33 @@ const SalesReports = () => {
   )
 
   const renderSalesPersonReport = () => (
-    <div className="overflow-x-auto">
-      <table className="w-full">
-        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+    <div className="overflow-x-auto overflow-y-auto max-h-[55vh] border border-gray-200 rounded-lg" style={{ scrollbarGutter: 'stable' }}>
+      <table className="w-full min-w-[700px]">
+        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 sticky top-0 z-10">
           <tr>
-            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Sales Person</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Quantity</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Revenue</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Cost</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Profit</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Margin %</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Commission</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Sales Count</th>
+            {isColumnVisible('salesperson', 'sales_person_name') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Sales Person</th>}
+            {isColumnVisible('salesperson', 'total_quantity') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Quantity</th>}
+            {isColumnVisible('salesperson', 'total_revenue') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Revenue</th>}
+            {isColumnVisible('salesperson', 'total_cost') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Cost</th>}
+            {isColumnVisible('salesperson', 'total_profit') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Profit</th>}
+            {isColumnVisible('salesperson', 'profit_margin') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Margin %</th>}
+            {isColumnVisible('salesperson', 'commission_amount') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Commission</th>}
+            {isColumnVisible('salesperson', 'sale_count') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Sales Count</th>}
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-200">
+        <tbody className="divide-y divide-gray-200 bg-white">
           {filteredSalesPersonReports.map((report) => (
             <tr key={report.sales_person_name} className="hover:bg-gray-50 transition-colors">
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm font-medium text-gray-900">{report.sales_person_name}</div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">{report.total_quantity}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold text-green-600">₹{report.total_revenue.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600">₹{report.total_cost.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-blue-600">₹{report.total_profit.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  report.profit_margin >= 30 ? 'bg-green-100 text-green-700' :
-                  report.profit_margin >= 15 ? 'bg-yellow-100 text-yellow-700' :
-                  'bg-red-100 text-red-700'
-                }`}>
-                  {report.profit_margin.toFixed(2)}%
-                </span>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold text-purple-600">₹{report.commission_amount.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-600">{report.sale_count}</td>
+              {isColumnVisible('salesperson', 'sales_person_name') && <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{report.sales_person_name}</td>}
+              {isColumnVisible('salesperson', 'total_quantity') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-900">{report.total_quantity}</td>}
+              {isColumnVisible('salesperson', 'total_revenue') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-semibold text-green-600">₹{report.total_revenue.toFixed(2)}</td>}
+              {isColumnVisible('salesperson', 'total_cost') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">₹{report.total_cost.toFixed(2)}</td>}
+              {isColumnVisible('salesperson', 'total_profit') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-bold text-blue-600">₹{report.total_profit.toFixed(2)}</td>}
+              {isColumnVisible('salesperson', 'profit_margin') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm">
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${report.profit_margin >= 30 ? 'bg-green-100 text-green-700' : report.profit_margin >= 15 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>{report.profit_margin.toFixed(2)}%</span>
+              </td>}
+              {isColumnVisible('salesperson', 'commission_amount') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-semibold text-purple-600">₹{report.commission_amount.toFixed(2)}</td>}
+              {isColumnVisible('salesperson', 'sale_count') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">{report.sale_count}</td>}
             </tr>
           ))}
         </tbody>
@@ -605,92 +629,70 @@ const SalesReports = () => {
     }
   }
 
+  const salesGroupedByDate = useMemo(() => {
+    const groups: Record<string, Sale[]> = {}
+    filteredSales.forEach(sale => {
+      const dateKey = sale.sale_date.split('T')[0]
+      if (!groups[dateKey]) groups[dateKey] = []
+      groups[dateKey].push(sale)
+    })
+    return Object.entries(groups).sort(([a], [b]) => b.localeCompare(a))
+  }, [filteredSales])
+
   const renderSalesList = () => (
-    <div className="overflow-x-auto">
-      <table className="w-full">
-        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
-          <tr>
-            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date</th>
-            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Invoice</th>
-            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Customer</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Items</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Amount</th>
-            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Payment</th>
-            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Remark</th>
-            <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-200">
-          {filteredSales.map((sale) => (
-            <tr key={sale.id} className="hover:bg-gray-50 transition-colors">
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm text-gray-900">
-                  {new Date(sale.sale_date).toLocaleDateString('en-IN', {
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric'
-                  })}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {new Date(sale.sale_date).toLocaleTimeString('en-IN', { 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    hour12: true
-                  })}
-                </div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm font-medium text-gray-900">
-                  {sale.invoice_number}
-                </div>
-              </td>
-              <td className="px-6 py-4">
-                <div className="text-sm text-gray-900">
-                  {sale.customer_name || 'Walk-in Customer'}
-                </div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-right">
-                <div className="text-sm text-gray-900">
-                  {sale.items.length} item{sale.items.length !== 1 ? 's' : ''}
-                </div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-right">
-                <div className="text-sm font-bold text-gray-900">
-                  ₹{sale.grand_total.toFixed(2)}
-                </div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                  sale.payment_status === 'paid'
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-yellow-100 text-yellow-700'
-                }`}>
-                  {sale.payment_status.charAt(0).toUpperCase() + sale.payment_status.slice(1)}
-                </span>
-              </td>
-              <td className="px-6 py-4 hidden lg:table-cell">
-                {sale.internal_remarks ? (
-                  <div className="text-xs text-gray-700 bg-yellow-50 px-2 py-1 rounded border border-yellow-200 max-w-xs">
-                    <div className="font-semibold text-yellow-800 mb-1">Internal:</div>
-                    <div className="text-gray-600 whitespace-pre-wrap break-words">{sale.internal_remarks}</div>
-                  </div>
-                ) : (
-                  <span className="text-xs text-gray-400 italic">No remark</span>
-                )}
-              </td>
-              <td className="px-6 py-4 text-right whitespace-nowrap">
-                <button
-                  onClick={() => navigate(`/invoice/${sale.id}`)}
-                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                  title="View Receipt"
-                >
-                  <Eye className="w-4 h-4" />
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="overflow-x-auto overflow-y-auto max-h-[60vh] border border-gray-200 rounded-lg" style={{ scrollbarGutter: 'stable' }}>
+      {salesGroupedByDate.map(([dateStr, dateSales]) => (
+        <div key={dateStr} className="mb-6">
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-3 rounded-t-lg sticky top-0 z-10">
+            <span className="font-bold">{new Date(dateStr).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+            <span className="ml-2 text-blue-100">({dateSales.length} sale{dateSales.length !== 1 ? 's' : ''})</span>
+          </div>
+          <table className="w-full min-w-[800px] text-sm">
+            <thead className="bg-gray-100 border-b border-gray-200">
+              <tr>
+                {isColumnVisible('sales', 'sale_date') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Time</th>}
+                {isColumnVisible('sales', 'invoice_number') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Invoice</th>}
+                {isColumnVisible('sales', 'customer_name') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Customer</th>}
+                {isColumnVisible('sales', 'sales_person_name') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Sales Person</th>}
+                {isColumnVisible('sales', 'items_count') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Items</th>}
+                {isColumnVisible('sales', 'subtotal') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Subtotal</th>}
+                {isColumnVisible('sales', 'discount') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Discount</th>}
+                {isColumnVisible('sales', 'tax_amount') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Tax</th>}
+                {isColumnVisible('sales', 'grand_total') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Amount</th>}
+                {isColumnVisible('sales', 'payment_status') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Payment</th>}
+                {isColumnVisible('sales', 'payment_method') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Method</th>}
+                {isColumnVisible('sales', 'internal_remarks') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Remark</th>}
+                {isColumnVisible('sales', 'notes') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Notes</th>}
+                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase w-16">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 bg-white">
+              {dateSales.map((sale) => (
+                <tr key={sale.id} className="hover:bg-gray-50 transition-colors">
+                  {isColumnVisible('sales', 'sale_date') && <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-600">{new Date(sale.sale_date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</td>}
+                  {isColumnVisible('sales', 'invoice_number') && <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{sale.invoice_number}</td>}
+                  {isColumnVisible('sales', 'customer_name') && <td className="px-4 py-3 text-sm text-gray-900">{sale.customer_name || 'Walk-in'}</td>}
+                  {isColumnVisible('sales', 'sales_person_name') && <td className="px-4 py-3 text-sm text-gray-600">{sale.sales_person_name || '—'}</td>}
+                  {isColumnVisible('sales', 'items_count') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-900">{sale.items.length} item{sale.items.length !== 1 ? 's' : ''}</td>}
+                  {isColumnVisible('sales', 'subtotal') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">₹{sale.subtotal.toFixed(2)}</td>}
+                  {isColumnVisible('sales', 'discount') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">{(sale.discount ?? 0) > 0 ? `₹${(sale.discount ?? 0).toFixed(2)}` : '—'}</td>}
+                  {isColumnVisible('sales', 'tax_amount') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">₹{sale.tax_amount.toFixed(2)}</td>}
+                  {isColumnVisible('sales', 'grand_total') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-bold text-gray-900">₹{sale.grand_total.toFixed(2)}</td>}
+                  {isColumnVisible('sales', 'payment_status') && <td className="px-4 py-3 whitespace-nowrap">
+                    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sale.payment_status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{sale.payment_status.charAt(0).toUpperCase() + sale.payment_status.slice(1)}</span>
+                  </td>}
+                  {isColumnVisible('sales', 'payment_method') && <td className="px-4 py-3 text-sm text-gray-600">{sale.payment_method || (sale.payment_methods?.map(p => p.method).join(', ') ?? '—')}</td>}
+                  {isColumnVisible('sales', 'internal_remarks') && <td className="px-4 py-3 text-xs text-gray-600 max-w-[150px] truncate" title={sale.internal_remarks}>{sale.internal_remarks || '—'}</td>}
+                  {isColumnVisible('sales', 'notes') && <td className="px-4 py-3 text-xs text-gray-600 max-w-[150px] truncate" title={sale.notes}>{sale.notes || '—'}</td>}
+                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                    <button onClick={() => navigate(`/invoice/${sale.id}`)} className="p-2 text-blue-600 hover:bg-blue-50 rounded" title="View Receipt"><Eye className="w-4 h-4" /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
     </div>
   )
 
@@ -808,6 +810,28 @@ const SalesReports = () => {
             </div>
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-500">Global search</label>
+                <div className="relative min-w-[220px]">
+                  <input
+                    type="text"
+                    value={globalSearchQuery}
+                    onChange={(e) => setGlobalSearchQuery(e.target.value)}
+                    placeholder="Search by customer, product, category, invoice..."
+                    className="px-3 py-2 pr-8 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none w-full"
+                  />
+                  {globalSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setGlobalSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 rounded"
+                      title="Clear search"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-gray-500">By Product</label>
                 <select
                   value={filterProductId === '' ? '' : filterProductId}
@@ -916,7 +940,7 @@ const SalesReports = () => {
                   ))}
                 </select>
               </div>
-              {(filterProductId !== '' || filterCategoryName !== '' || filterCustomerId !== '' || filterSalesPersonId !== '') && (
+              {(filterProductId !== '' || filterCategoryName !== '' || filterCustomerId !== '' || filterSalesPersonId !== '' || globalSearchQuery !== '') && (
                 <button
                   type="button"
                   onClick={() => {
@@ -925,6 +949,7 @@ const SalesReports = () => {
                     setFilterCustomerId('')
                     setCustomerSearchQuery('')
                     setFilterSalesPersonId('')
+                    setGlobalSearchQuery('')
                   }}
                   className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors mt-6"
                   title="Clear all filters"
@@ -938,7 +963,8 @@ const SalesReports = () => {
 
           {/* Tabs */}
           <div className="bg-white/70 backdrop-blur-xl rounded-xl shadow-xl p-6 mb-8 border border-white/50">
-            <div className="flex gap-4 border-b border-gray-200 mb-6">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 mb-6 pb-4">
+            <div className="flex gap-4">
               <button
                 onClick={() => setActiveView('product')}
                 className={`px-6 py-3 font-semibold text-sm transition-colors relative flex items-center gap-2 ${
@@ -1000,6 +1026,38 @@ const SalesReports = () => {
                 )}
               </button>
             </div>
+            <button
+              type="button"
+              onClick={() => setShowColumnSettings(true)}
+              className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-lg text-sm font-medium text-gray-700"
+              title="Show / Hide columns"
+            >
+              <Columns3 className="w-4 h-4" />
+              Columns
+            </button>
+            </div>
+
+            {showColumnSettings && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowColumnSettings(false)}>
+                <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                  <h3 className="text-lg font-bold text-gray-900 mb-2">Show / Hide Columns</h3>
+                  <p className="text-sm text-gray-500 mb-2">View: <span className="font-semibold">{activeView === 'product' ? 'By Product' : activeView === 'category' ? 'By Category' : activeView === 'customer' ? 'By Customer' : activeView === 'salesperson' ? 'By Sales Person' : 'All Sales'}</span></p>
+                  <div className="grid grid-cols-2 gap-2 mb-4">
+                    {SALES_REPORT_COLUMNS[activeView].map(({ key, label }) => (
+                      <label key={key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                        <input type="checkbox" checked={visibleColumns[activeView]?.has(key) ?? true} onChange={() => toggleColumnVisibility(activeView, key)} className="w-4 h-4 text-blue-600 rounded border-gray-300" />
+                        <span className="text-sm text-gray-800">{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => { const all = new Set(SALES_REPORT_COLUMNS[activeView].map(c => c.key)); setVisibleColumns(prev => ({ ...prev, [activeView]: all })); localStorage.setItem(getStorageKey(activeView), JSON.stringify([...all])) }} className="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 rounded-lg">Select All</button>
+                    <button type="button" onClick={() => { const def = new Set(DEFAULT_VISIBLE_COLUMNS[activeView]); setVisibleColumns(prev => ({ ...prev, [activeView]: def })); localStorage.setItem(getStorageKey(activeView), JSON.stringify([...def])) }} className="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 rounded-lg">Reset</button>
+                    <button type="button" onClick={() => setShowColumnSettings(false)} className="ml-auto px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Done</button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {loading ? (
               <div className="p-12 text-center">

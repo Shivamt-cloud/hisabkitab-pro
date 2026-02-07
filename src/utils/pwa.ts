@@ -116,6 +116,10 @@ export async function checkForUpdates(): Promise<boolean> {
   if (!isServiceWorkerSupported()) {
     return false
   }
+  // Skip in dev – no service worker, avoids dev-sw.js errors
+  if (import.meta.env?.DEV) {
+    return false
+  }
 
   try {
     const registration = await navigator.serviceWorker.getRegistration()
@@ -126,7 +130,7 @@ export async function checkForUpdates(): Promise<boolean> {
     await registration.update()
     return true
   } catch (error) {
-    console.error('Error checking for updates:', error)
+    console.warn('[PWA] Update check failed:', error)
     return false
   }
 }

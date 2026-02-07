@@ -1,6 +1,6 @@
 /**
  * Reorder list: products below min stock with last purchase qty/rate
- * Helps with purchasing decisions.
+ * Smart reorder: sales velocity, lead time + safety stock formula.
  */
 
 import { useState, useEffect, useMemo } from 'react'
@@ -9,10 +9,13 @@ import { useAuth } from '../context/AuthContext'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { productService, Product } from '../services/productService'
 import { purchaseService } from '../services/purchaseService'
-import { Home, Package, Download, AlertTriangle } from 'lucide-react'
+import { reportService } from '../services/reportService'
+import { Home, Package, Download, AlertTriangle, ShoppingBag, TrendingUp } from 'lucide-react'
 import { exportToExcel } from '../utils/exportUtils'
 import { useToast } from '../context/ToastContext'
 import type { Purchase } from '../types/purchase'
+
+const DEFAULT_LEAD_TIME_WEEKS = 2
 
 export interface ReorderRow {
   product_id: number
@@ -24,6 +27,7 @@ export interface ReorderRow {
   last_purchase_rate: number | null
   last_purchase_date: string | null
   suggested_qty: number
+  sales_velocity_per_week?: number
 }
 
 const ReorderList = () => {
@@ -32,6 +36,7 @@ const ReorderList = () => {
   const { toast } = useToast()
   const [products, setProducts] = useState<Product[]>([])
   const [purchases, setPurchases] = useState<Purchase[]>([])
+  const [salesVelocityMap, setSalesVelocityMap] = useState<Map<number, { totalSold: number; velocityPerWeek: number }>>(new Map())
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -39,12 +44,14 @@ const ReorderList = () => {
       setLoading(true)
       const companyId = getCurrentCompanyId()
       try {
-        const [prods, purchs] = await Promise.all([
+        const [prods, purchs, velocityMap] = await Promise.all([
           productService.getAll(false, companyId ?? undefined),
           purchaseService.getAll(undefined, companyId ?? undefined),
+          reportService.getSalesVelocityByProduct(4, companyId ?? undefined),
         ])
         setProducts(prods)
         setPurchases(purchs)
+        setSalesVelocityMap(velocityMap)
       } catch (e) {
         console.error('Reorder list load error:', e)
       } finally {
@@ -56,11 +63,46 @@ const ReorderList = () => {
 
   const reorderRows = useMemo((): ReorderRow[] => {
     const rows: ReorderRow[] = []
-    const minStockByProduct = new Map<number, number>()
-    const stockByProduct = new Map<number, number>()
-    products.forEach(p => {
-      minStockByProduct.set(p.id, p.min_stock_level ?? 0)
-      stockByProduct.set(p.id, p.stock_quantity ?? 0)
+    const productMap = new Map(products.map(p => [p.id, p]))
+    // Use same logic as Dashboard/Stock Alerts: min_stock from product OR from purchase items; stock from purchase items sum or product.stock_quantity
+    const productMinStockMap = new Map<number, number>()
+    const productAvailableStockMap = new Map<number, number>()
+    // Article-level: purchase items with article code, aggregated by article (same as Stock Alerts)
+    const articleToPurchaseItemMap = new Map<string, { product_id: number; article: string; availableQty: number; minStock: number }>()
+    purchases.forEach(purchase => {
+      purchase.items.forEach(item => {
+        if (item.min_stock_level !== undefined && item.min_stock_level > 0 && item.product_id) {
+          const current = productMinStockMap.get(item.product_id) || 0
+          productMinStockMap.set(item.product_id, Math.max(current, item.min_stock_level))
+        }
+        if (item.product_id) {
+          const soldQty = item.sold_quantity ?? 0
+          const availableQty = (item.quantity ?? 0) - soldQty
+          const current = productAvailableStockMap.get(item.product_id) || 0
+          productAvailableStockMap.set(item.product_id, current + availableQty)
+        }
+        if (item.article && item.article.trim() && item.product_id) {
+          const articleKey = item.article.trim().toLowerCase()
+          const soldQty = item.sold_quantity ?? 0
+          const availableQty = (item.quantity ?? 0) - soldQty
+          const existing = articleToPurchaseItemMap.get(articleKey)
+          if (existing) {
+            articleToPurchaseItemMap.set(articleKey, {
+              product_id: item.product_id,
+              article: item.article.trim(),
+              availableQty: existing.availableQty + availableQty,
+              minStock: Math.max(existing.minStock, item.min_stock_level || 0),
+            })
+          } else {
+            articleToPurchaseItemMap.set(articleKey, {
+              product_id: item.product_id,
+              article: item.article.trim(),
+              availableQty,
+              minStock: item.min_stock_level || 0,
+            })
+          }
+        }
+      })
     })
     // Last purchase per product: { product_id: { qty, rate, date } }
     const lastPurchaseByProduct = new Map<number, { qty: number; rate: number; date: string }>()
@@ -80,17 +122,22 @@ const ReorderList = () => {
         })
       })
     })
+    // 1) Product-level: below min stock
     products.forEach(product => {
-      const minStock = minStockByProduct.get(product.id) ?? 0
-      const current = stockByProduct.get(product.id) ?? 0
+      const minStock = product.min_stock_level ?? productMinStockMap.get(product.id) ?? 0
+      const current = productAvailableStockMap.get(product.id) ?? product.stock_quantity ?? 0
       if (minStock <= 0) return
       if (current >= minStock) return
       const last = lastPurchaseByProduct.get(product.id)
-      const suggested = Math.max(
-        minStock * 2 - current,
-        last?.qty ?? minStock,
-        minStock
-      )
+      const velocity = salesVelocityMap.get(product.id)
+      const velocityPerWeek = velocity?.velocityPerWeek ?? 0
+      const demandDuringLeadTime = velocityPerWeek * DEFAULT_LEAD_TIME_WEEKS
+      const suggestedByFormula = Math.ceil(Math.max(0, demandDuringLeadTime + minStock - current))
+      // When we have sales velocity, use the smart formula; otherwise fall back to last purchase qty
+      const suggested =
+        velocityPerWeek > 0
+          ? Math.max(suggestedByFormula, minStock)
+          : Math.max(minStock * 2 - current, last?.qty ?? minStock, minStock)
       rows.push({
         product_id: product.id,
         product_name: product.name,
@@ -101,22 +148,57 @@ const ReorderList = () => {
         last_purchase_rate: last?.rate ?? null,
         last_purchase_date: last?.date ?? null,
         suggested_qty: suggested,
+        sales_velocity_per_week: velocityPerWeek > 0 ? Math.round(velocityPerWeek * 10) / 10 : undefined,
+      })
+    })
+    // 2) Article-level: same as Stock Alerts – e.g. "Saroj Saree [Gauri nanadan]" when that article is below min
+    const addedProductArticle = new Set<string>()
+    articleToPurchaseItemMap.forEach((itemData, articleKey) => {
+      if (itemData.minStock <= 0) return
+      if (itemData.availableQty > itemData.minStock) return
+      const product = productMap.get(itemData.product_id)
+      if (!product) return
+      const key = `${itemData.product_id}:${articleKey}`
+      if (addedProductArticle.has(key)) return
+      addedProductArticle.add(key)
+      const last = lastPurchaseByProduct.get(itemData.product_id)
+      const velocity = salesVelocityMap.get(product.id)
+      const velocityPerWeek = velocity?.velocityPerWeek ?? 0
+      const demandDuringLeadTime = velocityPerWeek * DEFAULT_LEAD_TIME_WEEKS
+      const suggestedByFormula = Math.ceil(Math.max(0, demandDuringLeadTime + itemData.minStock - itemData.availableQty))
+      const suggested =
+        velocityPerWeek > 0
+          ? Math.max(suggestedByFormula, itemData.minStock)
+          : Math.max(itemData.minStock * 2 - itemData.availableQty, last?.qty ?? itemData.minStock, itemData.minStock)
+      rows.push({
+        product_id: product.id,
+        product_name: `${product.name} [${itemData.article}]`,
+        unit: product.unit || 'pcs',
+        current_stock: itemData.availableQty,
+        min_stock_level: itemData.minStock,
+        last_purchase_qty: last?.qty ?? null,
+        last_purchase_rate: last?.rate ?? null,
+        last_purchase_date: last?.date ?? null,
+        suggested_qty: suggested,
+        sales_velocity_per_week: velocityPerWeek > 0 ? Math.round(velocityPerWeek * 10) / 10 : undefined,
       })
     })
     rows.sort((a, b) => a.current_stock - b.current_stock)
     return rows
-  }, [products, purchases])
+  }, [products, purchases, salesVelocityMap])
 
   const headers = [
     'Product',
     'Unit',
     'Current Stock',
     'Min Stock',
+    'Sales/Week',
     'Last Purchase Qty',
     'Last Purchase Rate',
     'Last Purchase Date',
     'Suggested Reorder Qty',
   ]
+  const tableHeaders = [...headers, 'Action']
 
   const exportRows = useMemo(
     () =>
@@ -125,6 +207,7 @@ const ReorderList = () => {
         r.unit,
         r.current_stock,
         r.min_stock_level,
+        r.sales_velocity_per_week ?? '—',
         r.last_purchase_qty ?? '—',
         r.last_purchase_rate != null ? r.last_purchase_rate.toFixed(2) : '—',
         r.last_purchase_date ? new Date(r.last_purchase_date).toLocaleDateString('en-IN') : '—',
@@ -132,6 +215,10 @@ const ReorderList = () => {
       ]),
     [reorderRows]
   )
+
+  const placeOrderForRow = (row: ReorderRow) => {
+    navigate('/purchases/reorder', { state: { lowStockItems: [row] } })
+  }
 
   const handleExport = () => {
     exportToExcel(exportRows, headers, `Reorder_List_${new Date().toISOString().slice(0, 10)}`, 'Reorder List')
@@ -155,9 +242,20 @@ const ReorderList = () => {
                 </button>
                 <div>
                   <h1 className="text-2xl font-bold text-gray-900">Reorder List</h1>
-                  <p className="text-sm text-gray-600">Products below min stock with last purchase qty/rate</p>
+                  <p className="text-sm text-gray-600">Sales velocity • Smart suggested qty (lead time + safety stock) • Last purchase qty/rate</p>
                 </div>
               </div>
+              <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => navigate('/purchases/reorder', { state: { lowStockItems: reorderRows } })}
+                disabled={reorderRows.length === 0}
+                className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 text-sm font-medium"
+                title="Open Place Reorder form with these items"
+              >
+                <ShoppingBag className="w-4 h-4" />
+                Place order for these
+              </button>
               <button
                 type="button"
                 onClick={handleExport}
@@ -167,6 +265,7 @@ const ReorderList = () => {
                 <Download className="w-4 h-4" />
                 Export Excel
               </button>
+            </div>
             </div>
           </div>
         </header>
@@ -180,13 +279,24 @@ const ReorderList = () => {
                 <Package className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                 <p className="text-gray-600 font-medium">No products below min stock</p>
                 <p className="text-sm text-gray-500 mt-1">Set min stock level on products to see reorder suggestions.</p>
-                <button
-                  type="button"
-                  onClick={() => navigate('/stock/alerts')}
-                  className="mt-4 text-indigo-600 hover:underline font-medium"
-                >
-                  View Stock Alerts
-                </button>
+                <div className="flex flex-wrap justify-center gap-3 mt-4">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/stock/alerts')}
+                    className="text-indigo-600 hover:underline font-medium"
+                  >
+                    View Stock Alerts
+                  </button>
+                  <span className="text-gray-400">|</span>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/purchases/reorder')}
+                    className="flex items-center gap-1 text-violet-600 hover:underline font-medium"
+                  >
+                    <ShoppingBag className="w-4 h-4" />
+                    Place Reorder (add items there)
+                  </button>
+                </div>
               </div>
             ) : (
               <>
@@ -200,23 +310,37 @@ const ReorderList = () => {
                   <table className="w-full text-sm border-collapse">
                     <thead className="bg-gray-100 sticky top-0">
                       <tr>
-                        {headers.map(h => (
-                          <th
-                            key={h}
-                            className="px-3 py-2 text-left font-semibold text-gray-700 border border-gray-200 whitespace-nowrap"
-                          >
-                            {h}
-                          </th>
-                        ))}
+                        {tableHeaders.map((h) => {
+                          const isSalesWeek = h === 'Sales/Week'
+                          const isSuggested = h === 'Suggested Reorder Qty'
+                          return (
+                            <th
+                              key={h}
+                              className={`px-3 py-2 text-left font-semibold border border-gray-200 whitespace-nowrap ${
+                                isSalesWeek
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : isSuggested
+                                    ? 'bg-amber-100 text-amber-900'
+                                    : 'text-gray-700'
+                              }`}
+                              title={isSalesWeek ? 'Units sold per week (last 4 weeks)' : isSuggested ? 'Lead time × velocity + safety stock − current' : undefined}
+                            >
+                              {isSalesWeek ? <span className="flex items-center gap-1"><TrendingUp className="w-4 h-4 text-emerald-600" />{h}</span> : h}
+                            </th>
+                          )
+                        })}
                       </tr>
                     </thead>
                     <tbody>
-                      {reorderRows.map(row => (
-                        <tr key={row.product_id} className="border-b border-gray-100 hover:bg-gray-50">
+                      {reorderRows.map((row, index) => (
+                        <tr key={`${row.product_id}-${row.product_name}-${index}`} className="border-b border-gray-100 hover:bg-gray-50">
                           <td className="px-3 py-2 border border-gray-100 font-medium">{row.product_name}</td>
                           <td className="px-3 py-2 border border-gray-100">{row.unit}</td>
                           <td className="px-3 py-2 border border-gray-100">{row.current_stock}</td>
                           <td className="px-3 py-2 border border-gray-100">{row.min_stock_level}</td>
+                          <td className="px-3 py-2 border border-gray-100 bg-emerald-50">
+                            {row.sales_velocity_per_week != null ? row.sales_velocity_per_week.toFixed(1) : '—'}
+                          </td>
                           <td className="px-3 py-2 border border-gray-100">
                             {row.last_purchase_qty != null ? row.last_purchase_qty : '—'}
                           </td>
@@ -228,7 +352,18 @@ const ReorderList = () => {
                               ? new Date(row.last_purchase_date).toLocaleDateString('en-IN')
                               : '—'}
                           </td>
-                          <td className="px-3 py-2 border border-gray-100 font-semibold">{row.suggested_qty}</td>
+                          <td className="px-3 py-2 border border-gray-100 bg-amber-50 font-semibold text-amber-900">{row.suggested_qty}</td>
+                          <td className="px-3 py-2 border border-gray-100 whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => placeOrderForRow(row)}
+                              className="inline-flex items-center gap-1 px-2 py-1.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-xs font-medium"
+                              title={`Place order for ${row.product_name}`}
+                            >
+                              <ShoppingBag className="w-3.5 h-3.5" />
+                              Place order
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

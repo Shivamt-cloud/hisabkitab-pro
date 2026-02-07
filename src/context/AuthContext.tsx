@@ -8,14 +8,42 @@ import { companyService } from '../services/companyService'
 import { cloudDeviceService } from '../services/cloudDeviceService'
 import { getTierPricing } from '../utils/tierPricing'
 import { getDeviceId, getDeviceType, getDeviceName } from '../utils/deviceId'
+import { hasPlanFeature as checkPlanFeature, getEffectiveTier } from '../utils/planFeatures'
+import type { PlanFeature } from '../utils/planFeatures'
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [currentCompanyId, setCurrentCompanyId] = useState<number | null>(null)
+  const [subscriptionTier, setSubscriptionTier] = useState<'basic' | 'standard' | 'premium' | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [userPermissions, setUserPermissions] = useState<{ useCustomPermissions: boolean; customPermissions: any[] } | null>(null)
+
+  async function loadSubscriptionTier(u: User | null, companyId: number | null) {
+    if (!u) {
+      setSubscriptionTier(null)
+      return
+    }
+    if (u.role === 'admin') {
+      setSubscriptionTier('premium')
+      return
+    }
+    const cid = companyId ?? u.company_id ?? null
+    if (!cid) {
+      setSubscriptionTier('basic')
+      return
+    }
+    try {
+      const company = await companyService.getById(cid)
+      const tier = (company?.subscription_tier || 'basic') as 'basic' | 'standard' | 'premium'
+      const trialEnd = company?.subscription_end_date || company?.valid_to || null
+      const effective = getEffectiveTier(tier, !!company?.is_free_trial, trialEnd)
+      setSubscriptionTier(effective)
+    } catch {
+      setSubscriptionTier('basic')
+    }
+  }
 
   useEffect(() => {
     // Check if user is logged in from localStorage
@@ -51,6 +79,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.error('Error loading user permissions:', error)
             setUserPermissions(null)
           })
+        const companyIdForTier = parsedUser.role === 'admin' ? (savedCompanyId ? parseInt(savedCompanyId) : null) : parsedUser.company_id
+        loadSubscriptionTier(parsedUser, companyIdForTier)
       } catch (error) {
         console.error('Error parsing saved user:', error)
         localStorage.removeItem('hisabkitab_user')
@@ -219,6 +249,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       setUser(foundUser)
       localStorage.setItem('hisabkitab_user', JSON.stringify(foundUser))
+      await loadSubscriptionTier(foundUser, foundUser.role !== 'admin' ? foundUser.company_id ?? null : currentCompanyId)
       
       // Set company ID for non-admin users
       if (foundUser.role !== 'admin' && foundUser.company_id) {
@@ -310,6 +341,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return user?.company_id || null
   }
 
+  const hasPlanFeature = (feature: PlanFeature): boolean => {
+    if (!user) return false
+    if (user.role === 'admin') return true
+    const tier = subscriptionTier || 'basic'
+    return checkPlanFeature(tier, feature, false)
+  }
+
   const hasPermission = (permission: string): boolean => {
     if (!user) return false
     
@@ -340,7 +378,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user, 
       login, 
       logout, 
-      hasPermission, 
+      hasPermission,
+      hasPlanFeature,
+      subscriptionTier,
       isLoading,
       currentCompanyId,
       switchCompany,
@@ -351,10 +391,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 }
 
-export function useAuth() {
+const FALLBACK_AUTH: AuthContextType = {
+  user: null,
+  isLoading: false,
+  login: async () => ({ success: false, error: 'Auth not available' }),
+  logout: () => {},
+  hasPermission: () => false,
+  hasPlanFeature: () => false,
+  subscriptionTier: null,
+  currentCompanyId: null,
+  switchCompany: () => {},
+  getCurrentCompanyId: () => null,
+}
+
+export function useAuth(): AuthContextType {
   const context = useContext(AuthContext)
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider')
+    if (import.meta.env.DEV) {
+      console.warn(
+        'useAuth was called outside AuthProvider. Ensure the component is rendered inside <AuthProvider>. Using fallback (unauthenticated).',
+        new Error().stack
+      )
+    }
+    return FALLBACK_AUTH
   }
   return context
 }

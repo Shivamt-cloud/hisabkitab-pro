@@ -91,3 +91,55 @@ export interface DateRange {
   endDate?: string
 }
 
+// Purchase report types
+export interface PurchasesBySupplierReport {
+  supplier_id?: number
+  supplier_name: string
+  total_quantity: number
+  total_amount: number
+  purchase_count: number
+  pending_amount: number
+  average_order_value: number
+}export interface PurchasesByProductReport {
+  product_id: number
+  product_name: string
+  category_name: string
+  total_quantity: number
+  total_amount: number
+  average_unit_price: number
+  purchase_count: number
+  supplier_names: string[] // Suppliers from whom this product was bought
+}
+
+export interface PurchasesByCategoryReport {
+  category_id?: number
+  category_name: string
+  total_quantity: number
+  total_amount: number
+  product_count: number
+  purchase_count: number
+}
+
+// Expense report types
+export interface ExpensesByCategoryReport {
+  expense_type: string
+  category_label: string
+  total_amount: number
+  expense_count: number
+  payment_methods: Record<string, number>
+}
+
+export interface ExpensesByPeriodReport {
+  period: string
+  total_amount: number
+  expense_count: number
+}
+
+export interface ExpenseVsIncomeReport {
+  period: string
+  total_expense: number
+  total_income: number
+  net: number // income - expense
+  expense_count: number
+  sale_count: number
+}

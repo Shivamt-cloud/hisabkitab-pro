@@ -222,41 +222,67 @@ const DailyReport = () => {
 
   // Calculate comprehensive cash flow and accounting
   const cashFlow = useMemo(() => {
-    const openingAmount = openingClosing.opening?.amount || 0
-    const closingAmount = openingClosing.closing?.amount || 0
-    
-    // Sales collections by payment method
+    const opening = openingClosing.opening
+    const closing = openingClosing.closing
+    const closingAmount = closing?.amount || 0  // Physical cash counted (denominations only for closing)
+
+    // Manual extra from opening (extra money user has) - opening amount = cash_denom + full manual
+    const openingManual = opening?.manual_extra || {}
+    const openingManualCash = openingManual.cash || 0
+    const openingManualUpi = openingManual.upi || 0
+    const openingManualCard = openingManual.card || 0
+    const openingManualOther = openingManual.other || 0
+    const openingManualTotal = openingManualCash + openingManualUpi + openingManualCard + openingManualOther
+    const openingAmount = (opening?.amount || 0)  // Full opening = cash + manual
+
+    // Opening CASH for reconciliation = amount minus non-cash manual (upi, card, other)
+    const openingCash = openingAmount - (openingManualUpi + openingManualCard + openingManualOther)
+
+    // Manual sales from closing (sales received outside system)
+    const closingManual = closing?.manual_extra || {}
+    const manualCashSales = closingManual.cash || 0
+    const manualUpiSales = closingManual.upi || 0
+    const manualCardSales = closingManual.card || 0
+    const manualOtherSales = closingManual.other || 0
+    const manualSalesTotal = manualCashSales + manualUpiSales + manualCardSales + manualOtherSales
+
+    // Sales collections by payment method (from system)
     const cashSales = salesByPaymentMethod.find(pm => pm.method.toLowerCase() === 'cash')?.amount || 0
     const upiSales = salesByPaymentMethod.find(pm => pm.method.toLowerCase() === 'upi')?.amount || 0
     const cardSales = salesByPaymentMethod.find(pm => pm.method.toLowerCase().includes('card'))?.amount || 0
     const otherSales = salesByPaymentMethod
       .filter(pm => !['cash', 'upi'].includes(pm.method.toLowerCase()) && !pm.method.toLowerCase().includes('card'))
       .reduce((sum, pm) => sum + pm.amount, 0)
-    
-    const totalCollections = cashSales + upiSales + cardSales + otherSales
-    
+
+    // Total collections = system sales + manual sales
+    const totalCashCollections = cashSales + manualCashSales
+    const totalUpiCollections = upiSales + manualUpiSales
+    const totalCardCollections = cardSales + manualCardSales
+    const totalOtherCollections = otherSales + manualOtherSales
+    const totalCollections = totalCashCollections + totalUpiCollections + totalCardCollections + totalOtherCollections
+
     // Expenses by payment method
     const cashExpenses = expenses
       .filter(e => e.expense_type !== 'opening' && e.expense_type !== 'closing' && e.payment_method === 'cash')
       .reduce((sum, e) => sum + e.amount, 0)
-    
+
     const upiExpenses = expenses
       .filter(e => e.expense_type !== 'opening' && e.expense_type !== 'closing' && e.payment_method === 'upi')
       .reduce((sum, e) => sum + e.amount, 0)
-    
+
     const cardExpenses = expenses
       .filter(e => e.expense_type !== 'opening' && e.expense_type !== 'closing' && e.payment_method === 'card')
       .reduce((sum, e) => sum + e.amount, 0)
-    
+
     const otherExpenses = expenses
       .filter(e => e.expense_type !== 'opening' && e.expense_type !== 'closing' && !['cash', 'upi', 'card'].includes(e.payment_method))
       .reduce((sum, e) => sum + e.amount, 0)
-    
-    // Net cash flow
-    const netCashFlow = cashSales - cashExpenses
-    const expectedClosing = openingAmount + netCashFlow
+
+    // Net cash flow: expected closing = opening CASH + system cash sales + manual cash sales - cash expenses
+    const netCashFlow = totalCashCollections - cashExpenses
+    const expectedClosing = openingCash + netCashFlow
     const difference = closingAmount > 0 ? closingAmount - expectedClosing : 0
-    
+
     return {
       openingAmount,
       closingAmount,
@@ -264,6 +290,16 @@ const DailyReport = () => {
       upiSales,
       cardSales,
       otherSales,
+      manualCashSales,
+      manualUpiSales,
+      manualCardSales,
+      manualOtherSales,
+      manualSalesTotal,
+      openingManualTotal,
+      totalCashCollections,
+      totalUpiCollections,
+      totalCardCollections,
+      totalOtherCollections,
       totalCollections,
       cashExpenses,
       upiExpenses,
@@ -618,10 +654,12 @@ const DailyReport = () => {
             <div class="cash-card">
               <h3>Opening Balance</h3>
               <p class="amount">${formatCurrency(cashFlow.openingAmount)}</p>
+              ${openingClosing.opening?.remark ? `<p style="font-size: 11px; color: #6b7280; margin-top: 8px;">Remark: ${openingClosing.opening.remark}</p>` : ''}
             </div>
             <div class="cash-card">
               <h3>Closing Balance</h3>
               <p class="amount">${formatCurrency(cashFlow.closingAmount)}</p>
+              ${openingClosing.closing?.remark ? `<p style="font-size: 11px; color: #6b7280; margin-top: 8px;">Remark: ${openingClosing.closing.remark}</p>` : ''}
             </div>
             <div class="cash-card">
               <h3>Expected Closing</h3>
@@ -1054,8 +1092,8 @@ const DailyReport = () => {
 • Net ${totals.totalProfit >= 0 ? 'Profit' : 'Loss'}: ₹${Math.abs(totals.totalProfit).toLocaleString('en-IN', { maximumFractionDigits: 2 })} (${totals.netProfitMargin >= 0 ? '+' : ''}${totals.netProfitMargin.toFixed(2)}%)
 
 💵 *Cash Management*
-• Opening Balance: ₹${cashFlow.openingAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-• Closing Balance: ₹${cashFlow.closingAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+• Opening Balance: ₹${cashFlow.openingAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}${openingClosing.opening?.remark ? `\n  _${openingClosing.opening.remark}_` : ''}
+• Closing Balance: ₹${cashFlow.closingAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}${openingClosing.closing?.remark ? `\n  _${openingClosing.closing.remark}_` : ''}
 • Expected Closing: ₹${cashFlow.expectedClosing.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
 • Difference: ₹${cashFlow.difference.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
 
@@ -1293,9 +1331,20 @@ Generated by HisabKitab-Pro`
                         ₹{cashFlow.openingAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                       </p>
                     </div>
+                    {openingClosing.opening.manual_extra && cashFlow.openingManualTotal > 0 && (
+                      <div>
+                        <p className="text-sm font-semibold text-gray-700 mb-2">Extra Money (Manual):</p>
+                        <div className="flex gap-3 text-xs flex-wrap">
+                          {openingClosing.opening.manual_extra.cash ? <span>Cash: ₹{openingClosing.opening.manual_extra.cash.toLocaleString()}</span> : null}
+                          {openingClosing.opening.manual_extra.upi ? <span>UPI: ₹{openingClosing.opening.manual_extra.upi.toLocaleString()}</span> : null}
+                          {openingClosing.opening.manual_extra.card ? <span>Card: ₹{openingClosing.opening.manual_extra.card.toLocaleString()}</span> : null}
+                          {openingClosing.opening.manual_extra.other ? <span>Other: ₹{openingClosing.opening.manual_extra.other.toLocaleString()}</span> : null}
+                        </div>
+                      </div>
+                    )}
                     {openingClosing.opening.cash_denominations && (
                       <div>
-                        <p className="text-sm font-semibold text-gray-700 mb-2">Cash Breakdown:</p>
+                        <p className="text-sm font-semibold text-gray-700 mb-2">Cash Denominations:</p>
                         <div className="grid grid-cols-2 gap-2 text-xs">
                           {Object.entries(openingClosing.opening.cash_denominations)
                             .filter(([_, count]) => count && count > 0)
@@ -1314,6 +1363,12 @@ Generated by HisabKitab-Pro`
                         </div>
                       </div>
                     )}
+                    {openingClosing.opening.remark && (
+                      <div className="mt-3">
+                        <p className="text-sm font-semibold text-gray-700 mb-1">Remark:</p>
+                        <p className="text-sm text-gray-600 bg-white px-3 py-2 rounded border border-gray-200">{openingClosing.opening.remark}</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1328,28 +1383,45 @@ Generated by HisabKitab-Pro`
                   <div className="bg-white rounded-lg p-3 border border-blue-200">
                     <p className="text-xs text-gray-600 mb-1">Cash</p>
                     <p className="text-xl font-bold text-green-600">
-                      ₹{cashFlow.cashSales.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                      ₹{cashFlow.totalCashCollections.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                     </p>
+                    {cashFlow.manualCashSales > 0 && (
+                      <p className="text-xs text-gray-500">incl. manual ₹{cashFlow.manualCashSales.toLocaleString()}</p>
+                    )}
                   </div>
                   <div className="bg-white rounded-lg p-3 border border-blue-200">
                     <p className="text-xs text-gray-600 mb-1">UPI</p>
                     <p className="text-xl font-bold text-purple-600">
-                      ₹{cashFlow.upiSales.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                      ₹{cashFlow.totalUpiCollections.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                     </p>
+                    {cashFlow.manualUpiSales > 0 && (
+                      <p className="text-xs text-gray-500">incl. manual ₹{cashFlow.manualUpiSales.toLocaleString()}</p>
+                    )}
                   </div>
                   <div className="bg-white rounded-lg p-3 border border-blue-200">
                     <p className="text-xs text-gray-600 mb-1">Card</p>
                     <p className="text-xl font-bold text-indigo-600">
-                      ₹{cashFlow.cardSales.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                      ₹{cashFlow.totalCardCollections.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                     </p>
+                    {cashFlow.manualCardSales > 0 && (
+                      <p className="text-xs text-gray-500">incl. manual ₹{cashFlow.manualCardSales.toLocaleString()}</p>
+                    )}
                   </div>
                   <div className="bg-white rounded-lg p-3 border border-blue-200">
                     <p className="text-xs text-gray-600 mb-1">Other</p>
                     <p className="text-xl font-bold text-gray-600">
-                      ₹{cashFlow.otherSales.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                      ₹{cashFlow.totalOtherCollections.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                     </p>
+                    {cashFlow.manualOtherSales > 0 && (
+                      <p className="text-xs text-gray-500">incl. manual ₹{cashFlow.manualOtherSales.toLocaleString()}</p>
+                    )}
                   </div>
                 </div>
+                {cashFlow.manualSalesTotal > 0 && (
+                  <p className="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded mb-3">
+                    Manual sales (outside system): ₹{cashFlow.manualSalesTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                  </p>
+                )}
                 <div className="bg-white rounded-lg p-3 border-2 border-blue-300">
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-semibold text-gray-700">Total Collections:</span>
@@ -1534,8 +1606,14 @@ Generated by HisabKitab-Pro`
                     </div>
                     <div className="flex justify-between items-center py-2 bg-white rounded-lg px-4">
                       <span className="text-gray-700">Cash Sales Received:</span>
-                      <span className="font-bold text-green-600">+₹{cashFlow.cashSales.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                      <span className="font-bold text-green-600">+₹{cashFlow.totalCashCollections.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
                     </div>
+                    {cashFlow.manualCashSales > 0 && (
+                      <div className="flex justify-between items-center py-1 text-sm text-gray-600 px-4">
+                        <span>includes manual sales:</span>
+                        <span>₹{cashFlow.manualCashSales.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between items-center py-2 bg-white rounded-lg px-4">
                       <span className="text-gray-700">Cash Expenses Paid:</span>
                       <span className="font-bold text-red-600">-₹{cashFlow.cashExpenses.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
@@ -1571,6 +1649,17 @@ Generated by HisabKitab-Pro`
                             {cashFlow.difference >= 0 ? '+' : ''}₹{cashFlow.difference.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                           </span>
                         </div>
+                        {openingClosing.closing.manual_extra && cashFlow.manualSalesTotal > 0 && (
+                          <div className="mt-3 bg-amber-50 rounded-lg p-3 border border-amber-200">
+                            <p className="text-sm font-semibold text-gray-700 mb-2">Manual Sales (included):</p>
+                            <div className="flex gap-3 text-xs flex-wrap">
+                              {openingClosing.closing.manual_extra.cash ? <span>Cash: ₹{openingClosing.closing.manual_extra.cash.toLocaleString()}</span> : null}
+                              {openingClosing.closing.manual_extra.upi ? <span>UPI: ₹{openingClosing.closing.manual_extra.upi.toLocaleString()}</span> : null}
+                              {openingClosing.closing.manual_extra.card ? <span>Card: ₹{openingClosing.closing.manual_extra.card.toLocaleString()}</span> : null}
+                              {openingClosing.closing.manual_extra.other ? <span>Other: ₹{openingClosing.closing.manual_extra.other.toLocaleString()}</span> : null}
+                            </div>
+                          </div>
+                        )}
                         {openingClosing.closing.cash_denominations && (
                           <div className="mt-3 bg-white rounded-lg p-3">
                             <p className="text-sm font-semibold text-gray-700 mb-2">Closing Cash Breakdown:</p>
@@ -1590,6 +1679,12 @@ Generated by HisabKitab-Pro`
                                   )
                                 })}
                             </div>
+                          </div>
+                        )}
+                        {openingClosing.closing.remark && (
+                          <div className="mt-3">
+                            <p className="text-sm font-semibold text-gray-700 mb-1">Remark:</p>
+                            <p className="text-sm text-gray-600 bg-white px-3 py-2 rounded border border-gray-200">{openingClosing.closing.remark}</p>
                           </div>
                         )}
                       </>

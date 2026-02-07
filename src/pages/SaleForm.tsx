@@ -7,9 +7,11 @@ import { saleService } from '../services/saleService'
 import { salesPersonService } from '../services/salespersonService'
 import { customerService } from '../services/customerService'
 import { purchaseService } from '../services/purchaseService'
+import { priceSegmentService, productSegmentPriceService } from '../services/priceListService'
 import { SalesPerson } from '../types/salesperson'
 import { Customer } from '../types/customer'
 import { Breadcrumbs } from '../components/Breadcrumbs'
+import CustomerModal from '../components/CustomerModal'
 import { X, Plus, Trash2, Search, ShoppingCart, Home, User, Pause, Play, RotateCcw } from 'lucide-react'
 import { SaleItem, Sale } from '../types/sale'
 import { Purchase, PurchaseItem } from '../types/purchase'
@@ -47,6 +49,13 @@ const SaleForm = () => {
   const [internalRemarks, setInternalRemarks] = useState<string>('') // Internal remarks (not shown to customers)
   const [hasHeldCart, setHasHeldCart] = useState(false) // Held cart available to resume (by company)
   const [salesForQuickReorder, setSalesForQuickReorder] = useState<Sale[]>([]) // Recent sales for Last sold / Frequently sold
+  const [showCustomerModal, setShowCustomerModal] = useState(false) // Add customer in-place without leaving sale
+  const [editingQty, setEditingQty] = useState<Record<string, string>>({}) // per-row quantity while user is typing (e.g. ".5")
+  const [saleSegmentId, setSaleSegmentId] = useState<number | null>(null) // Price segment for this sale (null = Retail/default)
+  const [priceSegments, setPriceSegments] = useState<Array<{ id: number; name: string; description?: string; is_default: boolean }>>([])
+
+  // Segment pricing: key = priceKey(productId, segmentId, article). When user selects segment, override product prices.
+  const segmentPricesMapRef = useRef<Map<string, number>>(new Map())
 
   const HELD_CART_KEY = () => `hisabkitab_held_cart_${getCurrentCompanyId() ?? 'default'}`
 
@@ -390,6 +399,72 @@ const SaleForm = () => {
     setCreditApplied(0)
   }, [customerId])
 
+  // Load price segments on mount
+  useEffect(() => {
+    priceSegmentService.getAll(getCurrentCompanyId()).then(segs =>
+      setPriceSegments(segs.map(s => ({ id: s.id, name: s.name, description: s.description, is_default: s.is_default })))
+    )
+  }, [getCurrentCompanyId])
+
+  // Sync saleSegmentId from customer when customer changes (Retail = null for all retail users)
+  useEffect(() => {
+    if (!customerId) {
+      setSaleSegmentId(null)
+      return
+    }
+    const customer = customers.find(c => c.id === customerId)
+    if (customer?.price_segment_id) {
+      setSaleSegmentId(customer.price_segment_id)
+    } else {
+      setSaleSegmentId(null) // Retail - same pricing for everyone
+    }
+  }, [customerId, customers])
+
+  // Load segment prices when saleSegmentId is set (for price list override)
+  // When segment changes, also reapply prices to existing cart items
+  useEffect(() => {
+    const loadSegmentPrices = async () => {
+      if (!saleSegmentId) {
+        segmentPricesMapRef.current = new Map()
+        return
+      }
+      try {
+        const companyId = getCurrentCompanyId()
+        const all = await productSegmentPriceService.getAll(companyId)
+        const map = new Map<string, number>()
+        all
+          .filter(p => p.segment_id === saleSegmentId)
+          .forEach(p => {
+            const key = productSegmentPriceService.priceKey(p.product_id, p.segment_id, p.article)
+            map.set(key, p.price)
+          })
+        segmentPricesMapRef.current = map
+        // Reapply segment prices to existing cart items
+        setSaleItems(prev => prev.map(item => {
+          const keyWithArticle = productSegmentPriceService.priceKey(item.product_id, saleSegmentId, item.purchase_item_article || undefined)
+          const keyProductOnly = productSegmentPriceService.priceKey(item.product_id, saleSegmentId)
+          const segmentPrice = map.get(keyWithArticle) ?? map.get(keyProductOnly)
+          if (segmentPrice != null) {
+            const mrp = item.mrp || segmentPrice
+            const discount = mrp > segmentPrice ? mrp - segmentPrice : 0
+            const discountPct = mrp > 0 ? (discount / mrp * 100) : 0
+            return {
+              ...item,
+              unit_price: segmentPrice,
+              discount,
+              discount_percentage: discountPct,
+              total: Math.round(segmentPrice * item.quantity * 100) / 100
+            }
+          }
+          return item
+        }))
+      } catch {
+        segmentPricesMapRef.current = new Map()
+      }
+    }
+    loadSegmentPrices()
+  }, [saleSegmentId, getCurrentCompanyId])
+
   // Hold / Resume cart
   const holdCart = () => {
     if (saleItems.length === 0 && !customerId) {
@@ -401,6 +476,7 @@ const SaleForm = () => {
         saleItems,
         customerId: customerId || '',
         salesPersonId: salesPersonId || '',
+        saleSegmentId: saleSegmentId ?? null,
         paymentMethods,
         discountType,
         discountValue,
@@ -412,6 +488,7 @@ const SaleForm = () => {
       setSaleItems([])
       setCustomerId('')
       setSalesPersonId('')
+      setSaleSegmentId(null)
       setPaymentMethods([{ method: 'cash', amount: 0 }])
       setDiscountValue(0)
       setCreditApplied(0)
@@ -431,6 +508,7 @@ const SaleForm = () => {
       if (parsed.saleItems?.length) setSaleItems(parsed.saleItems)
       if (parsed.customerId) setCustomerId(parsed.customerId)
       if (parsed.salesPersonId) setSalesPersonId(parsed.salesPersonId)
+      if (parsed.saleSegmentId != null) setSaleSegmentId(parsed.saleSegmentId)
       if (parsed.paymentMethods?.length) setPaymentMethods(parsed.paymentMethods)
       if (parsed.discountType) setDiscountType(parsed.discountType)
       if (typeof parsed.discountValue === 'number') setDiscountValue(parsed.discountValue)
@@ -1252,6 +1330,17 @@ const SaleForm = () => {
         console.log(`  → Using product stock (aggregated): ${remainingStock}`)
       }
       
+      // Segment price override: if a segment is selected, use price list price for this product (+ article if item-level)
+      if (saleSegmentId) {
+        const map = segmentPricesMapRef.current
+        const keyWithArticle = productSegmentPriceService.priceKey(product.id, saleSegmentId, purchaseItemArticle || undefined)
+        const keyProductOnly = productSegmentPriceService.priceKey(product.id, saleSegmentId)
+        const segmentPrice = map.get(keyWithArticle) ?? map.get(keyProductOnly)
+        if (segmentPrice != null) {
+          unitPrice = segmentPrice
+        }
+      }
+
       // Always use the actual product name (article is stored separately in purchase_item_article)
       const displayName = product.name
       
@@ -1839,8 +1928,8 @@ const SaleForm = () => {
         // Match by unique key first (most accurate)
         if (saleItem.purchase_item_unique_key && item.purchase_item_unique_key) {
           if (item.purchase_item_unique_key === saleItem.purchase_item_unique_key) {
-            const newQuantity = Math.max(1, Math.min(quantity, maxQuantity))
-            const newTotal = item.unit_price * newQuantity
+            const newQuantity = Math.max(0.01, Math.min(quantity, maxQuantity))
+            const newTotal = Math.round(item.unit_price * newQuantity * 100) / 100
             console.log(`[SaleForm] Updating quantity (unique key) for ${item.product_name}: ${item.quantity} -> ${newQuantity}, Total: ₹${item.total.toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
             return { ...item, quantity: newQuantity, total: newTotal }
           }
@@ -1858,9 +1947,9 @@ const SaleForm = () => {
             !item.purchase_item_id && !item.purchase_item_article))
         
         if (isMatch) {
-          const newQuantity = Math.max(1, Math.min(quantity, maxQuantity))
+          const newQuantity = Math.max(0.01, Math.min(quantity, maxQuantity))
           // Recalculate total based on new quantity and current unit price
-          const newTotal = item.unit_price * newQuantity
+          const newTotal = Math.round(item.unit_price * newQuantity * 100) / 100
           console.log(`[SaleForm] Updating quantity for ${item.product_name}: ${item.quantity} -> ${newQuantity}, Unit Price: ₹${item.unit_price.toFixed(2)}, Total: ₹${item.total.toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
           return {
             ...item,
@@ -2429,9 +2518,47 @@ const SaleForm = () => {
                                 <button type="button" onClick={() => setCartItemSaleType('return')} className={`px-2 py-0.5 text-xs font-medium rounded ${item.sale_type === 'return' ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-600'}`}>Return</button>
                               </div>
                               <span className="text-xs text-gray-500">Qty</span>
-                              <button type="button" onClick={() => updateItemQuantity(item, item.quantity - 1)} className="w-6 h-6 flex items-center justify-center bg-gray-200 hover:bg-gray-300 rounded text-sm">−</button>
-                              <span className="w-6 text-center text-sm font-semibold">{item.quantity}</span>
-                              <button type="button" onClick={() => updateItemQuantity(item, item.quantity + 1)} className="w-6 h-6 flex items-center justify-center bg-gray-200 hover:bg-gray-300 rounded text-sm">+</button>
+                              <button type="button" onClick={() => { const qtyKey = item.purchase_item_unique_key || `qty-${item.product_id}-${item.purchase_item_id ?? item.purchase_item_article ?? 'main'}`; setEditingQty(prev => { const next = { ...prev }; delete next[qtyKey]; return next }); updateItemQuantity(item, Math.max(0.01, item.quantity - 1)); }} className="w-6 h-6 flex items-center justify-center bg-gray-200 hover:bg-gray-300 rounded text-sm">−</button>
+                              {(() => {
+                                const qtyKey = item.purchase_item_unique_key || `qty-${item.product_id}-${item.purchase_item_id ?? item.purchase_item_article ?? 'main'}`
+                                const isEditing = editingQty[qtyKey] !== undefined
+                                const displayValue = isEditing ? editingQty[qtyKey] : (item.quantity === 0 ? '' : String(item.quantity))
+                                return (
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={displayValue}
+                                    onFocus={() => setEditingQty(prev => ({ ...prev, [qtyKey]: item.quantity === 0 ? '' : String(item.quantity) }))}
+                                    onChange={(e) => {
+                                      const v = e.target.value.replace(/[^0-9.]/g, '')
+                                      setEditingQty(prev => ({ ...prev, [qtyKey]: v }))
+                                    }}
+                                    onBlur={() => {
+                                      const raw = editingQty[qtyKey] ?? ''
+                                      const v = raw.trim() === '' ? '' : raw.replace(/[^0-9.]/g, '')
+                                      const num = v === '' ? 0 : parseFloat(v)
+                                      if (!Number.isNaN(num) && num >= 0.01) {
+                                        updateItemQuantity(item, num)
+                                      } else if (v !== '' && !Number.isNaN(num) && num >= 0) {
+                                        updateItemQuantity(item, 0.01)
+                                      } else if (v !== '' && (Number.isNaN(num) || num < 0)) {
+                                        updateItemQuantity(item, 0.01)
+                                      }
+                                      setEditingQty(prev => {
+                                        const next = { ...prev }
+                                        delete next[qtyKey]
+                                        return next
+                                      })
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                                    }}
+                                    className="w-14 px-1.5 py-0.5 text-sm text-center border border-gray-300 rounded font-semibold"
+                                    placeholder="0"
+                                  />
+                                )
+                              })()}
+                              <button type="button" onClick={() => { const qtyKey = item.purchase_item_unique_key || `qty-${item.product_id}-${item.purchase_item_id ?? item.purchase_item_article ?? 'main'}`; setEditingQty(prev => { const next = { ...prev }; delete next[qtyKey]; return next }); updateItemQuantity(item, item.quantity + 1); }} className="w-6 h-6 flex items-center justify-center bg-gray-200 hover:bg-gray-300 rounded text-sm">+</button>
                               <button type="button" onClick={() => removeItem(item)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Remove"><Trash2 className="w-4 h-4" /></button>
                             </div>
                           </div>
@@ -2491,9 +2618,29 @@ const SaleForm = () => {
                     </div>
                   )
                 })()}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Price Segment</label>
+                  <select
+                    value={saleSegmentId ?? ''}
+                    onChange={(e) => setSaleSegmentId(e.target.value === '' ? null : parseInt(e.target.value, 10))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                  >
+                    <option value="">Default (Retail)</option>
+                    {priceSegments.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}{s.description ? ` – ${s.description}` : ''}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {saleSegmentId
+                      ? `Pricing from ${priceSegments.find(s => s.id === saleSegmentId)?.name ?? 'segment'} list`
+                      : 'Retail pricing – all retail customers use the same prices'}
+                  </p>
+                </div>
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Customer</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Customer {customers.length > 0 && <span className="text-gray-500 font-normal">(Total: {customers.length})</span>}
+                    </label>
                     <div className="space-y-2">
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
@@ -2501,30 +2648,69 @@ const SaleForm = () => {
                           type="text"
                           value={customerSearchQuery}
                           onChange={(e) => setCustomerSearchQuery(e.target.value)}
-                          onFocus={() => setCustomerSearchQuery('')}
-                          placeholder="Search customer..."
+                          placeholder="Type name, phone, or email to search..."
                           className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                         />
                       </div>
-                      <select
-                        value={customerId}
-                        onChange={(e) => setCustomerId(e.target.value ? parseInt(e.target.value) : '')}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                      >
-                        <option value="">Select Customer</option>
-                        {customers
-                          .filter(c => 
-                            !customerSearchQuery || 
-                            c.name.toLowerCase().includes(customerSearchQuery.toLowerCase()) ||
-                            c.phone?.includes(customerSearchQuery) ||
-                            c.email?.toLowerCase().includes(customerSearchQuery.toLowerCase())
-                          )
-                          .map(customer => (
+                      {/* Live search results: show matching customers as you type */}
+                      {customerSearchQuery.trim() && (() => {
+                        const q = customerSearchQuery.trim()
+                        const qLower = q.toLowerCase()
+                        const qPhone = q.replace(/\s/g, '')
+                        const matched = customers.filter(c => {
+                          const nameMatch = (c.name || '').toLowerCase().includes(qLower)
+                          const phoneMatch = (c.phone || '').replace(/\s/g, '').includes(qPhone)
+                          const emailMatch = (c.email || '').toLowerCase().includes(qLower)
+                          return nameMatch || phoneMatch || emailMatch
+                        })
+                        const showList = matched.slice(0, 30)
+                        return (
+                          <div className="border border-gray-200 rounded-xl bg-white shadow-lg max-h-60 overflow-y-auto">
+                            {matched.length === 0 ? (
+                              <div className="px-4 py-3 text-sm text-gray-500">No customer found. Add new below.</div>
+                            ) : (
+                              <>
+                                <div className="px-3 py-2 text-xs font-medium text-gray-500 border-b bg-gray-50 rounded-t-xl">
+                                  {matched.length} result{matched.length !== 1 ? 's' : ''} — click to select
+                                </div>
+                                {showList.map(customer => (
+                                  <button
+                                    key={customer.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setCustomerId(customer.id)
+                                      setCustomerSearchQuery('')
+                                    }}
+                                    className="w-full text-left px-4 py-2.5 hover:bg-blue-50 border-b border-gray-100 last:border-b-0 text-sm"
+                                  >
+                                    <span className="font-medium text-gray-900">{customer.name}</span>
+                                    {customer.phone && <span className="text-gray-500 ml-2">{customer.phone}</span>}
+                                    {customer.email && <span className="text-gray-400 ml-2 truncate">{customer.email}</span>}
+                                  </button>
+                                ))}
+                                {matched.length > 30 && (
+                                  <div className="px-4 py-2 text-xs text-gray-400 bg-gray-50">+{matched.length - 30} more — narrow your search</div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )
+                      })()}
+                      {/* Dropdown when not searching: pick from full list */}
+                      {!customerSearchQuery.trim() && (
+                        <select
+                          value={customerId}
+                          onChange={(e) => setCustomerId(e.target.value ? parseInt(e.target.value) : '')}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        >
+                          <option value="">Select Customer{customers.length > 0 ? ` (${customers.length} total)` : ''}</option>
+                          {customers.map(customer => (
                             <option key={customer.id} value={customer.id}>
                               {customer.name} {customer.phone ? `(${customer.phone})` : ''}
                             </option>
                           ))}
-                      </select>
+                        </select>
+                      )}
                       {customerId && (() => {
                         const selected = customers.find(c => c.id === customerId)
                         return selected && (
@@ -2539,8 +2725,12 @@ const SaleForm = () => {
                       })()}
                       <button
                         type="button"
-                        onClick={() => navigate('/customers/new?returnTo=sale')}
-                        className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setShowCustomerModal(true)
+                        }}
+                        className="text-sm text-blue-600 hover:text-blue-700 font-medium underline cursor-pointer"
                       >
                         + Add New Customer
                       </button>
@@ -3077,6 +3267,17 @@ const SaleForm = () => {
           </div>
         </form>
       </main>
+
+      {/* Add Customer modal: add new customer without leaving sale; cart and form data are preserved */}
+      <CustomerModal
+        isOpen={showCustomerModal}
+        onClose={() => setShowCustomerModal(false)}
+        onCustomerAdded={async (customer: Customer) => {
+          await loadCustomers()
+          setCustomerId(customer.id)
+          setShowCustomerModal(false)
+        }}
+      />
     </div>
   )
 }

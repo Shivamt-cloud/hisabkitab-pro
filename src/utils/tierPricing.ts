@@ -51,3 +51,12 @@ export function calculateTierPrice(basePrice: number, tier: SubscriptionTier): n
 export function getTierPricing(tier: SubscriptionTier): TierPricing {
   return TIER_PRICING[tier]
 }
+
+/**
+ * Get display monthly price (basic plan: 500 → 499 for psychological pricing)
+ */
+export function getDisplayMonthlyPrice(tierPrice: number, tier: SubscriptionTier): number {
+  const calculated = Math.round(tierPrice / 12)
+  if (tier === 'basic' && calculated === 500) return 499
+  return calculated
+}

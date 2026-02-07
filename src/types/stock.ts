@@ -36,7 +36,9 @@ export interface StockAlert {
   min_stock_level: number
   category?: string
   unit?: string
-  alert_type: 'low_stock' | 'out_of_stock'
+  alert_type: 'low_stock' | 'out_of_stock' | 'excess_slow_moving'
   suggested_quantity?: number // Suggested quantity to purchase to reach optimal stock
+  sales_velocity_per_week?: number // For excess_slow_moving: units sold per week
+  days_of_stock?: number // For excess_slow_moving: estimated days until stock depletes at current velocity
 }
 

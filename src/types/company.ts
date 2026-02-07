@@ -19,6 +19,7 @@ export interface Company {
   valid_to?: string
   is_active: boolean
   subscription_tier?: SubscriptionTier
+  is_free_trial?: boolean
   max_users?: number
   subscription_start_date?: string
   subscription_end_date?: string

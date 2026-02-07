@@ -106,6 +106,7 @@ export interface ReceiptPrinterSettings {
   show_company_name?: boolean
   show_company_address?: boolean
   show_company_phone?: boolean
+  show_company_email?: boolean
   show_company_gstin?: boolean
 
   show_invoice_number?: boolean
@@ -115,7 +116,10 @@ export interface ReceiptPrinterSettings {
 
   show_customer_name?: boolean
   show_customer_phone?: boolean
+  show_customer_address?: boolean
   show_customer_gstin?: boolean
+  show_sales_person?: boolean
+  show_notes?: boolean
 
   show_items?: boolean
   show_item_discount?: boolean

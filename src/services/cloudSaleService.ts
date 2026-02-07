@@ -10,6 +10,41 @@ import { getAll, put, getById, deleteById, STORES } from '../database/db'
  */
 export const cloudSaleService = {
   /**
+   * Fast fetch: Supabase only, no IndexedDB sync. Use for Dashboard initial load.
+   * Falls back to IndexedDB when offline.
+   */
+  getAllFast: async (includeArchived: boolean = false, companyId?: number | null): Promise<Sale[]> => {
+    if (!isSupabaseAvailable() || !isOnline()) {
+      let sales = await getAll<Sale>(STORES.SALES)
+      if (companyId !== undefined && companyId !== null) {
+        sales = sales.filter(s => s.company_id === companyId)
+      } else if (companyId === null) return []
+      if (!includeArchived) sales = sales.filter(s => !s.archived)
+      return sales
+    }
+    try {
+      let query = supabase!.from('sales').select('*')
+      if (companyId !== undefined && companyId !== null) query = query.eq('company_id', companyId)
+      if (!includeArchived) query = query.eq('archived', false)
+      const { data, error } = await query.order('sale_date', { ascending: false })
+      if (error) {
+        let sales = await getAll<Sale>(STORES.SALES)
+        if (companyId !== undefined && companyId !== null) sales = sales.filter(s => s.company_id === companyId)
+        else if (companyId === null) return []
+        if (!includeArchived) sales = sales.filter(s => !s.archived)
+        return sales
+      }
+      return (data as Sale[]) || []
+    } catch (_) {
+      let sales = await getAll<Sale>(STORES.SALES)
+      if (companyId !== undefined && companyId !== null) sales = sales.filter(s => s.company_id === companyId)
+      else if (companyId === null) return []
+      if (!includeArchived) sales = sales.filter(s => !s.archived)
+      return sales
+    }
+  },
+
+  /**
    * Get all sales from cloud
    */
   getAll: async (includeArchived: boolean = false, companyId?: number | null): Promise<Sale[]> => {
@@ -55,11 +90,12 @@ export const cloudSaleService = {
         return sales
       }
 
-      // Sync to local storage for offline access
-      if (data) {
-        for (const sale of data) {
-          await put(STORES.SALES, sale as Sale)
-        }
+      // Sync to local storage in background (don't block UI – IndexedDB writes are slow with large datasets)
+      if (data && data.length > 0) {
+        const toSync = data as Sale[]
+        void Promise.all(toSync.map((sale) => put(STORES.SALES, sale))).catch((e) =>
+          console.warn('[cloudSaleService] Background sync failed:', e)
+        )
       }
 
       return (data as Sale[]) || []

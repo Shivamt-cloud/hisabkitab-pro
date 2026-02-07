@@ -1,27 +1,31 @@
 import { PaymentRecord, PaymentTransaction, OutstandingPayment, PaymentType, PaymentStatus, PaymentMethod } from '../types/payment'
 import { saleService } from './saleService'
 import { purchaseService } from './purchaseService'
+import { Sale } from '../types/sale'
+import { Purchase } from '../types/purchase'
 import { getAll, getById, put, STORES } from '../database/db'
 
 export const paymentService = {
-  // Initialize payment records from sales and purchases
-  initializeFromSalesAndPurchases: async (companyId?: number | null): Promise<void> => {
-    const [sales, purchases] = await Promise.all([
-      saleService.getAll(true, companyId),
-      purchaseService.getAll(undefined, companyId)
-    ])
+  // Initialize payment records from sales and purchases (accepts pre-loaded data to avoid duplicate fetches)
+  initializeFromSalesAndPurchases: async (companyId?: number | null, preloaded?: { sales?: Sale[]; purchases?: Purchase[] }): Promise<void> => {
+    const [sales, purchases] = preloaded?.sales && preloaded?.purchases
+      ? [preloaded.sales, preloaded.purchases]
+      : await Promise.all([
+          saleService.getAll(true, companyId),
+          purchaseService.getAll(undefined, companyId)
+        ])
 
     const existingRecords = await getAll<PaymentRecord>(STORES.PAYMENT_RECORDS)
+    const toPut: PaymentRecord[] = []
 
-    // Process sales
+    let idx = 0
     for (const sale of sales) {
       const existing = existingRecords.find(p => p.type === 'sale' && p.reference_id === sale.id)
       if (!existing) {
         const paidAmount = sale.payment_status === 'paid' ? sale.grand_total : 0
         const pendingAmount = sale.grand_total - paidAmount
-        
-        const record: PaymentRecord = {
-          id: Date.now() + Math.random(), // Unique ID
+        toPut.push({
+          id: Date.now() + Math.random() * 10000 + idx++,
           type: 'sale',
           reference_id: sale.id,
           reference_number: sale.invoice_number,
@@ -35,30 +39,22 @@ export const paymentService = {
           payment_date: sale.payment_status === 'paid' ? sale.sale_date : undefined,
           created_at: sale.created_at,
           updated_at: sale.updated_at,
-        }
-        await put(STORES.PAYMENT_RECORDS, record)
+        })
       }
     }
-
-    // Process purchases
     for (const purchase of purchases) {
       const existing = existingRecords.find(p => p.type === 'purchase' && p.reference_id === purchase.id)
       if (!existing) {
-        const totalAmount = purchase.type === 'gst' 
-          ? (purchase as any).grand_total 
-          : (purchase as any).total_amount
-        const paidAmount = purchase.payment_status === 'paid' ? totalAmount :
-                          purchase.payment_status === 'partial' ? (totalAmount * 0.5) : 0
+        const totalAmount = purchase.type === 'gst' ? (purchase as any).grand_total : (purchase as any).total_amount
+        const paidAmount = purchase.payment_status === 'paid' ? totalAmount : purchase.payment_status === 'partial' ? (totalAmount * 0.5) : 0
         const pendingAmount = totalAmount - paidAmount
-
-        const record: PaymentRecord = {
-          id: Date.now() + Math.random(), // Unique ID
+        toPut.push({
+          id: Date.now() + Math.random() * 10000 + idx++,
           type: 'purchase',
           reference_id: purchase.id,
           reference_number: (purchase as any).invoice_number || `PUR-${purchase.id}`,
           supplier_id: purchase.type === 'gst' ? (purchase as any).supplier_id : undefined,
-          supplier_name: purchase.type === 'gst' ? (purchase as any).supplier_name : 
-                        (purchase as any).supplier_name,
+          supplier_name: (purchase as any).supplier_name,
           total_amount: totalAmount,
           paid_amount: paidAmount,
           pending_amount: pendingAmount,
@@ -67,9 +63,13 @@ export const paymentService = {
           payment_date: purchase.payment_status === 'paid' ? purchase.purchase_date : undefined,
           created_at: purchase.created_at,
           updated_at: (purchase as any).updated_at,
-        }
-        await put(STORES.PAYMENT_RECORDS, record)
+        })
       }
+    }
+    if (toPut.length > 0) {
+      void Promise.all(toPut.map((r) => put(STORES.PAYMENT_RECORDS, r))).catch((e) =>
+        console.warn('[paymentService] Background sync failed:', e)
+      )
     }
   },
 
@@ -107,9 +107,9 @@ export const paymentService = {
     return records
   },
 
-  // Get outstanding payments
-  getOutstandingPayments: async (type?: PaymentType, companyId?: number | null): Promise<OutstandingPayment[]> => {
-    await paymentService.initializeFromSalesAndPurchases(companyId)
+  // Get outstanding payments (preloaded avoids re-fetching sales/purchases)
+  getOutstandingPayments: async (type?: PaymentType, companyId?: number | null, preloaded?: { sales: Sale[]; purchases: Purchase[] }): Promise<OutstandingPayment[]> => {
+    await paymentService.initializeFromSalesAndPurchases(companyId, preloaded)
     let records = await getAll<PaymentRecord>(STORES.PAYMENT_RECORDS)
     records = records.filter(p => p.pending_amount > 0)
     
@@ -270,10 +270,33 @@ export const paymentService = {
     return transactions.sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime())
   },
 
-  // Get statistics
-  getStats: async (companyId?: number | null) => {
-    await paymentService.initializeFromSalesAndPurchases(companyId)
-    const outstanding = await paymentService.getOutstandingPayments(undefined, companyId)
+  /**
+   * Fast stats from sales/purchases only – no payment records, no IndexedDB.
+   * Use for Dashboard initial load. Matches getStats return shape.
+   */
+  getStatsFromSalesPurchases: (sales: Sale[], purchases: Purchase[]) => {
+    const customerPending = sales.filter((s) => s.payment_status !== 'paid')
+    const supplierPending = purchases.filter((p) => p.payment_status !== 'paid')
+    const customerOutstanding = customerPending.reduce((sum, s) => sum + s.grand_total, 0)
+    const supplierOutstanding = supplierPending.reduce((sum, p) => {
+      const total = p.type === 'gst' ? (p as any).grand_total : (p as any).total_amount
+      const pending = p.payment_status === 'paid' ? 0 : p.payment_status === 'partial' ? total * 0.5 : total
+      return sum + pending
+    }, 0)
+    return {
+      totalOutstanding: customerOutstanding + supplierOutstanding,
+      customerOutstanding,
+      supplierOutstanding,
+      customerCount: customerPending.length,
+      supplierCount: supplierPending.length,
+      overdueCount: 0, // Would need due_date from payment records
+    }
+  },
+
+  // Get statistics (pass preloaded sales/purchases to avoid duplicate fetches – e.g. from Dashboard)
+  getStats: async (companyId?: number | null, preloaded?: { sales: Sale[]; purchases: Purchase[] }) => {
+    await paymentService.initializeFromSalesAndPurchases(companyId, preloaded)
+    const outstanding = await paymentService.getOutstandingPayments(undefined, companyId, preloaded)
     const customerOutstanding = outstanding.filter(p => p.type === 'sale')
     const supplierOutstanding = outstanding.filter(p => p.type === 'purchase')
 

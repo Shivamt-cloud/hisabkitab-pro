@@ -13,6 +13,7 @@ export interface Customer {
   credit_limit?: number
   outstanding_amount?: number
   credit_balance?: number // Positive balance from returns/exchanges (credit available to use)
+  price_segment_id?: number // For price lists (Retail, Wholesale, VIP, etc.)
   company_id?: number
   created_at: string
   updated_at?: string

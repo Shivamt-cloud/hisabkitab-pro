@@ -31,6 +31,12 @@ export function KeyboardShortcuts() {
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // Use e.code (physical key) so Alt/Option+S and Alt/Option+P work on Mac (e.key becomes ß, π etc.)
+      // Cmd+Shift+Q / Ctrl+Shift+Q → Quick Sale (scan → add → pay)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'KeyQ') {
+        e.preventDefault()
+        if (hasPermission('sales:create')) navigate('/sales/quick')
+        return
+      }
       // Cmd+Shift+S / Ctrl+Shift+S → New Sale (Mac-friendly combined key)
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'KeyS') {
         e.preventDefault()

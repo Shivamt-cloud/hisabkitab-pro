@@ -65,6 +65,29 @@ export async function generatePurchaseInvoiceNumber(
 }
 
 /**
+ * Generate reorder number with company code
+ * Format: {COMP_CODE}-RO-{YYYY}-{NNNN}
+ */
+export async function generateReorderNumber(
+  companyId: number | undefined | null,
+  existingReorderNumbers: string[] = []
+): Promise<string> {
+  const companyCode = await getCompanyCodeById(companyId)
+  const prefix = companyCode ? `${companyCode}-RO` : 'RO'
+  const year = new Date().getFullYear()
+  const yearPrefix = `${prefix}-${year}-`
+  const existingNumbers = existingReorderNumbers
+    .filter(ro => ro.startsWith(yearPrefix))
+    .map(ro => {
+      const parts = ro.split('-')
+      const numPart = parts[parts.length - 1]
+      return parseInt(numPart) || 0
+    })
+  const nextNumber = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : 1
+  return `${yearPrefix}${String(nextNumber).padStart(4, '0')}`
+}
+
+/**
  * Generate product SKU with company code
  * Format: {COMP_CODE}-PROD-{NNNN} or {COMP_CODE}-{CUSTOM_SKU}
  */

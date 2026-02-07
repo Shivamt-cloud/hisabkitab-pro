@@ -3,11 +3,12 @@ import { useAuth } from '../context/AuthContext'
 import { useNavigate, Link } from 'react-router-dom'
 import { LogIn, Mail, Lock, AlertCircle, User, Package, ShoppingCart, TrendingUp, Users, BarChart3, Shield, CheckCircle, MessageCircle, Globe, X, Building2, Phone, MapPin, FileText, UserPlus, BookOpen, Search, Target, WifiOff, Download } from 'lucide-react'
 import { COUNTRY_OPTIONS, detectCountry, formatPrice, getCountryPricing, getSavedCountry, isSupportedCountryCode, saveCountry, type CountryPricing } from '../utils/pricing'
-import { calculateTierPrice, getTierPricing } from '../utils/tierPricing'
+import { calculateTierPrice, getDisplayMonthlyPrice, getTierPricing } from '../utils/tierPricing'
 import { getMaxUsersForPlan } from '../utils/planUserLimits'
 import { SubscriptionTier } from '../types/device'
 import { userService } from '../services/userService'
 import { registrationRequestService } from '../services/registrationRequestService'
+import { SATISFIED_CUSTOMERS_COUNT } from '../constants'
 
 const Login = () => {
   const [email, setEmail] = useState('')
@@ -297,6 +298,13 @@ Please review and process this registration request.
         <div className="flex-[2] hidden lg:block">
           <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20 shadow-2xl">
             <div className="mb-6">
+              {/* Satisfied Customers - Top */}
+              <div className="flex items-center justify-center gap-2 mb-6 py-3 px-4 bg-white/10 backdrop-blur-sm rounded-xl border border-white/20">
+                <Users className="w-6 h-6 text-emerald-400" />
+                <span className="text-white font-bold text-lg">
+                  {SATISFIED_CUSTOMERS_COUNT.toLocaleString()}+ Satisfied Customers
+                </span>
+              </div>
               {/* Enhanced Title Section */}
               <div className="text-center mb-6">
                 <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-blue-100 to-purple-100 mb-3 drop-shadow-2xl animate-fade-in">
@@ -394,8 +402,14 @@ Please review and process this registration request.
                     <div className="text-sm font-bold mb-2 tracking-wider uppercase">
                       Special {pricing.countryName} Pricing
                     </div>
-                    <div className="text-4xl font-black mb-3 drop-shadow-2xl animate-scale leading-tight">
-                      {formatPrice(pricing.yearlyPrice, pricing.currencySymbol)}<span className="text-2xl">/Year</span>
+                    <div className="flex items-center justify-center gap-8 mb-3 flex-wrap">
+                      <div className="text-4xl font-black drop-shadow-2xl animate-scale leading-tight">
+                        {formatPrice(pricing.yearlyPrice, pricing.currencySymbol)}<span className="text-2xl">/Year</span>
+                      </div>
+                      <span className="text-2xl text-white/60 font-bold">|</span>
+                      <div className="text-4xl font-black drop-shadow-2xl animate-scale leading-tight">
+                        {formatPrice(getDisplayMonthlyPrice(pricing.yearlyPrice, 'basic'), pricing.currencySymbol)}<span className="text-2xl">/mo</span>
+                      </div>
                     </div>
                     {pricing.originalPrice && (
                       <div className="text-base font-semibold mt-2 flex items-center justify-center gap-3 mb-3">
@@ -547,6 +561,14 @@ Please review and process this registration request.
               </p>
             </div>
 
+            {/* Satisfied Customers Badge */}
+            <div className="flex items-center justify-center gap-2 mb-4 py-3 px-4 bg-white/10 backdrop-blur-sm rounded-xl border border-white/20">
+              <Users className="w-6 h-6 text-emerald-400" />
+              <span className="text-white font-bold text-lg">
+                {SATISFIED_CUSTOMERS_COUNT.toLocaleString()}+ Satisfied Customers
+              </span>
+            </div>
+
             {/* Contact Information */}
             <div className="bg-white/10 rounded-lg p-4 border border-white/20 animate-glow">
               <div className="flex items-center justify-center gap-2 text-white/90 mb-2">
@@ -641,6 +663,10 @@ Please review and process this registration request.
         <div className="w-full max-w-2xl flex flex-col items-center justify-center">
           {/* Title for Mobile */}
           <div className="text-center mb-8 lg:hidden">
+            <div className="flex items-center justify-center gap-2 mb-4 py-2 px-4 bg-white/10 backdrop-blur-sm rounded-xl border border-white/20 inline-flex">
+              <Users className="w-5 h-5 text-emerald-400" />
+              <span className="text-white font-bold">{SATISFIED_CUSTOMERS_COUNT.toLocaleString()}+ Satisfied Customers</span>
+            </div>
             <h1 className="text-4xl font-extrabold text-white mb-2">HisabKitab-Pro</h1>
             <p className="text-blue-100 text-lg mb-4">Inventory Management System</p>
             <div className="max-w-sm mx-auto mb-4 text-left">
@@ -711,8 +737,14 @@ Please review and process this registration request.
                 
                 <div className="relative z-10">
                   <div className="text-sm font-semibold mb-0.5">Special {pricing.countryName} Pricing</div>
-                  <div className="text-xl font-extrabold drop-shadow-lg animate-scale">
-                    {formatPrice(pricing.yearlyPrice, pricing.currencySymbol)}/Year
+                  <div className="flex items-center justify-center gap-4 flex-wrap">
+                    <span className="text-xl font-extrabold drop-shadow-lg animate-scale">
+                      {formatPrice(pricing.yearlyPrice, pricing.currencySymbol)}/Year
+                    </span>
+                    <span className="text-white/50 font-bold">|</span>
+                    <span className="text-xl font-extrabold drop-shadow-lg animate-scale">
+                      {formatPrice(getDisplayMonthlyPrice(pricing.yearlyPrice, 'basic'), pricing.currencySymbol)}/mo
+                    </span>
                   </div>
                   {pricing.originalPrice && (
                     <div className="text-xs font-normal mt-0.5 flex items-center justify-center gap-1">
@@ -1410,9 +1442,16 @@ Please review and process this registration request.
                             <div className="text-xs text-gray-500 line-through mb-1">
                               {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
                             </div>
-                            <div className={`text-2xl font-extrabold ${isMostPopular ? 'text-emerald-800' : 'text-gray-900'}`}>
-                              {formatPrice(tierPrice, pricing.currencySymbol)}
-                              <span className="text-sm font-normal">/Year</span>
+                            <div className={`flex items-baseline gap-2 flex-wrap ${isMostPopular ? 'text-emerald-800' : 'text-gray-900'}`}>
+                              <span className="text-2xl font-extrabold">
+                                {formatPrice(tierPrice, pricing.currencySymbol)}
+                                <span className="text-sm font-normal">/Year</span>
+                              </span>
+                              <span className="text-gray-400 font-bold">|</span>
+                              <span className="text-2xl font-extrabold">
+                                {formatPrice(getDisplayMonthlyPrice(tierPrice, tier), pricing.currencySymbol)}
+                                <span className="text-sm font-normal">/mo</span>
+                              </span>
                             </div>
                             <div className="inline-block mt-1 bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
                               50% OFF
@@ -1545,9 +1584,16 @@ Please review and process this registration request.
                           <div className="text-sm text-gray-500 line-through mb-1">
                             {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
                           </div>
-                          <div className="text-3xl font-extrabold text-gray-900">
-                            {formatPrice(tierPrice, pricing.currencySymbol)}
-                            <span className="text-sm font-normal">/Year</span>
+                          <div className="flex items-baseline gap-3 flex-wrap">
+                            <span className="text-3xl font-extrabold text-gray-900">
+                              {formatPrice(tierPrice, pricing.currencySymbol)}
+                              <span className="text-base font-normal">/Year</span>
+                            </span>
+                            <span className="text-gray-400 font-bold">|</span>
+                            <span className="text-3xl font-extrabold text-gray-900">
+                              {formatPrice(getDisplayMonthlyPrice(tierPrice, tier), pricing.currencySymbol)}
+                              <span className="text-base font-normal">/mo</span>
+                            </span>
                           </div>
                           <div className="inline-block mt-1 bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
                             50% OFF
@@ -1572,7 +1618,7 @@ Subscription Renewal Request
 
 Current Plan: ${subscriptionExpired.currentTier}
 Requested Plan: ${tierInfo.name}
-Price: ${formatPrice(tierPrice, pricing.currencySymbol)}/Year
+Price: ${formatPrice(tierPrice, pricing.currencySymbol)}/Year (${formatPrice(getDisplayMonthlyPrice(tierPrice, tier), pricing.currencySymbol)}/mo)
 
 Please process this renewal request to restore access to the system.
 

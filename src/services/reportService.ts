@@ -1,5 +1,8 @@
 import { saleService } from './saleService'
+import { purchaseService } from './purchaseService'
+import { paymentService } from './paymentService'
 import { productService, categoryService } from './productService'
+import { expenseService } from './expenseService'
 import {
   SalesByProductReport,
   SalesByCategoryReport,
@@ -8,10 +11,18 @@ import {
   ProductPerformanceReport,
   ProfitAnalysisReport,
   CategoryProfitReport,
+  PurchasesBySupplierReport,
+  PurchasesByProductReport,
+  PurchasesByCategoryReport,
+  ExpensesByCategoryReport,
+  ExpensesByPeriodReport,
+  ExpenseVsIncomeReport,
   ReportTimePeriod,
   DateRange,
 } from '../types/reports'
 import { Sale } from '../types/sale'
+import { Purchase } from '../types/purchase'
+import { Expense } from '../types/expense'
 
 export const reportService = {
   // Get date range based on time period
@@ -470,5 +481,330 @@ export const reportService = {
       product_count: cat.product_count,
       sale_count: cat.sale_count,
     }))
+  },
+
+  // --- Purchase Reports ---
+
+  filterPurchasesByDate: (purchases: Purchase[], startDate?: string, endDate?: string): Purchase[] => {
+    if (!startDate && !endDate) return purchases
+    return purchases.filter(p => {
+      const purchaseDate = new Date(p.purchase_date).getTime()
+      if (startDate && purchaseDate < new Date(startDate).getTime()) return false
+      if (endDate) {
+        const endDateTime = new Date(endDate).getTime() + 86400000
+        if (purchaseDate > endDateTime) return false
+      }
+      return true
+    })
+  },
+
+  getPurchasesBySupplier: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<PurchasesBySupplierReport[]> => {
+    const [allPurchases, outstanding] = await Promise.all([
+      purchaseService.getAll(undefined, companyId),
+      paymentService.getOutstandingPayments('purchase', companyId),
+    ])
+    const filtered = reportService.filterPurchasesByDate(allPurchases, startDate, endDate)
+    const supplierMap = new Map<string | number, PurchasesBySupplierReport>()
+    const pendingBySupplierId = new Map<number, number>()
+    const pendingBySupplierName = new Map<string, number>()
+    outstanding.forEach(o => {
+      if (o.supplier_id != null) {
+        pendingBySupplierId.set(o.supplier_id, (pendingBySupplierId.get(o.supplier_id) ?? 0) + o.pending_amount)
+      } else if (o.supplier_name) {
+        pendingBySupplierName.set(o.supplier_name, (pendingBySupplierName.get(o.supplier_name) ?? 0) + o.pending_amount)
+      }
+    })
+
+    filtered.forEach(p => {
+      const supplierId = p.type === 'gst' ? (p as any).supplier_id : undefined
+      const supplierName = (p as any).supplier_name || 'Unknown Supplier'
+      const key = supplierId ?? `name:${supplierName}`
+      const totalAmount = p.type === 'gst' ? (p as any).grand_total : (p as any).total_amount
+      const itemQty = p.items.reduce((s, i) => s + (i.purchase_type !== 'return' ? i.quantity : -i.quantity), 0)
+
+      const existing = supplierMap.get(key) || {
+        supplier_id: supplierId,
+        supplier_name: supplierName,
+        total_quantity: 0,
+        total_amount: 0,
+        purchase_count: 0,
+        pending_amount: 0,
+        average_order_value: 0,
+      }
+      existing.total_quantity += Math.max(0, itemQty)
+      existing.total_amount += totalAmount
+      existing.purchase_count += 1
+      supplierMap.set(key, existing)
+    })
+
+    const reports = Array.from(supplierMap.values()).map(r => {
+      const pending = r.supplier_id != null
+        ? (pendingBySupplierId.get(r.supplier_id) ?? 0)
+        : (pendingBySupplierName.get(r.supplier_name) ?? 0)
+      return {
+        ...r,
+        pending_amount: pending,
+        average_order_value: r.purchase_count > 0 ? r.total_amount / r.purchase_count : 0,
+      }
+    })
+    return reports.sort((a, b) => b.total_amount - a.total_amount)
+  },
+
+  getPurchasesByProduct: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<PurchasesByProductReport[]> => {
+    const [allPurchases, products] = await Promise.all([
+      purchaseService.getAll(undefined, companyId),
+      productService.getAll(false, companyId),
+    ])
+    const filtered = reportService.filterPurchasesByDate(allPurchases, startDate, endDate)
+    const productMap = new Map<number, { total_quantity: number; total_amount: number; purchase_count: number; suppliers: Set<string> }>()
+
+    filtered.forEach(p => {
+      const supplierName = (p as any).supplier_name || 'Unknown'
+      p.items.forEach(item => {
+        if (item.purchase_type === 'return') return
+        const productId = item.product_id
+        const product = products.find(pr => pr.id === productId)
+        const categoryName = product?.category_name || 'Uncategorized'
+        const qty = item.quantity
+        const amt = item.total
+
+        const existing = productMap.get(productId) || {
+          total_quantity: 0,
+          total_amount: 0,
+          purchase_count: 0,
+          suppliers: new Set<string>(),
+        }
+        existing.total_quantity += qty
+        existing.total_amount += amt
+        existing.purchase_count += 1
+        existing.suppliers.add(supplierName)
+        productMap.set(productId, existing)
+      })
+    })
+
+    const reports: PurchasesByProductReport[] = Array.from(productMap.entries()).map(([productId, data]) => {
+      const product = products.find(p => p.id === productId)
+      return {
+        product_id: productId,
+        product_name: product?.name || 'Unknown',
+        category_name: product?.category_name || 'Uncategorized',
+        total_quantity: data.total_quantity,
+        total_amount: data.total_amount,
+        average_unit_price: data.total_quantity > 0 ? data.total_amount / data.total_quantity : 0,
+        purchase_count: data.purchase_count,
+        supplier_names: Array.from(data.suppliers),
+      }
+    })
+    return reports.sort((a, b) => b.total_amount - a.total_amount)
+  },
+
+  getPurchasesByCategory: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<PurchasesByCategoryReport[]> => {
+    const [allPurchases, products] = await Promise.all([
+      purchaseService.getAll(undefined, companyId),
+      productService.getAll(false, companyId),
+    ])
+    const filtered = reportService.filterPurchasesByDate(allPurchases, startDate, endDate)
+    const categoryMap = new Map<string, PurchasesByCategoryReport & { productIds: Set<number> }>()
+
+    filtered.forEach(p => {
+      p.items.forEach(item => {
+        if (item.purchase_type === 'return') return
+        const product = products.find(pr => pr.id === item.product_id)
+        const categoryName = product?.category_name || 'Uncategorized'
+        const categoryId = product?.category_id
+
+        const existing = categoryMap.get(categoryName) || {
+          category_id: categoryId,
+          category_name: categoryName,
+          total_quantity: 0,
+          total_amount: 0,
+          product_count: 0,
+          purchase_count: 0,
+          productIds: new Set<number>(),
+        }
+        existing.total_quantity += item.quantity
+        existing.total_amount += item.total
+        existing.productIds.add(item.product_id)
+        categoryMap.set(categoryName, existing)
+      })
+    })
+
+    const purchaseCountByCategory = new Map<string, number>()
+    filtered.forEach(p => {
+      const seen = new Set<string>()
+      p.items.forEach(item => {
+        if (item.purchase_type === 'return') return
+        const product = products.find(pr => pr.id === item.product_id)
+        const cat = product?.category_name || 'Uncategorized'
+        if (!seen.has(cat)) {
+          seen.add(cat)
+          purchaseCountByCategory.set(cat, (purchaseCountByCategory.get(cat) ?? 0) + 1)
+        }
+      })
+    })
+
+    const reports = Array.from(categoryMap.values()).map(cat => ({
+      category_id: cat.category_id,
+      category_name: cat.category_name,
+      total_quantity: cat.total_quantity,
+      total_amount: cat.total_amount,
+      product_count: cat.productIds.size,
+      purchase_count: purchaseCountByCategory.get(cat.category_name) ?? 0,
+    }))
+    return reports.sort((a, b) => b.total_amount - a.total_amount)
+  },
+
+  // --- Sales velocity for reorder suggestions ---
+
+  /** Sales velocity: units sold per week for each product (last N weeks) */
+  getSalesVelocityByProduct: async (weeksLookback: number = 4, companyId?: number | null): Promise<Map<number, { totalSold: number; velocityPerWeek: number }>> => {
+    const allSales = await saleService.getAll(true, companyId)
+    const endDate = new Date()
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - weeksLookback * 7)
+    const filtered = reportService.filterSalesByDate(
+      allSales,
+      startDate.toISOString().split('T')[0],
+      endDate.toISOString().split('T')[0]
+    )
+    const productMap = new Map<number, { totalSold: number }>()
+    filtered.forEach(sale => {
+      sale.items.forEach(item => {
+        if (item.sale_type === 'sale' && item.product_id) {
+          const current = productMap.get(item.product_id) || { totalSold: 0 }
+          current.totalSold += item.quantity
+          productMap.set(item.product_id, current)
+        }
+      })
+    })
+    const result = new Map<number, { totalSold: number; velocityPerWeek: number }>()
+    productMap.forEach((v, productId) => {
+      result.set(productId, {
+        totalSold: v.totalSold,
+        velocityPerWeek: weeksLookback > 0 ? v.totalSold / weeksLookback : 0,
+      })
+    })
+    return result
+  },
+
+  // --- Expense Reports ---
+
+  filterExpensesByDate: (expenses: Expense[], startDate?: string, endDate?: string): Expense[] => {
+    if (!startDate && !endDate) return expenses
+    return expenses.filter(e => {
+      const d = new Date(e.expense_date).getTime()
+      if (startDate && d < new Date(startDate).getTime()) return false
+      if (endDate && d > new Date(endDate + 'T23:59:59').getTime()) return false
+      return true
+    })
+  },
+
+  getExpensesByCategory: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<ExpensesByCategoryReport[]> => {
+    const all = await expenseService.getAll(companyId)
+    const filtered = reportService.filterExpensesByDate(all, startDate, endDate)
+    // Exclude opening/closing (balance entries, not operational expenses)
+    const operational = filtered.filter(e => e.expense_type !== 'opening' && e.expense_type !== 'closing')
+    const categoryMap = new Map<string, { total: number; count: number; byPayment: Record<string, number> }>()
+    const LABELS: Record<string, string> = {
+      salary: 'Employee Salary',
+      sales_person_payment: 'Sales Person Payment',
+      purchase: 'Purchase',
+      transport: 'Transport',
+      office: 'Office / Rent',
+      utility: 'Utilities',
+      maintenance: 'Maintenance',
+      marketing: 'Marketing',
+      other: 'Other',
+    }
+    operational.forEach(e => {
+      const label = LABELS[e.expense_type] || e.expense_type
+      const existing = categoryMap.get(e.expense_type) || { total: 0, count: 0, byPayment: {} }
+      existing.total += e.amount
+      existing.count += 1
+      existing.byPayment[e.payment_method] = (existing.byPayment[e.payment_method] || 0) + e.amount
+      categoryMap.set(e.expense_type, existing)
+    })
+    return Array.from(categoryMap.entries()).map(([expense_type, data]) => ({
+      expense_type,
+      category_label: LABELS[expense_type] || expense_type,
+      total_amount: data.total,
+      expense_count: data.count,
+      payment_methods: data.byPayment,
+    })).sort((a, b) => b.total_amount - a.total_amount)
+  },
+
+  getExpensesByPeriod: async (groupBy: 'day' | 'week' | 'month', startDate?: string, endDate?: string, companyId?: number | null): Promise<ExpensesByPeriodReport[]> => {
+    const all = await expenseService.getAll(companyId)
+    const filtered = reportService.filterExpensesByDate(all, startDate, endDate)
+    const operational = filtered.filter(e => e.expense_type !== 'opening' && e.expense_type !== 'closing')
+    const periodMap = new Map<string, { total: number; count: number }>()
+    operational.forEach(e => {
+      const d = new Date(e.expense_date)
+      let key: string
+      if (groupBy === 'day') key = d.toISOString().split('T')[0]
+      else if (groupBy === 'week') {
+        const w = new Date(d)
+        w.setDate(d.getDate() - d.getDay())
+        key = w.toISOString().split('T')[0]
+      } else key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const ex = periodMap.get(key) || { total: 0, count: 0 }
+      ex.total += e.amount
+      ex.count += 1
+      periodMap.set(key, ex)
+    })
+    return Array.from(periodMap.entries()).map(([period, data]) => ({
+      period,
+      total_amount: data.total,
+      expense_count: data.count,
+    })).sort((a, b) => a.period.localeCompare(b.period))
+  },
+
+  getExpenseVsIncome: async (groupBy: 'day' | 'week' | 'month', startDate?: string, endDate?: string, companyId?: number | null): Promise<ExpenseVsIncomeReport[]> => {
+    const [allExpenses, allSales] = await Promise.all([
+      expenseService.getAll(companyId),
+      saleService.getAll(true, companyId),
+    ])
+    const expensesFiltered = reportService.filterExpensesByDate(allExpenses, startDate, endDate)
+    const salesFiltered = reportService.filterSalesByDate(allSales, startDate, endDate)
+    const operationalExpenses = expensesFiltered.filter(e => e.expense_type !== 'opening' && e.expense_type !== 'closing')
+    const periodMap = new Map<string, { expense: number; expenseCount: number; income: number; saleCount: number }>()
+    const addToPeriod = (key: string, expense: number, inc: number, expCount: number, saleCount: number) => {
+      const ex = periodMap.get(key) || { expense: 0, expenseCount: 0, income: 0, saleCount: 0 }
+      ex.expense += expense
+      ex.expenseCount += expCount
+      ex.income += inc
+      ex.saleCount += saleCount
+      periodMap.set(key, ex)
+    }
+    operationalExpenses.forEach(e => {
+      const d = new Date(e.expense_date)
+      let key: string
+      if (groupBy === 'day') key = d.toISOString().split('T')[0]
+      else if (groupBy === 'week') {
+        const w = new Date(d)
+        w.setDate(d.getDate() - d.getDay())
+        key = w.toISOString().split('T')[0]
+      } else key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      addToPeriod(key, e.amount, 0, 1, 0)
+    })
+    salesFiltered.forEach(s => {
+      const d = new Date(s.sale_date)
+      let key: string
+      if (groupBy === 'day') key = d.toISOString().split('T')[0]
+      else if (groupBy === 'week') {
+        const w = new Date(d)
+        w.setDate(d.getDate() - d.getDay())
+        key = w.toISOString().split('T')[0]
+      } else key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      addToPeriod(key, 0, s.grand_total || 0, 0, 1)
+    })
+    return Array.from(periodMap.entries()).map(([period, data]) => ({
+      period,
+      total_expense: data.expense,
+      total_income: data.income,
+      net: data.income - data.expense,
+      expense_count: data.expenseCount,
+      sale_count: data.saleCount,
+    })).sort((a, b) => a.period.localeCompare(b.period))
   },
 }

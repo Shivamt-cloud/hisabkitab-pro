@@ -2,7 +2,7 @@
 // Provides a simple interface to interact with IndexedDB
 
 const DB_NAME = 'hisabkitab_db'
-const DB_VERSION = 15 // Add company_id to notifications for multi-tenant isolation
+const DB_VERSION = 17 // Add price_segments and product_segment_prices for price lists
 
 // Object store names (tables)
 export const STORES = {
@@ -32,6 +32,10 @@ export const STORES = {
   REGISTRATION_REQUESTS: 'registration_requests',
   USER_DEVICES: 'user_devices',
   SUBSCRIPTION_PAYMENTS: 'subscription_payments',
+  PURCHASE_REORDERS: 'purchase_reorders',
+  PURCHASE_REORDER_ITEMS: 'purchase_reorder_items',
+  PRICE_SEGMENTS: 'price_segments',
+  PRODUCT_SEGMENT_PRICES: 'product_segment_prices',
 } as const
 
 let dbInstance: IDBDatabase | null = null
@@ -227,6 +231,20 @@ export function initDB(config: DBConfig = {}): Promise<IDBDatabase> {
         if (!purchasesStore.indexNames.contains('purchase_date')) {
           purchasesStore.createIndex('purchase_date', 'purchase_date', { unique: false })
         }
+      }
+
+      if (!db.objectStoreNames.contains(STORES.PURCHASE_REORDERS)) {
+        const reordersStore = db.createObjectStore(STORES.PURCHASE_REORDERS, { keyPath: 'id' })
+        reordersStore.createIndex('company_id', 'company_id', { unique: false })
+        reordersStore.createIndex('supplier_id', 'supplier_id', { unique: false })
+        reordersStore.createIndex('status', 'status', { unique: false })
+        reordersStore.createIndex('order_date', 'order_date', { unique: false })
+      }
+
+      if (!db.objectStoreNames.contains(STORES.PURCHASE_REORDER_ITEMS)) {
+        const itemsStore = db.createObjectStore(STORES.PURCHASE_REORDER_ITEMS, { keyPath: 'id' })
+        itemsStore.createIndex('purchase_reorder_id', 'purchase_reorder_id', { unique: false })
+        itemsStore.createIndex('product_id', 'product_id', { unique: false })
       }
 
       // Handle STOCK_ADJUSTMENTS store - create if needed, or add missing indexes
@@ -456,6 +474,19 @@ export function initDB(config: DBConfig = {}): Promise<IDBDatabase> {
         if (!paymentsStore.indexNames.contains('gateway_payment_id')) {
           paymentsStore.createIndex('gateway_payment_id', 'gateway_payment_id', { unique: false })
         }
+      }
+
+      if (!db.objectStoreNames.contains(STORES.PRICE_SEGMENTS)) {
+        const segmentsStore = db.createObjectStore(STORES.PRICE_SEGMENTS, { keyPath: 'id' })
+        segmentsStore.createIndex('company_id', 'company_id', { unique: false })
+        segmentsStore.createIndex('is_default', 'is_default', { unique: false })
+      }
+
+      if (!db.objectStoreNames.contains(STORES.PRODUCT_SEGMENT_PRICES)) {
+        const pricesStore = db.createObjectStore(STORES.PRODUCT_SEGMENT_PRICES, { keyPath: 'id' })
+        pricesStore.createIndex('product_id', 'product_id', { unique: false })
+        pricesStore.createIndex('segment_id', 'segment_id', { unique: false })
+        pricesStore.createIndex('company_id', 'company_id', { unique: false })
       }
       }) // Close upgradePromise Promise
     }

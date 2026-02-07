@@ -12,6 +12,11 @@ import { getAll, getById, put, deleteById, getByIndex, STORES } from '../databas
 
 // Sales
 export const saleService = {
+  /** Fast fetch for Dashboard: Supabase only, no IndexedDB sync */
+  getAllFast: async (includeArchived: boolean = false, companyId?: number | null): Promise<Sale[]> => {
+    return await cloudSaleService.getAllFast(includeArchived, companyId)
+  },
+
   // Get all sales (from cloud, with local fallback)
   getAll: async (includeArchived: boolean = false, companyId?: number | null): Promise<Sale[]> => {
     return await cloudSaleService.getAll(includeArchived, companyId)

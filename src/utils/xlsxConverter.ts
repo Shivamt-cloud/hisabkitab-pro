@@ -277,7 +277,8 @@ function validateCustomerFormat(headers: string[]): {
     explanation = `The Excel file is missing required columns for customer data:\n\n`
     explanation += `❌ Missing: ${missingColumns.join(', ')}\n\n`
     explanation += `Required columns for Customers sheet:\n`
-    explanation += `• Customer Name (or "Name")\n\n`
+    explanation += `• Customer Name (or "Name") — required\n`
+    explanation += `• Phone, Email, GSTIN, Address, etc. — optional\n\n`
     explanation += `💡 Tip: Download the sample Excel template to see the correct format.`
   }
 
@@ -762,7 +763,8 @@ export async function convertXLSXToJSON(file: File): Promise<ConversionResult> {
       }
     }
 
-    // If no purchases sheet found, validate first sheet as purchases
+    // If no purchases sheet found, validate first sheet as purchases only when the first sheet
+    // is not already a known type (Customers, Products, Suppliers, Categories) to avoid wrong warnings
     let hasPurchaseSheet = false
     for (const sheetName of workbook.SheetNames) {
       if (sheetName.toLowerCase().includes('purchase') || sheetName.toLowerCase().includes('bill')) {
@@ -771,7 +773,15 @@ export async function convertXLSXToJSON(file: File): Promise<ConversionResult> {
       }
     }
 
-    if (!hasPurchaseSheet && workbook.SheetNames.length > 0) {
+    const firstSheetNameLower = workbook.SheetNames.length > 0 ? workbook.SheetNames[0].toLowerCase() : ''
+    const firstSheetIsOtherType =
+      firstSheetNameLower.includes('customer') ||
+      firstSheetNameLower.includes('product') ||
+      firstSheetNameLower.includes('supplier') ||
+      firstSheetNameLower.includes('vendor') ||
+      firstSheetNameLower.includes('categor')
+
+    if (!hasPurchaseSheet && workbook.SheetNames.length > 0 && !firstSheetIsOtherType) {
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
       const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' }) as any[][]
       if (jsonData.length >= 2) {
@@ -835,8 +845,8 @@ export async function convertXLSXToJSON(file: File): Promise<ConversionResult> {
       }
     }
 
-    // If no purchases sheet found, try first sheet as purchases (backward compatibility)
-    if (purchases.length === 0 && workbook.SheetNames.length > 0) {
+    // If no purchases sheet found, try first sheet as purchases only when it is not already Customers/Products/Suppliers/Categories (backward compatibility)
+    if (purchases.length === 0 && workbook.SheetNames.length > 0 && !firstSheetIsOtherType) {
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
       const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' }) as any[][]
       if (jsonData.length >= 2) {

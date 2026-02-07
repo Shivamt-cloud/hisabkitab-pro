@@ -37,6 +37,11 @@ export const supplierService = {
 
 // Purchases
 export const purchaseService = {
+  /** Fast fetch for Dashboard: Supabase only, no IndexedDB merge/sync */
+  getAllFast: async (type?: PurchaseType, companyId?: number | null): Promise<Purchase[]> => {
+    return await cloudPurchaseService.getAllFast(type, companyId)
+  },
+
   // Get all purchases (from cloud, with local fallback)
   getAll: async (type?: PurchaseType, companyId?: number | null): Promise<Purchase[]> => {
     return await cloudPurchaseService.getAll(type, companyId)

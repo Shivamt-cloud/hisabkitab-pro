@@ -55,11 +55,10 @@ export const cloudCustomerService = {
         return customers.sort((a, b) => new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime())
       }
 
-      // Sync to local storage for offline access
-      if (data) {
-        for (const customer of data) {
-          await put(STORES.CUSTOMERS, customer as Customer)
-        }
+      if (data && data.length > 0) {
+        void Promise.all((data as Customer[]).map((c) => put(STORES.CUSTOMERS, c))).catch((e) =>
+          console.warn('[cloudCustomerService] Background sync failed:', e)
+        )
       }
 
       return (data as Customer[]) || []
@@ -212,6 +211,7 @@ export const cloudCustomerService = {
           outstanding_amount: updated.outstanding_amount || 0,
           credit_balance: updated.credit_balance || 0,
           company_id: updated.company_id || null,
+          price_segment_id: updated.price_segment_id ?? null,
           updated_at: updated.updated_at,
         }
 

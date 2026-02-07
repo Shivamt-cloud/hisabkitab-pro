@@ -1,17 +1,41 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { usePlanUpgrade } from '../context/PlanUpgradeContext'
 import { useToast } from '../context/ToastContext'
 import { useNavigate } from 'react-router-dom'
 import { purchaseService } from '../services/purchaseService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Purchase, PurchaseType } from '../types/purchase'
-import { Plus, Eye, Edit, Filter, FileText, TrendingUp, Home, FileSpreadsheet, Search, X, Trash2, AlertCircle, CalendarClock } from 'lucide-react'
+import { Plus, Eye, Edit, Filter, FileText, TrendingUp, Home, FileSpreadsheet, Search, X, Trash2, AlertCircle, CalendarClock, Package, Columns3, Lock } from 'lucide-react'
 import { exportToExcel as exportExcel } from '../utils/exportUtils'
 
 type TimePeriod = 'all' | 'today' | 'yesterday' | 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom'
 
+const COLUMN_KEYS = [
+  { key: 'date', label: 'Date' },
+  { key: 'purchase_id', label: 'Purchase #' },
+  { key: 'type', label: 'Type' },
+  { key: 'invoice', label: 'Invoice' },
+  { key: 'supplier', label: 'Supplier' },
+  { key: 'product_name', label: 'Product' },
+  { key: 'article', label: 'Article' },
+  { key: 'barcode', label: 'Barcode' },
+  { key: 'qty', label: 'Qty' },
+  { key: 'remaining', label: 'Remaining' },
+  { key: 'purchase_price', label: 'Purchase Price' },
+  { key: 'sale_price', label: 'Sale Price' },
+  { key: 'mrp', label: 'MRP' },
+  { key: 'item_total', label: 'Item Total' },
+  { key: 'tax', label: 'Tax' },
+  { key: 'status', label: 'Status' },
+  { key: 'last_modified', label: 'Last Modified' },
+] as const
+const DEFAULT_VISIBLE_COLUMNS = ['date', 'purchase_id', 'invoice', 'supplier', 'product_name', 'article', 'qty', 'remaining', 'purchase_price', 'sale_price', 'mrp', 'item_total', 'status']
+const COLUMNS_STORAGE_KEY = 'purchaseHistory_visibleColumns'
+
 const PurchaseHistory = () => {
-  const { hasPermission, getCurrentCompanyId } = useAuth()
+  const { hasPermission, hasPlanFeature, getCurrentCompanyId } = useAuth()
+  const { showPlanUpgrade } = usePlanUpgrade()
   const { toast } = useToast()
   const navigate = useNavigate()
   const [purchases, setPurchases] = useState<Purchase[]>([])
@@ -30,6 +54,17 @@ const PurchaseHistory = () => {
   const [selectedPurchaseIds, setSelectedPurchaseIds] = useState<Set<number>>(new Set())
   const [isDeleting, setIsDeleting] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showColumnSettings, setShowColumnSettings] = useState(false)
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem(COLUMNS_STORAGE_KEY)
+      if (stored) {
+        const parsed = JSON.parse(stored) as string[]
+        return new Set(parsed)
+      }
+    } catch (_) {}
+    return new Set(DEFAULT_VISIBLE_COLUMNS)
+  })
   
   // Debounce search query to avoid excessive filtering
   useEffect(() => {
@@ -85,6 +120,17 @@ const PurchaseHistory = () => {
   useEffect(() => {
     setSelectedPurchaseIds(new Set())
   }, [purchases.length])
+
+  const toggleColumnVisibility = (key: string) => {
+    setVisibleColumns(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify([...next]))
+      return next
+    })
+  }
+  const isColumnVisible = (key: string) => visibleColumns.has(key)
 
   // Debug: Log when modal state changes
   useEffect(() => {
@@ -290,6 +336,43 @@ const PurchaseHistory = () => {
     return Math.max(0, quantity - soldQty)
   }
 
+  // Supplier display: highlight unknown supplier
+  const getSupplierDisplayName = (purchase: Purchase): string => {
+    const name = (purchase as any).supplier_name
+    return name && String(name).trim() !== '' ? String(name).trim() : 'Unknown supplier'
+  }
+  const isUnknownSupplier = (purchase: Purchase): boolean => {
+    const name = (purchase as any).supplier_name
+    return !name || String(name).trim() === '' || name === 'N/A'
+  }
+
+  // Same product from other suppliers: for each product name, which other suppliers have it (so we can show "Also from: X" per item)
+  const productNameToOtherSuppliersMap = useMemo(() => {
+    const productToSuppliers = new Map<string, Map<string, Set<number>>>() // productName -> supplierName -> purchaseIds
+    allPurchases.forEach(purchase => {
+      const supplierName = getSupplierDisplayName(purchase)
+      ;(purchase.items || []).forEach(item => {
+        const pn = item.product_name?.trim()
+        if (!pn) return
+        if (!productToSuppliers.has(pn)) {
+          productToSuppliers.set(pn, new Map())
+        }
+        const supplierMap = productToSuppliers.get(pn)!
+        if (!supplierMap.has(supplierName)) supplierMap.set(supplierName, new Set())
+        supplierMap.get(supplierName)!.add(purchase.id)
+      })
+    })
+    return productToSuppliers
+  }, [allPurchases])
+
+  const getOtherSuppliersForProduct = (productName: string | undefined, currentSupplierName: string): string[] => {
+    if (!productName?.trim()) return []
+    const supplierMap = productNameToOtherSuppliersMap.get(productName.trim())
+    if (!supplierMap) return []
+    const others = [...supplierMap.keys()].filter(s => s !== currentSupplierName)
+    return others
+  }
+
   // Memoize filtered purchases to avoid recalculating on every render
   const filteredPurchases = useMemo(() => {
     let filtered = [...allPurchases]
@@ -320,7 +403,7 @@ const PurchaseHistory = () => {
     // Apply supplier filter
     if (selectedSupplier !== 'all') {
       filtered = filtered.filter(purchase => 
-        (purchase as any).supplier_name === selectedSupplier
+        getSupplierDisplayName(purchase) === selectedSupplier
       )
     }
     
@@ -451,11 +534,9 @@ const PurchaseHistory = () => {
     return () => clearInterval(interval)
   }, [])
 
-  // Get unique suppliers for filter dropdown
+  // Get unique suppliers for filter dropdown (include "Unknown supplier" when present)
   const getUniqueSuppliers = (): string[] => {
-    const suppliers = allPurchases
-      .map(p => (p as any).supplier_name)
-      .filter((name): name is string => !!name && name !== 'N/A')
+    const suppliers = allPurchases.map(p => getSupplierDisplayName(p))
     return [...new Set(suppliers)].sort()
   }
 
@@ -651,6 +732,14 @@ const PurchaseHistory = () => {
                     >
                       <Plus className="w-5 h-5" />
                       GST Purchase
+                    </button>
+                    <button
+                      onClick={() => hasPlanFeature('purchase_reorder') ? navigate('/purchases/reorders') : showPlanUpgrade('purchase_reorder')}
+                      className="bg-gradient-to-r from-violet-600 to-purple-600 text-white font-semibold py-2.5 px-4 rounded-xl hover:shadow-lg transition-all flex items-center gap-2"
+                    >
+                      {!hasPlanFeature('purchase_reorder') && <Lock className="w-5 h-5" />}
+                      <Package className="w-5 h-5" />
+                      Reorders
                     </button>
                   </>
                 )}
@@ -1077,8 +1166,69 @@ const PurchaseHistory = () => {
             )}
           </div>
 
-          {/* Results Count and Bulk Actions */}
+          {/* Column visibility + Results Count and Bulk Actions */}
           <div className="mb-4 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setShowColumnSettings(true)}
+                className="inline-flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 transition-colors"
+                title="Choose which columns to show"
+              >
+                <Columns3 className="w-4 h-4" />
+                Columns
+              </button>
+              {showColumnSettings && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowColumnSettings(false)}>
+                  <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                    <h3 className="text-lg font-bold text-gray-900 mb-2">Show / Hide Columns</h3>
+                    <p className="text-sm text-gray-500 mb-4">Select which columns to display in the purchase history grid.</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {COLUMN_KEYS.map(({ key, label }) => (
+                        <label key={key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                          <input
+                            type="checkbox"
+                            checked={visibleColumns.has(key)}
+                            onChange={() => toggleColumnVisibility(key)}
+                            className="w-4 h-4 text-blue-600 rounded border-gray-300"
+                          />
+                          <span className="text-sm text-gray-800">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="mt-4 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVisibleColumns(new Set(COLUMN_KEYS.map(c => c.key)))
+                          localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(COLUMN_KEYS.map(c => c.key)))
+                        }}
+                        className="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 rounded-lg"
+                      >
+                        Select All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVisibleColumns(new Set(DEFAULT_VISIBLE_COLUMNS))
+                          localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(DEFAULT_VISIBLE_COLUMNS))
+                        }}
+                        className="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 rounded-lg"
+                      >
+                        Reset
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowColumnSettings(false)}
+                        className="ml-auto px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
             {(searchQuery || selectedSupplier !== 'all' || selectedProduct !== 'all' || filterType !== 'all' || timePeriod !== 'all') && (
               <div className="px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-sm text-blue-900">
@@ -1171,820 +1321,377 @@ const PurchaseHistory = () => {
                   <div>
                     {Object.entries(groupedPurchases).map(([supplierName, supplierPurchases]) => (
                     <div key={supplierName} className="mb-8">
-                      {/* Supplier Header */}
-                      <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-4 rounded-t-lg">
+                      {/* Supplier Header - highlight when unknown supplier */}
+                      <div className={`px-6 py-4 rounded-t-lg ${supplierName === 'Unknown Supplier' || supplierName === 'Unknown supplier'
+                        ? 'bg-amber-500 text-amber-950 border-2 border-amber-600'
+                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white'
+                      }`}>
                         <div className="flex items-center justify-between">
                           <div>
-                            <h3 className="text-lg font-bold">{supplierName}</h3>
-                            <p className="text-sm text-blue-100">
-                              {supplierPurchases.length} purchase{supplierPurchases.length !== 1 ? 's' : ''} • 
-                              Total: ₹{supplierPurchases.reduce((sum, p) => 
+                            <h3 className="text-lg font-bold flex items-center gap-2">
+                              {supplierName}
+                              {(supplierName === 'Unknown Supplier' || supplierName === 'Unknown supplier') && (
+                                <span className="text-xs font-medium px-2 py-0.5 rounded bg-amber-200/80 text-amber-900">No supplier set</span>
+                              )}
+                            </h3>
+                            <p className={`text-sm ${supplierName === 'Unknown Supplier' || supplierName === 'Unknown supplier' ? 'text-amber-900/80' : 'text-blue-100'}`}>
+                              {supplierPurchases.length} purchase{supplierPurchases.length !== 1 ? 's' : ''} •
+                              Total: ₹{supplierPurchases.reduce((sum, p) =>
                                 sum + (p.type === 'gst' ? (p as any).grand_total : (p as any).total_amount), 0
                               ).toFixed(2)}
                             </p>
                           </div>
-                          <div className="text-sm text-blue-100">
+                          <div className={`text-sm ${supplierName === 'Unknown Supplier' || supplierName === 'Unknown supplier' ? 'text-amber-900/80' : 'text-blue-100'}`}>
                             Latest: {new Date(supplierPurchases[0]?.purchase_date).toLocaleDateString('en-IN')}
                           </div>
                         </div>
                       </div>
                       
-                      <table className="w-full min-w-[800px]">
-                        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+                      <div className="overflow-x-auto overflow-y-auto max-h-[55vh] border border-t-0 border-gray-200 rounded-b-lg" style={{ scrollbarGutter: 'stable' }}>
+                      <table className="w-full min-w-[900px]">
+                        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 sticky top-0 z-10">
                           <tr>
                             {hasPermission('purchases:delete') && (
-                              <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-10 sm:w-12">
-                                <input
-                                  type="checkbox"
-                                  checked={supplierPurchases.length > 0 && supplierPurchases.every(p => selectedPurchaseIds.has(p.id))}
-                                  onChange={(e) => {
-                                    supplierPurchases.forEach(p => handleSelectPurchase(p.id, e.target.checked))
-                                  }}
-                                  className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
-                                  title="Select All in Group"
-                                />
-                              </th>
+                              <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-10">Select</th>
                             )}
-                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date</th>
-                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden sm:table-cell">Purchase #</th>
-                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden sm:table-cell">Type</th>
-                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Invoice</th>
-                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden md:table-cell">Products</th>
-                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Items</th>
-                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Available Qty</th>
-                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden xl:table-cell">Articles</th>
-                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden xl:table-cell">Barcodes</th>
-                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Amount</th>
-                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden md:table-cell">Status</th>
-                            <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Last Modified</th>
-                            <th className="px-2 sm:px-4 md:px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
+                            {isColumnVisible('date') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date</th>}
+                            {isColumnVisible('purchase_id') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Purchase #</th>}
+                            {isColumnVisible('type') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Type</th>}
+                            {isColumnVisible('invoice') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Invoice</th>}
+                            {isColumnVisible('product_name') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Product</th>}
+                            {isColumnVisible('article') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Article</th>}
+                            {isColumnVisible('barcode') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Barcode</th>}
+                            {isColumnVisible('qty') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Qty</th>}
+                            {isColumnVisible('remaining') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Remaining</th>}
+                            {isColumnVisible('purchase_price') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Purchase</th>}
+                            {isColumnVisible('sale_price') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Sale</th>}
+                            {isColumnVisible('mrp') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">MRP</th>}
+                            {isColumnVisible('item_total') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Item Total</th>}
+                            {isColumnVisible('tax') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Tax</th>}
+                            {isColumnVisible('status') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Status</th>}
+                            {isColumnVisible('last_modified') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Last Modified</th>}
+                            <th className="px-2 sm:px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200 bg-white">
-                          {supplierPurchases.map((purchase) => (
-                            <tr key={purchase.id} className={`hover:bg-gray-50 transition-colors ${selectedPurchaseIds.has(purchase.id) ? 'bg-blue-50' : ''}`}>
+                          {supplierPurchases.flatMap((purchase) =>
+                            (purchase.items || []).map((item, itemIdx) => (
+                            <tr key={`${purchase.id}-${itemIdx}`} className={`hover:bg-gray-50 transition-colors ${selectedPurchaseIds.has(purchase.id) ? 'bg-blue-50' : ''}`}>
                               {hasPermission('purchases:delete') && (
-                                <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedPurchaseIds.has(purchase.id)}
-                                    onChange={(e) => handleSelectPurchase(purchase.id, e.target.checked)}
-                                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
-                                    onClick={(e) => e.stopPropagation()}
-                                  />
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
+                                  {itemIdx === 0 ? (
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedPurchaseIds.has(purchase.id)}
+                                      onChange={(e) => handleSelectPurchase(purchase.id, e.target.checked)}
+                                      className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  ) : null}
                                 </td>
                               )}
-                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
-                                <div className="text-xs sm:text-sm text-gray-900">
-                                  {new Date(purchase.purchase_date).toLocaleDateString('en-IN', {
-                                    day: '2-digit',
-                                    month: 'short',
-                                    year: 'numeric'
-                                  })}
-                                </div>
-                              </td>
-                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden sm:table-cell">
-                                <span className="text-xs sm:text-sm font-semibold text-gray-700">#{purchase.id}</span>
-                              </td>
-                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden sm:table-cell">
-                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                                  purchase.type === 'gst'
-                                    ? 'bg-indigo-100 text-indigo-700'
-                                    : 'bg-green-100 text-green-700'
-                                }`}>
-                                  {purchase.type === 'gst' ? 'GST' : 'Simple'}
-                                </span>
-                              </td>
-                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
-                                <div className="text-xs sm:text-sm font-medium text-gray-900">
-                                  {purchase.type === 'gst' 
-                                    ? (purchase as any).invoice_number 
-                                    : (purchase as any).invoice_number || 'N/A'}
-                                </div>
-                                <div className="sm:hidden mt-1">
-                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                                    purchase.type === 'gst'
-                                      ? 'bg-indigo-100 text-indigo-700'
-                                      : 'bg-green-100 text-green-700'
-                                  }`}>
-                                    {purchase.type === 'gst' ? 'GST' : 'Simple'}
-                                  </span>
-                                </div>
-                              </td>
-                              <td className="px-2 sm:px-4 md:px-6 py-3 hidden md:table-cell">
-                                <div className="text-xs sm:text-sm text-gray-900">
-                                  {(() => {
-                                    const productNames = purchase.items
-                                      .map(item => item.product_name)
-                                      .filter((name): name is string => !!name && name.trim() !== '')
-                                    const uniqueProducts = [...new Set(productNames)]
-                                    
-                                    if (uniqueProducts.length === 0) {
-                                      return <span className="text-gray-400 italic text-xs">No products</span>
-                                    }
-                                    
-                                    if (uniqueProducts.length <= 2) {
-                                      return (
-                                        <div className="space-y-1">
-                                          {uniqueProducts.map((product, idx) => (
-                                            <div key={idx} className="text-xs bg-purple-50 px-2 py-1 rounded border border-purple-200 text-purple-900 font-medium">
-                                              {product}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )
-                                    }
-                                    
-                                    return (
-                                      <div className="space-y-1">
-                                        {uniqueProducts.slice(0, 2).map((product, idx) => (
-                                          <div key={idx} className="text-xs bg-purple-50 px-2 py-1 rounded border border-purple-200 text-purple-900 font-medium">
-                                            {product}
-                                          </div>
-                                        ))}
-                                        <div className="text-xs text-gray-500 font-medium">
-                                          +{uniqueProducts.length - 2} more
-                                        </div>
-                                      </div>
-                                    )
-                                  })()}
-                                </div>
-                              </td>
-                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden lg:table-cell">
-                                <div className="text-xs sm:text-sm text-gray-900">
-                                  {purchase.items.length} item{purchase.items.length !== 1 ? 's' : ''}
-                                </div>
-                              </td>
-                              <td className="px-2 sm:px-4 md:px-6 py-3">
-                                <div className="text-sm text-gray-900">
-                                  {(() => {
-                                    const totalQuantity = purchase.items.reduce((sum, item) => sum + item.quantity, 0)
-                                    const totalSoldQuantity = purchase.items.reduce((sum, item) => sum + getSoldQuantity(item), 0)
-                                    const totalAvailable = totalQuantity - totalSoldQuantity
-                                    
-                                    return (
-                                      <div className="flex flex-col gap-2">
-                                        <div className="flex flex-col gap-1">
-                                          <span className={`font-semibold text-base ${
-                                            totalAvailable === 0 
-                                              ? 'text-red-600' 
-                                              : totalAvailable < totalQuantity * 0.2 
-                                              ? 'text-orange-600' 
-                                              : 'text-green-600'
-                                          }`}>
-                                            Remaining: {totalAvailable} / {totalQuantity}
-                                          </span>
-                                          <span className="text-xs text-gray-500">
-                                            {totalSoldQuantity > 0 ? `${totalSoldQuantity} sold` : 'All available'}
-                                          </span>
-                                        </div>
-                                        {/* Show per-item breakdown */}
-                                        {purchase.items.length > 0 && (
-                                          <div className="mt-2 pt-2 border-t border-gray-200">
-                                            <div className="text-xs font-semibold text-gray-600 mb-1">Per Item:</div>
-                                            <div className="space-y-1 max-h-32 overflow-y-auto">
-                                              {purchase.items.map((item, idx) => {
-                                                const remaining = getRemainingQuantity(item)
-                                                const sold = getSoldQuantity(item)
-                                                const total = item.quantity || 0
-                                                return (
-                                                  <div key={idx} className="text-xs bg-gray-50 px-2 py-1 rounded border border-gray-200">
-                                                    <div className="flex justify-between items-center">
-                                                      <span className="font-medium text-gray-700">
-                                                        {item.product_name || `Item ${idx + 1}`}
-                                                      </span>
-                                                      <span className={`font-semibold ${
-                                                        remaining === 0 ? 'text-red-600' : 
-                                                        remaining < total * 0.2 ? 'text-orange-600' : 
-                                                        'text-green-600'
-                                                      }`}>
-                                                        {remaining}/{total}
-                                                      </span>
-                                                    </div>
-                                                    {item.article && (
-                                                      <div className="text-xs text-gray-500 mt-0.5">
-                                                        Article: {item.article}
-                                                      </div>
-                                                    )}
-                                                    {sold > 0 && (
-                                                      <div className="text-xs text-gray-500">
-                                                        Sold: {sold}
-                                                      </div>
-                                                    )}
-                                                  </div>
-                                                )
-                                              })}
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    )
-                                  })()}
-                                </div>
-                              </td>
-                              <td className="px-2 sm:px-4 md:px-6 py-3 hidden xl:table-cell">
-                                <div className="text-xs sm:text-sm text-gray-900">
-                                  {(() => {
-                                    const articles = purchase.items
-                                      .map(item => item.article)
-                                      .filter((article): article is string => !!article && article.trim() !== '')
-                                    const uniqueArticles = [...new Set(articles)]
-                                    
-                                    if (uniqueArticles.length === 0) {
-                                      return <span className="text-gray-400 italic text-xs">No articles</span>
-                                    }
-                                    
-                                    if (uniqueArticles.length <= 3) {
-                                      return (
-                                        <div className="space-y-1">
-                                          {uniqueArticles.map((article, idx) => (
-                                            <div key={idx} className="text-xs bg-blue-50 px-2 py-1 rounded border border-blue-200 text-blue-900">
-                                              {article}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )
-                                    }
-                                    
-                                    return (
-                                      <div className="space-y-1">
-                                        {uniqueArticles.slice(0, 2).map((article, idx) => (
-                                          <div key={idx} className="text-xs bg-blue-50 px-2 py-1 rounded border border-blue-200 text-blue-900">
-                                            {article}
-                                          </div>
-                                        ))}
-                                        <div className="text-xs text-gray-500 font-medium">
-                                          +{uniqueArticles.length - 2} more
-                                        </div>
-                                      </div>
-                                    )
-                                  })()}
-                                </div>
-                              </td>
-                              <td className="px-2 sm:px-4 md:px-6 py-3 hidden xl:table-cell">
-                                <div className="text-xs sm:text-sm text-gray-900">
-                                  {(() => {
-                                    const barcodes = purchase.items
-                                      .map(item => item.barcode)
-                                      .filter((barcode): barcode is string => !!barcode)
-                                    const uniqueBarcodes = [...new Set(barcodes)]
-                                    
-                                    if (uniqueBarcodes.length === 0) {
-                                      return <span className="text-gray-400 italic text-xs">No barcodes</span>
-                                    }
-                                    
-                                    if (uniqueBarcodes.length <= 3) {
-                                      return (
-                                        <div className="space-y-1">
-                                          {uniqueBarcodes.map((barcode, idx) => (
-                                            <div key={idx} className="font-mono text-xs bg-gray-50 px-2 py-1 rounded border border-gray-200">
-                                              {barcode}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )
-                                    }
-                                    
-                                    return (
-                                      <div className="space-y-1">
-                                        {uniqueBarcodes.slice(0, 2).map((barcode, idx) => (
-                                          <div key={idx} className="font-mono text-xs bg-gray-50 px-2 py-1 rounded border border-gray-200">
-                                            {barcode}
-                                          </div>
-                                        ))}
-                                        <div className="text-xs text-gray-500 font-medium">
-                                          +{uniqueBarcodes.length - 2} more
-                                        </div>
-                                      </div>
-                                    )
-                                  })()}
-                                </div>
-                              </td>
-                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
-                                <div className="text-xs sm:text-sm font-bold text-gray-900">
-                                  ₹{purchase.type === 'gst' 
-                                    ? (purchase as any).grand_total.toFixed(2)
-                                    : (purchase as any).total_amount.toFixed(2)}
-                                </div>
-                                {purchase.type === 'gst' && (purchase as any).total_tax > 0 && (
-                                  <div className="text-xs text-gray-500">
-                                    Tax: ₹{(purchase as any).total_tax.toFixed(2)}
-                                  </div>
-                                )}
-                              </td>
-                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden md:table-cell">
-                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                                  purchase.payment_status === 'paid'
-                                    ? 'bg-green-100 text-green-700'
-                                    : purchase.payment_status === 'pending'
-                                    ? 'bg-yellow-100 text-yellow-700'
-                                    : 'bg-orange-100 text-orange-700'
-                                }`}>
-                                  {purchase.payment_status.charAt(0).toUpperCase() + purchase.payment_status.slice(1)}
-                                </span>
-                              </td>
-                              <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden lg:table-cell">
-                                <div className="text-xs sm:text-sm text-gray-900">
-                                  {(purchase as any).updated_at 
-                                    ? new Date((purchase as any).updated_at).toLocaleDateString('en-IN', {
-                                        day: '2-digit',
-                                        month: 'short',
-                                        year: 'numeric'
-                                      })
-                                    : purchase.created_at 
-                                    ? new Date(purchase.created_at).toLocaleDateString('en-IN', {
-                                        day: '2-digit',
-                                        month: 'short',
-                                        year: 'numeric'
-                                      })
-                                    : 'N/A'}
-                                </div>
-                                <div className="text-xs text-gray-500">
-                                  {(purchase as any).updated_at 
-                                    ? new Date((purchase as any).updated_at).toLocaleTimeString('en-IN', {
-                                        hour: '2-digit',
-                                        minute: '2-digit',
-                                        hour12: true
-                                      })
-                                    : purchase.created_at
-                                    ? new Date(purchase.created_at).toLocaleTimeString('en-IN', {
-                                        hour: '2-digit',
-                                        minute: '2-digit',
-                                        hour12: true
-                                      })
-                                    : ''}
-                                </div>
-                              </td>
-                              <td className="px-2 sm:px-4 md:px-6 py-3 text-right whitespace-nowrap">
-                                <div className="flex items-center justify-end gap-2">
-                                  {hasPermission('purchases:update') && (
-                                    <button
-                                      onClick={() => navigate(
-                                        purchase.type === 'gst' 
-                                          ? `/purchases/${purchase.id}/edit-gst`
-                                          : `/purchases/${purchase.id}/edit-simple`
-                                      )}
-                                      className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                                      title="Edit Purchase"
-                                    >
-                                      <Edit className="w-4 h-4" />
-                                    </button>
+                              {isColumnVisible('date') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm text-gray-900">
+                                  {itemIdx === 0 ? new Date(purchase.purchase_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : null}
+                                </td>
+                              )}
+                              {isColumnVisible('purchase_id') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-semibold text-gray-700">
+                                  {itemIdx === 0 ? `#${purchase.id}` : null}
+                                </td>
+                              )}
+                              {isColumnVisible('type') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
+                                  {itemIdx === 0 ? (
+                                    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${purchase.type === 'gst' ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-700'}`}>
+                                      {purchase.type === 'gst' ? 'GST' : 'Simple'}
+                                    </span>
+                                  ) : null}
+                                </td>
+                              )}
+                              {isColumnVisible('invoice') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                                  {itemIdx === 0 ? ((purchase as any).invoice_number || 'N/A') : null}
+                                </td>
+                              )}
+                              {isColumnVisible('product_name') && (
+                                <td className="px-2 sm:px-4 py-2 text-sm font-medium text-gray-900">
+                                  {item.product_name || `Item ${itemIdx + 1}`}
+                                  {getOtherSuppliersForProduct(item.product_name, getSupplierDisplayName(purchase)).length > 0 && (
+                                    <div className="text-xs text-indigo-600 mt-0.5">Also from: {getOtherSuppliersForProduct(item.product_name, getSupplierDisplayName(purchase)).join(', ')}</div>
                                   )}
-                                  {hasPermission('purchases:delete') && (
-                                    <button
-                                      onClick={async (e) => {
+                                </td>
+                              )}
+                              {isColumnVisible('article') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm text-gray-600">{item.article || '—'}</td>
+                              )}
+                              {isColumnVisible('barcode') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap font-mono text-sm text-gray-600">{item.barcode || '—'}</td>
+                              )}
+                              {isColumnVisible('qty') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-medium">{item.quantity ?? 0}</td>
+                              )}
+                              {isColumnVisible('remaining') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
+                                  <span className={`font-semibold ${getRemainingQuantity(item) === 0 ? 'text-red-600' : getRemainingQuantity(item) < (item.quantity || 0) * 0.2 ? 'text-orange-600' : 'text-green-600'}`}>
+                                    {getRemainingQuantity(item)}/{(item.quantity ?? 0)}
+                                  </span>
+                                </td>
+                              )}
+                              {isColumnVisible('purchase_price') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap"><span className="inline-flex px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-xs font-medium">₹{(item.unit_price ?? 0).toFixed(2)}</span></td>
+                              )}
+                              {isColumnVisible('sale_price') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap"><span className="inline-flex px-1.5 py-0.5 rounded bg-green-100 text-green-800 text-xs font-medium">₹{(item.sale_price ?? 0).toFixed(2)}</span></td>
+                              )}
+                              {isColumnVisible('mrp') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap"><span className="inline-flex px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 text-xs font-medium">₹{(item.mrp ?? 0).toFixed(2)}</span></td>
+                              )}
+                              {isColumnVisible('item_total') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-semibold">₹{(item.total ?? 0).toFixed(2)}</td>
+                              )}
+                              {isColumnVisible('tax') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm text-gray-600">{(item.tax_amount != null && item.tax_amount > 0) ? `₹${(item.tax_amount ?? 0).toFixed(2)}` : '—'}</td>
+                              )}
+                              {isColumnVisible('status') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
+                                  {itemIdx === 0 ? (
+                                    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                                      purchase.payment_status === 'paid' ? 'bg-green-100 text-green-700' :
+                                      purchase.payment_status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-orange-100 text-orange-700'
+                                    }`}>
+                                      {purchase.payment_status.charAt(0).toUpperCase() + purchase.payment_status.slice(1)}
+                                    </span>
+                                  ) : null}
+                                </td>
+                              )}
+                              {isColumnVisible('last_modified') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-xs text-gray-600">
+                                  {itemIdx === 0 ? ((purchase as any).updated_at ? new Date((purchase as any).updated_at).toLocaleString('en-IN') : purchase.created_at ? new Date(purchase.created_at).toLocaleString('en-IN') : '—') : null}
+                                </td>
+                              )}
+                              <td className="px-2 sm:px-4 py-2 text-right whitespace-nowrap">
+                                {itemIdx === 0 ? (
+                                  <div className="flex items-center justify-end gap-1">
+                                    {hasPermission('purchases:update') && (
+                                      <button onClick={() => navigate(purchase.type === 'gst' ? `/purchases/${purchase.id}/edit-gst` : `/purchases/${purchase.id}/edit-simple`)} className="p-1.5 text-green-600 hover:bg-green-50 rounded" title="Edit"><Edit className="w-4 h-4" /></button>
+                                    )}
+                                    {hasPermission('purchases:delete') && (
+                                      <button onClick={async (e) => {
                                         e.stopPropagation()
-                                        const confirmed = window.confirm(
-                                          `Are you sure you want to delete this purchase?\n\nInvoice: ${(purchase as any).invoice_number || purchase.id}\nDate: ${new Date(purchase.purchase_date).toLocaleDateString()}\n\nThis action cannot be undone!`
-                                        )
-                                        if (confirmed) {
+                                        if (window.confirm('Delete this purchase?')) {
                                           try {
                                             await purchaseService.delete(purchase.id)
-                                            alert('Purchase deleted successfully!')
+                                            toast.success('Purchase deleted')
                                             await loadPurchases()
-                                            if (selectedPurchaseIds.has(purchase.id)) {
-                                              const newSelected = new Set(selectedPurchaseIds)
-                                              newSelected.delete(purchase.id)
-                                              setSelectedPurchaseIds(newSelected)
-                                            }
-                                          } catch (error) {
-                                            console.error('Error deleting purchase:', error)
-                                            alert('Error deleting purchase: ' + (error instanceof Error ? error.message : 'Unknown error'))
+                                          } catch (err) {
+                                            toast.error('Failed to delete')
                                           }
                                         }
-                                      }}
-                                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                      title="Delete Purchase"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  )}
-                                  <button
-                                    onClick={() =>
-                                      navigate(
-                                        purchase.type === 'gst'
-                                          ? `/purchases/${purchase.id}/edit-gst`
-                                          : `/purchases/${purchase.id}/edit-simple`
-                                      )
-                                    }
-                                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                    title="View Details"
-                                  >
-                                    <Eye className="w-4 h-4" />
-                                  </button>
-                                </div>
+                                      }} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                                    )}
+                                    <button onClick={() => navigate(purchase.type === 'gst' ? `/purchases/${purchase.id}/edit-gst` : `/purchases/${purchase.id}/edit-simple`)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="View"><Eye className="w-4 h-4" /></button>
+                                  </div>
+                                ) : null}
                               </td>
                             </tr>
-                          ))}
+                          )))}
                         </tbody>
+                        <tfoot className="bg-gray-100 border-t-2 border-gray-300">
+                          <tr>
+                            <td colSpan={
+                              (hasPermission('purchases:delete') ? 1 : 0) +
+                              COLUMN_KEYS.filter(c => visibleColumns.has(c.key)).length + 1
+                            } className="px-4 py-3">
+                              <div className="flex flex-wrap items-center justify-between gap-4 text-sm font-semibold text-gray-800">
+                                <span>{supplierPurchases.length} purchase{supplierPurchases.length !== 1 ? 's' : ''}</span>
+                                <span>
+                                  {(() => {
+                                    const totQty = supplierPurchases.reduce((s, p) => s + p.items.reduce((a, i) => a + (i.quantity ?? 0), 0), 0)
+                                    const totSold = supplierPurchases.reduce((s, p) => s + p.items.reduce((a, i) => a + getSoldQuantity(i), 0), 0)
+                                    return `Qty: ${totQty - totSold} / ${totQty}`
+                                  })()}
+                                </span>
+                                <span>
+                                  {supplierPurchases.some(p => p.type === 'gst' && (p as any).total_tax > 0) && (
+                                    <>Tax: ₹{supplierPurchases.reduce((sum, p) =>
+                                      sum + ((p.type === 'gst' && (p as any).total_tax) ? (p as any).total_tax : 0), 0
+                                    ).toFixed(2)} · </>
+                                  )}
+                                  <span className="text-indigo-700 font-bold">Total: ₹{supplierPurchases.reduce((sum, p) =>
+                                    sum + (p.type === 'gst' ? (p as any).grand_total : (p as any).total_amount), 0
+                                  ).toFixed(2)}</span>
+                                </span>
+                              </div>
+                            </td>
+                          </tr>
+                        </tfoot>
                       </table>
+                      </div>
                     </div>
                     ))}
                   </div>
                 ) : (
-                  // Regular table view (not grouped)
-                  <div>
-                    <table className="w-full min-w-[800px]">
-                    <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+                  // Regular table view (not grouped) - item-level rows
+                  <div className="overflow-x-auto overflow-y-auto max-h-[70vh]" style={{ scrollbarGutter: 'stable' }}>
+                    <table className="w-full min-w-[900px]">
+                    <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 sticky top-0 z-10">
                       <tr>
                         {hasPermission('purchases:delete') && (
-                          <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider w-10 sm:w-12">
-                            <input
-                              type="checkbox"
-                              checked={purchases.length > 0 && selectedPurchaseIds.size === purchases.length}
-                              onChange={(e) => handleSelectAll(e.target.checked)}
-                              className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
-                              title="Select All"
-                            />
-                          </th>
+                          <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-10">Select</th>
                         )}
-                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date</th>
-                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden sm:table-cell">Purchase #</th>
-                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden sm:table-cell">Type</th>
-                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Invoice</th>
-                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden md:table-cell">Supplier</th>
-                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden md:table-cell">Products</th>
-                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Items</th>
-                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Available Qty</th>
-                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden xl:table-cell">Articles</th>
-                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden xl:table-cell">Barcodes</th>
-                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Amount</th>
-                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden md:table-cell">Status</th>
-                        <th className="px-2 sm:px-4 md:px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Last Modified</th>
-                        <th className="px-2 sm:px-4 md:px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
+                        {isColumnVisible('date') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Date</th>}
+                        {isColumnVisible('purchase_id') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Purchase #</th>}
+                        {isColumnVisible('type') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Type</th>}
+                        {isColumnVisible('invoice') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Invoice</th>}
+                        {isColumnVisible('supplier') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Supplier</th>}
+                        {isColumnVisible('product_name') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Product</th>}
+                        {isColumnVisible('article') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Article</th>}
+                        {isColumnVisible('barcode') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Barcode</th>}
+                        {isColumnVisible('qty') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Qty</th>}
+                        {isColumnVisible('remaining') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Remaining</th>}
+                        {isColumnVisible('purchase_price') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Purchase</th>}
+                        {isColumnVisible('sale_price') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Sale</th>}
+                        {isColumnVisible('mrp') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">MRP</th>}
+                        {isColumnVisible('item_total') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Item Total</th>}
+                        {isColumnVisible('tax') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Tax</th>}
+                        {isColumnVisible('status') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Status</th>}
+                        {isColumnVisible('last_modified') && <th className="px-2 sm:px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Last Modified</th>}
+                        <th className="px-2 sm:px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {purchases.map((purchase) => (
-                      <tr key={purchase.id} className={`hover:bg-gray-50 transition-colors ${selectedPurchaseIds.has(purchase.id) ? 'bg-blue-50' : ''}`}>
+                      {purchases.flatMap((purchase) =>
+                        (purchase.items || []).map((item, itemIdx) => (
+                      <tr key={`${purchase.id}-${itemIdx}`} className={`hover:bg-gray-50 transition-colors ${selectedPurchaseIds.has(purchase.id) ? 'bg-blue-50' : ''}`}>
                         {hasPermission('purchases:delete') && (
-                          <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
-                            <input
-                              type="checkbox"
-                              checked={selectedPurchaseIds.has(purchase.id)}
-                              onChange={(e) => handleSelectPurchase(purchase.id, e.target.checked)}
-                              className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
-                              onClick={(e) => e.stopPropagation()}
-                            />
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
+                            {itemIdx === 0 ? (
+                              <input
+                                type="checkbox"
+                                checked={selectedPurchaseIds.has(purchase.id)}
+                                onChange={(e) => handleSelectPurchase(purchase.id, e.target.checked)}
+                                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            ) : null}
                           </td>
                         )}
-                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
-                          <div className="text-xs sm:text-sm text-gray-900">
-                            {new Date(purchase.purchase_date).toLocaleDateString('en-IN', {
-                              day: '2-digit',
-                              month: 'short',
-                              year: 'numeric'
-                            })}
-                          </div>
-                        </td>
-                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden sm:table-cell">
-                          <span className="text-xs sm:text-sm font-semibold text-gray-700">#{purchase.id}</span>
-                        </td>
-                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden sm:table-cell">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                            purchase.type === 'gst'
-                              ? 'bg-indigo-100 text-indigo-700'
-                              : 'bg-green-100 text-green-700'
-                          }`}>
-                            {purchase.type === 'gst' ? 'GST' : 'Simple'}
-                          </span>
-                        </td>
-                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
-                          <div className="text-xs sm:text-sm font-medium text-gray-900">
-                            {purchase.type === 'gst' 
-                              ? (purchase as any).invoice_number 
-                              : (purchase as any).invoice_number || 'N/A'}
-                          </div>
-                          <div className="sm:hidden mt-1">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                              purchase.type === 'gst'
-                                ? 'bg-indigo-100 text-indigo-700'
-                                : 'bg-green-100 text-green-700'
-                            }`}>
-                              {purchase.type === 'gst' ? 'GST' : 'Simple'}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-2 sm:px-4 md:px-6 py-3 hidden md:table-cell">
-                          <div className="text-xs sm:text-sm text-gray-900">
-                            {purchase.type === 'gst'
-                              ? (purchase as any).supplier_name || 'N/A'
-                              : (purchase as any).supplier_name || 'N/A'}
-                          </div>
-                          {purchase.type === 'gst' && (purchase as any).supplier_gstin && (
-                            <div className="text-xs text-gray-500">
-                              GSTIN: {(purchase as any).supplier_gstin}
+                        {isColumnVisible('date') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm text-gray-900">
+                            {itemIdx === 0 ? new Date(purchase.purchase_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : null}
+                          </td>
+                        )}
+                        {isColumnVisible('purchase_id') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-semibold text-gray-700">
+                            {itemIdx === 0 ? `#${purchase.id}` : null}
+                          </td>
+                        )}
+                        {isColumnVisible('type') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
+                            {itemIdx === 0 ? (
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${purchase.type === 'gst' ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-700'}`}>
+                                {purchase.type === 'gst' ? 'GST' : 'Simple'}
+                              </span>
+                            ) : null}
+                          </td>
+                        )}
+                        {isColumnVisible('invoice') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {itemIdx === 0 ? ((purchase as any).invoice_number || 'N/A') : null}
+                          </td>
+                        )}
+                        {isColumnVisible('supplier') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
+                            <div className={`text-sm ${isUnknownSupplier(purchase) ? 'font-semibold text-amber-800' : 'text-gray-900'}`}>
+                              {itemIdx === 0 ? getSupplierDisplayName(purchase) : null}
                             </div>
-                          )}
-                        </td>
-                        <td className="px-2 sm:px-4 md:px-6 py-3 hidden md:table-cell">
-                          <div className="text-xs sm:text-sm text-gray-900">
-                            {(() => {
-                              const productNames = purchase.items
-                                .map(item => item.product_name)
-                                .filter((name): name is string => !!name && name.trim() !== '')
-                              const uniqueProducts = [...new Set(productNames)]
-                              
-                              if (uniqueProducts.length === 0) {
-                                return <span className="text-gray-400 italic text-xs">No products</span>
-                              }
-                              
-                              if (uniqueProducts.length <= 2) {
-                                return (
-                                  <div className="space-y-1">
-                                    {uniqueProducts.map((product, idx) => (
-                                      <div key={idx} className="text-xs bg-purple-50 px-2 py-1 rounded border border-purple-200 text-purple-900 font-medium">
-                                        {product}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )
-                              }
-                              
-                              return (
-                                <div className="space-y-1">
-                                  {uniqueProducts.slice(0, 2).map((product, idx) => (
-                                    <div key={idx} className="text-xs bg-purple-50 px-2 py-1 rounded border border-purple-200 text-purple-900 font-medium">
-                                      {product}
-                                    </div>
-                                  ))}
-                                  <div className="text-xs text-gray-500 font-medium">
-                                    +{uniqueProducts.length - 2} more
-                                  </div>
-                                </div>
-                              )
-                            })()}
-                          </div>
-                        </td>
-                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden lg:table-cell">
-                          <div className="text-xs sm:text-sm text-gray-900">
-                            {purchase.items.length} item{purchase.items.length !== 1 ? 's' : ''}
-                          </div>
-                        </td>
-                        <td className="px-2 sm:px-4 md:px-6 py-3">
-                          <div className="text-xs sm:text-sm text-gray-900">
-                            {(() => {
-                              // Calculate total available quantity for all items in this purchase
-                              const totalQuantity = purchase.items.reduce((sum, item) => sum + item.quantity, 0)
-                              const totalSoldQuantity = purchase.items.reduce((sum, item) => sum + getSoldQuantity(item), 0)
-                              const totalAvailable = totalQuantity - totalSoldQuantity
-                              
-                              return (
-                                <div className="flex flex-col gap-2">
-                                  <div className="flex flex-col gap-1">
-                                    <span className={`font-semibold text-base ${
-                                      totalAvailable === 0 
-                                        ? 'text-red-600' 
-                                        : totalAvailable < totalQuantity * 0.2 
-                                        ? 'text-orange-600' 
-                                        : 'text-green-600'
-                                    }`}>
-                                      Remaining: {totalAvailable} / {totalQuantity}
-                                    </span>
-                                    <span className="text-xs text-gray-500">
-                                      {totalSoldQuantity > 0 ? `${totalSoldQuantity} sold` : 'All available'}
-                                    </span>
-                                  </div>
-                                  {/* Show per-item breakdown */}
-                                  {purchase.items.length > 0 && (
-                                    <div className="mt-2 pt-2 border-t border-gray-200">
-                                      <div className="text-xs font-semibold text-gray-600 mb-1">Per Item:</div>
-                                      <div className="space-y-1 max-h-32 overflow-y-auto">
-                                        {purchase.items.map((item, idx) => {
-                                          const remaining = getRemainingQuantity(item)
-                                          const sold = getSoldQuantity(item)
-                                          const total = item.quantity || 0
-                                          return (
-                                            <div key={idx} className="text-xs bg-gray-50 px-2 py-1 rounded border border-gray-200">
-                                              <div className="flex justify-between items-center">
-                                                <span className="font-medium text-gray-700">
-                                                  {item.product_name || `Item ${idx + 1}`}
-                                                </span>
-                                                <span className={`font-semibold ${
-                                                  remaining === 0 ? 'text-red-600' : 
-                                                  remaining < total * 0.2 ? 'text-orange-600' : 
-                                                  'text-green-600'
-                                                }`}>
-                                                  {remaining}/{total}
-                                                </span>
-                                              </div>
-                                              {item.article && (
-                                                <div className="text-xs text-gray-500 mt-0.5">
-                                                  Article: {item.article}
-                                                </div>
-                                              )}
-                                              {sold > 0 && (
-                                                <div className="text-xs text-gray-500">
-                                                  Sold: {sold}
-                                                </div>
-                                              )}
-                                            </div>
-                                          )
-                                        })}
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            })()}
-                          </div>
-                        </td>
-                        <td className="px-2 sm:px-4 md:px-6 py-3 hidden xl:table-cell">
-                          <div className="text-xs sm:text-sm text-gray-900">
-                            {(() => {
-                              const articles = purchase.items
-                                .map(item => item.article)
-                                .filter((article): article is string => !!article && article.trim() !== '')
-                              const uniqueArticles = [...new Set(articles)]
-                              
-                              if (uniqueArticles.length === 0) {
-                                return <span className="text-gray-400 italic text-xs">No articles</span>
-                              }
-                              
-                              if (uniqueArticles.length <= 3) {
-                                return (
-                                  <div className="space-y-1">
-                                    {uniqueArticles.map((article, idx) => (
-                                      <div key={idx} className="text-xs bg-blue-50 px-2 py-1 rounded border border-blue-200 text-blue-900">
-                                        {article}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )
-                              }
-                              
-                              return (
-                                <div className="space-y-1">
-                                  {uniqueArticles.slice(0, 2).map((article, idx) => (
-                                    <div key={idx} className="text-xs bg-blue-50 px-2 py-1 rounded border border-blue-200 text-blue-900">
-                                      {article}
-                                    </div>
-                                  ))}
-                                  <div className="text-xs text-gray-500 font-medium">
-                                    +{uniqueArticles.length - 2} more
-                                  </div>
-                                </div>
-                              )
-                            })()}
-                          </div>
-                        </td>
-                        <td className="px-2 sm:px-4 md:px-6 py-3 hidden xl:table-cell">
-                          <div className="text-xs sm:text-sm text-gray-900">
-                            {(() => {
-                              const barcodes = purchase.items
-                                .map(item => item.barcode)
-                                .filter((barcode): barcode is string => !!barcode)
-                              const uniqueBarcodes = [...new Set(barcodes)]
-                              
-                              if (uniqueBarcodes.length === 0) {
-                                return <span className="text-gray-400 italic text-xs">No barcodes</span>
-                              }
-                              
-                              if (uniqueBarcodes.length <= 3) {
-                                return (
-                                  <div className="space-y-1">
-                                    {uniqueBarcodes.map((barcode, idx) => (
-                                      <div key={idx} className="font-mono text-xs bg-gray-50 px-2 py-1 rounded border border-gray-200">
-                                        {barcode}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )
-                              }
-                              
-                              return (
-                                <div className="space-y-1">
-                                  {uniqueBarcodes.slice(0, 2).map((barcode, idx) => (
-                                    <div key={idx} className="font-mono text-xs bg-gray-50 px-2 py-1 rounded border border-gray-200">
-                                      {barcode}
-                                    </div>
-                                  ))}
-                                  <div className="text-xs text-gray-500 font-medium">
-                                    +{uniqueBarcodes.length - 2} more
-                                  </div>
-                                </div>
-                              )
-                            })()}
-                          </div>
-                        </td>
-                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap">
-                          <div className="text-xs sm:text-sm font-bold text-gray-900">
-                            ₹{purchase.type === 'gst' 
-                              ? (purchase as any).grand_total.toFixed(2)
-                              : (purchase as any).total_amount.toFixed(2)}
-                          </div>
-                          {purchase.type === 'gst' && (purchase as any).total_tax > 0 && (
-                            <div className="text-xs text-gray-500">
-                              Tax: ₹{(purchase as any).total_tax.toFixed(2)}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden md:table-cell">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                            purchase.payment_status === 'paid'
-                              ? 'bg-green-100 text-green-700'
-                              : purchase.payment_status === 'pending'
-                              ? 'bg-yellow-100 text-yellow-700'
-                              : 'bg-orange-100 text-orange-700'
-                          }`}>
-                            {purchase.payment_status.charAt(0).toUpperCase() + purchase.payment_status.slice(1)}
-                          </span>
-                        </td>
-                        <td className="px-2 sm:px-4 md:px-6 py-3 whitespace-nowrap hidden lg:table-cell">
-                          <div className="text-xs sm:text-sm text-gray-900">
-                            {(purchase as any).updated_at 
-                              ? new Date((purchase as any).updated_at).toLocaleDateString('en-IN', {
-                                  day: '2-digit',
-                                  month: 'short',
-                                  year: 'numeric'
-                                })
-                              : purchase.created_at 
-                              ? new Date(purchase.created_at).toLocaleDateString('en-IN', {
-                                  day: '2-digit',
-                                  month: 'short',
-                                  year: 'numeric'
-                                })
-                              : 'N/A'}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {(purchase as any).updated_at 
-                              ? new Date((purchase as any).updated_at).toLocaleTimeString('en-IN', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                  hour12: true
-                                })
-                              : purchase.created_at
-                              ? new Date(purchase.created_at).toLocaleTimeString('en-IN', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                  hour12: true
-                                })
-                              : ''}
-                          </div>
-                        </td>
-                        <td className="px-2 sm:px-4 md:px-6 py-3 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-2">
-                            {hasPermission('purchases:update') && (
-                              <button
-                                onClick={() => navigate(
-                                  purchase.type === 'gst' 
-                                    ? `/purchases/${purchase.id}/edit-gst`
-                                    : `/purchases/${purchase.id}/edit-simple`
-                                )}
-                                className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                                title="Edit Purchase"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </button>
+                          </td>
+                        )}
+                        {isColumnVisible('product_name') && (
+                          <td className="px-2 sm:px-4 py-2 text-sm font-medium text-gray-900">
+                            {item.product_name || `Item ${itemIdx + 1}`}
+                            {getOtherSuppliersForProduct(item.product_name, getSupplierDisplayName(purchase)).length > 0 && (
+                              <div className="text-xs text-indigo-600 mt-0.5">Also from: {getOtherSuppliersForProduct(item.product_name, getSupplierDisplayName(purchase)).join(', ')}</div>
                             )}
-                            {hasPermission('purchases:delete') && (
-                              <button
-                                onClick={async (e) => {
+                          </td>
+                        )}
+                        {isColumnVisible('article') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm text-gray-600">{item.article || '—'}</td>
+                        )}
+                        {isColumnVisible('barcode') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap font-mono text-sm text-gray-600">{item.barcode || '—'}</td>
+                        )}
+                        {isColumnVisible('qty') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-medium">{item.quantity ?? 0}</td>
+                        )}
+                        {isColumnVisible('remaining') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
+                            <span className={`font-semibold ${getRemainingQuantity(item) === 0 ? 'text-red-600' : getRemainingQuantity(item) < (item.quantity || 0) * 0.2 ? 'text-orange-600' : 'text-green-600'}`}>
+                              {getRemainingQuantity(item)}/{(item.quantity ?? 0)}
+                            </span>
+                          </td>
+                        )}
+                        {isColumnVisible('purchase_price') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap"><span className="inline-flex px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-xs font-medium">₹{(item.unit_price ?? 0).toFixed(2)}</span></td>
+                        )}
+                        {isColumnVisible('sale_price') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap"><span className="inline-flex px-1.5 py-0.5 rounded bg-green-100 text-green-800 text-xs font-medium">₹{(item.sale_price ?? 0).toFixed(2)}</span></td>
+                        )}
+                        {isColumnVisible('mrp') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap"><span className="inline-flex px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 text-xs font-medium">₹{(item.mrp ?? 0).toFixed(2)}</span></td>
+                        )}
+                        {isColumnVisible('item_total') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-semibold">₹{(item.total ?? 0).toFixed(2)}</td>
+                        )}
+                        {isColumnVisible('tax') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm text-gray-600">{(item.tax_amount != null && item.tax_amount > 0) ? `₹${(item.tax_amount ?? 0).toFixed(2)}` : '—'}</td>
+                        )}
+                        {isColumnVisible('status') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
+                            {itemIdx === 0 ? (
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                                purchase.payment_status === 'paid' ? 'bg-green-100 text-green-700' :
+                                purchase.payment_status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-orange-100 text-orange-700'
+                              }`}>
+                                {purchase.payment_status.charAt(0).toUpperCase() + purchase.payment_status.slice(1)}
+                              </span>
+                            ) : null}
+                          </td>
+                        )}
+                        {isColumnVisible('last_modified') && (
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-xs text-gray-600">
+                            {itemIdx === 0 ? ((purchase as any).updated_at ? new Date((purchase as any).updated_at).toLocaleString('en-IN') : purchase.created_at ? new Date(purchase.created_at).toLocaleString('en-IN') : '—') : null}
+                          </td>
+                        )}
+                        <td className="px-2 sm:px-4 py-2 text-right whitespace-nowrap">
+                          {itemIdx === 0 ? (
+                            <div className="flex items-center justify-end gap-1">
+                              {hasPermission('purchases:update') && (
+                                <button onClick={() => navigate(purchase.type === 'gst' ? `/purchases/${purchase.id}/edit-gst` : `/purchases/${purchase.id}/edit-simple`)} className="p-1.5 text-green-600 hover:bg-green-50 rounded" title="Edit"><Edit className="w-4 h-4" /></button>
+                              )}
+                              {hasPermission('purchases:delete') && (
+                                <button onClick={async (e) => {
                                   e.stopPropagation()
-                                  const confirmed = window.confirm(
-                                    `Are you sure you want to delete this purchase?\n\nInvoice: ${(purchase as any).invoice_number || purchase.id}\nDate: ${new Date(purchase.purchase_date).toLocaleDateString()}\n\nThis action cannot be undone!`
-                                  )
-                                  if (confirmed) {
+                                  if (window.confirm('Delete this purchase?')) {
                                     try {
-                                      await purchaseService.delete(purchase.id) // Now throws on error
-                                      alert('Purchase deleted successfully!')
+                                      await purchaseService.delete(purchase.id)
+                                      toast.success('Purchase deleted')
                                       await loadPurchases()
-                                      // Remove from selection if it was selected
-                                      if (selectedPurchaseIds.has(purchase.id)) {
-                                        const newSelected = new Set(selectedPurchaseIds)
-                                        newSelected.delete(purchase.id)
-                                        setSelectedPurchaseIds(newSelected)
-                                      }
-                                    } catch (error) {
-                                      console.error('Error deleting purchase:', error)
-                                      alert('Error deleting purchase: ' + (error instanceof Error ? error.message : 'Unknown error'))
+                                    } catch (err) {
+                                      toast.error('Failed to delete')
                                     }
                                   }
-                                }}
-                                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                title="Delete Purchase"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                            <button
-                              onClick={() =>
-                                navigate(
-                                  purchase.type === 'gst'
-                                    ? `/purchases/${purchase.id}/edit-gst`
-                                    : `/purchases/${purchase.id}/edit-simple`
-                                )
-                              }
-                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                              title="View Details"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                          </div>
+                                }} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                              )}
+                              <button onClick={() => navigate(purchase.type === 'gst' ? `/purchases/${purchase.id}/edit-gst` : `/purchases/${purchase.id}/edit-simple`)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="View"><Eye className="w-4 h-4" /></button>
+                            </div>
+                          ) : null}
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
+                        ))
+                      )}
+                    </tbody>
                 </table>
                   </div>
                 )}

@@ -71,6 +71,7 @@ const InvoiceView = () => {
         // Try to get product details if available (for archived products, admin can still see)
         const product = await productService.getById(item.product_id, true) // Include archived
         
+        const snap = item.product_snapshot as { gst_rate?: number; unit?: string; hsn_code?: string } | undefined
         return {
           product_name: item.product_name,
           quantity: item.quantity,
@@ -79,9 +80,9 @@ const InvoiceView = () => {
           discount: item.discount,
           discount_percentage: item.discount_percentage,
           total: item.total,
-          hsn_code: product?.hsn_code,
-          gst_rate: product?.gst_rate,
-          unit: product?.unit,
+          hsn_code: product?.hsn_code ?? snap?.hsn_code,
+          gst_rate: product?.gst_rate ?? snap?.gst_rate,
+          unit: product?.unit ?? snap?.unit,
         }
       })
       
@@ -92,36 +93,41 @@ const InvoiceView = () => {
       const settings = await settingsService.getAll().catch(() => null)
       const companyLogo = settings?.company?.company_logo
 
+      const sysCompany = settings?.company
       if (sale.company_id) {
         const company = await companyService.getById(sale.company_id)
         if (company) {
-          // Build full address from components
           const addressParts = []
           if (company.address) addressParts.push(company.address)
           if (company.city) addressParts.push(company.city)
           if (company.state) addressParts.push(company.state)
           if (company.pincode) addressParts.push(company.pincode)
           const fullAddress = addressParts.join(', ')
-          
           companyInfo = {
-            name: company.name || 'HisabKitab',
-            address: fullAddress || company.address,
-            city: company.city,
-            state: company.state,
-            pincode: company.pincode,
-            phone: company.phone,
-            email: company.email,
-            gstin: company.gstin,
-            website: company.website,
+            name: company.name || sysCompany?.company_name || 'HisabKitab',
+            address: fullAddress || company.address || sysCompany?.company_address,
+            city: company.city || sysCompany?.company_city,
+            state: company.state || sysCompany?.company_state,
+            pincode: company.pincode || sysCompany?.company_pincode,
+            phone: company.phone || sysCompany?.company_phone,
+            email: company.email || sysCompany?.company_email,
+            gstin: company.gstin || sysCompany?.company_gstin,
+            website: company.website || sysCompany?.company_website,
             logo: companyLogo || (company as any).logo,
           }
         }
       }
-      
-      // Fallback to default if no company found
       if (!companyInfo) {
         companyInfo = {
-          name: 'HisabKitab',
+          name: sysCompany?.company_name || 'HisabKitab',
+          address: sysCompany?.company_address,
+          city: sysCompany?.company_city,
+          state: sysCompany?.company_state,
+          pincode: sysCompany?.company_pincode,
+          phone: sysCompany?.company_phone,
+          email: sysCompany?.company_email,
+          gstin: sysCompany?.company_gstin,
+          website: sysCompany?.company_website,
           logo: companyLogo,
         }
       }
@@ -129,6 +135,7 @@ const InvoiceView = () => {
       const invoice: InvoiceData = {
         invoice_number: sale.invoice_number,
         invoice_date: sale.sale_date,
+        created_at: sale.created_at,
         customer: customerInfo,
         items: invoiceItems,
         subtotal: sale.subtotal,

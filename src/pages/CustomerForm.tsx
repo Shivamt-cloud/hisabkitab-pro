@@ -3,6 +3,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { customerService } from '../services/customerService'
+import { priceSegmentService } from '../services/priceListService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Breadcrumbs } from '../components/Breadcrumbs'
 import { Home, Save, X } from 'lucide-react'
@@ -19,6 +20,7 @@ interface FormData {
   pincode: string
   contact_person: string
   credit_limit: string
+  price_segment_id: string
   is_active: boolean
 }
 
@@ -45,11 +47,21 @@ const CustomerForm = () => {
     pincode: '',
     contact_person: '',
     credit_limit: '',
+    price_segment_id: '',
     is_active: true,
   })
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({})
   const [creditBalance, setCreditBalance] = useState<number | undefined>(undefined)
+  const [priceSegments, setPriceSegments] = useState<{ id: number; name: string }[]>([])
+
+  useEffect(() => {
+    const loadSegments = async () => {
+      const segs = await priceSegmentService.getAll(getCurrentCompanyId())
+      setPriceSegments(segs.map(s => ({ id: s.id, name: s.name })))
+    }
+    loadSegments()
+  }, [getCurrentCompanyId])
 
   useEffect(() => {
     if (isEditing && id) {
@@ -67,6 +79,7 @@ const CustomerForm = () => {
             pincode: customer.pincode || '',
             contact_person: customer.contact_person || '',
             credit_limit: customer.credit_limit?.toString() || '',
+            price_segment_id: customer.price_segment_id?.toString() || '',
             is_active: customer.is_active,
           })
           // Load credit balance
@@ -138,6 +151,7 @@ const CustomerForm = () => {
         pincode: formData.pincode.trim() || undefined,
         contact_person: formData.contact_person.trim() || undefined,
         credit_limit: formData.credit_limit ? parseFloat(formData.credit_limit) : undefined,
+        price_segment_id: formData.price_segment_id ? parseInt(formData.price_segment_id) : undefined,
         is_active: formData.is_active,
         company_id: getCurrentCompanyId() || undefined,
       }
@@ -266,6 +280,21 @@ const CustomerForm = () => {
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     placeholder="Contact person name"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Price Segment</label>
+                  <select
+                    value={formData.price_segment_id}
+                    onChange={(e) => setFormData({ ...formData, price_segment_id: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                  >
+                    <option value="">Default (Retail)</option>
+                    {priceSegments.map((s: { id: number; name: string }) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">Used for price lists (wholesale, VIP, etc.)</p>
                 </div>
               </div>
             </div>

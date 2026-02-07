@@ -1,18 +1,25 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { usePlanUpgrade } from '../context/PlanUpgradeContext'
 import { productService } from '../services/productService'
+import { reportService } from '../services/reportService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { StockAlert } from '../types/stock'
-import { AlertTriangle, Package, Home, TrendingDown, ShoppingCart, ListOrdered } from 'lucide-react'
+import { AlertTriangle, Package, Home, TrendingDown, ShoppingCart, ListOrdered, AlertCircle, Lock } from 'lucide-react'
+
+const EXCESS_STOCK_MULTIPLIER = 2 // Stock > min * this = excess
+const SLOW_MOVING_VELOCITY_THRESHOLD = 1 // Units per week below this = slow-moving
 
 const StockAlerts = () => {
-  const { hasPermission, getCurrentCompanyId } = useAuth()
+  const { hasPermission, hasPlanFeature, getCurrentCompanyId } = useAuth()
+  const { showPlanUpgrade } = usePlanUpgrade()
   const navigate = useNavigate()
   const [lowStockAlerts, setLowStockAlerts] = useState<StockAlert[]>([])
   const [outOfStockAlerts, setOutOfStockAlerts] = useState<StockAlert[]>([])
+  const [excessStockAlerts, setExcessStockAlerts] = useState<StockAlert[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'low' | 'out'>('low')
+  const [activeTab, setActiveTab] = useState<'low' | 'out' | 'excess'>('low')
 
   useEffect(() => {
     loadStockAlerts()
@@ -22,11 +29,12 @@ const StockAlerts = () => {
     setLoading(true)
     try {
       const companyId = getCurrentCompanyId()
-      const products = await productService.getAll(false, companyId)
-      
-      // Also load purchases to check if min_stock_level is set on purchase items but not on products
       const { purchaseService } = await import('../services/purchaseService')
-      const purchases = await purchaseService.getAll(undefined, companyId)
+      const [products, purchases, velocityMap] = await Promise.all([
+        productService.getAll(false, companyId),
+        purchaseService.getAll(undefined, companyId),
+        reportService.getSalesVelocityByProduct(4, companyId),
+      ])
       
       // Create a map of product_id to max min_stock_level from purchase items
       const productMinStockMap = new Map<number, number>()
@@ -245,8 +253,37 @@ const StockAlerts = () => {
 
     outOfStock.sort((a, b) => a.product_name.localeCompare(b.product_name))
 
+      // Excess stock: slow-moving items with stock > min * 2
+      const excessStock: StockAlert[] = []
+      const velocities = Array.from(velocityMap.values()).map(v => v.velocityPerWeek).filter(v => v >= 0).sort((a, b) => a - b)
+      const bottom20Threshold = velocities[Math.floor(velocities.length * 0.2)] ?? SLOW_MOVING_VELOCITY_THRESHOLD
+      products.forEach(product => {
+        const minStock = product.min_stock_level ?? productMinStockMap.get(product.id) ?? 0
+        if (minStock <= 0) return
+        const currentStock = productAvailableStockMap.get(product.id) ?? product.stock_quantity ?? 0
+        if (currentStock <= minStock * EXCESS_STOCK_MULTIPLIER) return
+        const velocity = velocityMap.get(product.id)
+        const velocityPerWeek = velocity?.velocityPerWeek ?? 0
+        const isSlowMoving = velocityPerWeek < SLOW_MOVING_VELOCITY_THRESHOLD || velocityPerWeek <= bottom20Threshold
+        if (!isSlowMoving) return
+        const daysOfStock = velocityPerWeek > 0 ? Math.round((currentStock / velocityPerWeek) * 7) : 9999
+        excessStock.push({
+          product_id: product.id,
+          product_name: product.name,
+          current_stock: currentStock,
+          min_stock_level: minStock,
+          category: product.category_name,
+          unit: product.unit,
+          alert_type: 'excess_slow_moving',
+          sales_velocity_per_week: Math.round(velocityPerWeek * 10) / 10,
+          days_of_stock: daysOfStock,
+        })
+      })
+      excessStock.sort((a, b) => (a.sales_velocity_per_week ?? 0) - (b.sales_velocity_per_week ?? 0))
+
       setLowStockAlerts(lowStock)
       setOutOfStockAlerts(outOfStock)
+      setExcessStockAlerts(excessStock)
     } catch (error) {
       console.error('Error loading stock alerts:', error)
     } finally {
@@ -280,10 +317,11 @@ const StockAlerts = () => {
                 </div>
               </div>
               <button
-                onClick={() => navigate('/stock/reorder')}
+                onClick={() => hasPlanFeature('purchase_reorder') ? navigate('/stock/reorder') : showPlanUpgrade('purchase_reorder')}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-sm font-medium"
-                title="Reorder list: products below min stock with last purchase qty/rate"
+                title={hasPlanFeature('purchase_reorder') ? 'Reorder list: products below min stock with last purchase qty/rate' : 'Upgrade to unlock'}
               >
+                {!hasPlanFeature('purchase_reorder') && <Lock className="w-4 h-4" />}
                 <ListOrdered className="w-4 h-4" />
                 Reorder List
               </button>
@@ -293,7 +331,7 @@ const StockAlerts = () => {
 
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Statistics */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div className="bg-gradient-to-br from-yellow-500 to-orange-600 rounded-xl shadow-xl p-6 border border-white/50 text-white">
               <div className="flex items-center justify-between">
                 <div>
@@ -313,6 +351,20 @@ const StockAlerts = () => {
                   <p className="text-sm opacity-75 mt-1">Products with zero stock</p>
                 </div>
                 <Package className="w-12 h-12 opacity-80" />
+              </div>
+            </div>
+
+            <div
+              className="bg-gradient-to-br from-amber-600 to-amber-700 rounded-xl shadow-xl p-6 border border-white/50 text-white cursor-pointer hover:shadow-2xl transition-shadow"
+              onClick={() => setActiveTab('excess')}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm opacity-90 mb-1">Excess Stock (Slow-moving)</p>
+                  <p className="text-3xl font-bold">{excessStockAlerts.length}</p>
+                  <p className="text-sm opacity-75 mt-1">High stock, low sales velocity</p>
+                </div>
+                <AlertCircle className="w-12 h-12 opacity-80" />
               </div>
             </div>
           </div>
@@ -346,6 +398,19 @@ const StockAlerts = () => {
                   <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-red-600"></span>
                 )}
               </button>
+              <button
+                onClick={() => setActiveTab('excess')}
+                className={`px-6 py-3 font-semibold text-sm transition-colors relative ${
+                  activeTab === 'excess'
+                    ? 'text-amber-600'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Excess Stock ({excessStockAlerts.length})
+                {activeTab === 'out' && (
+                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-red-600"></span>
+                )}
+              </button>
             </div>
 
             {loading ? (
@@ -374,7 +439,14 @@ const StockAlerts = () => {
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Category</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Current Stock</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Min. Level</th>
-                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Suggested Qty</th>
+                      {activeTab === 'excess' ? (
+                        <>
+                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Sales/Week</th>
+                          <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Days of Stock</th>
+                        </>
+                      ) : (
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Suggested Qty</th>
+                      )}
                       <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
@@ -395,7 +467,7 @@ const StockAlerts = () => {
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-2">
                               <span className={`text-sm font-bold ${
-                                alert.alert_type === 'out_of_stock' ? 'text-red-600' : 'text-orange-600'
+                                alert.alert_type === 'out_of_stock' ? 'text-red-600' : alert.alert_type === 'excess_slow_moving' ? 'text-amber-600' : 'text-orange-600'
                               }`}>
                                 {alert.current_stock} {alert.unit}
                               </span>
@@ -412,11 +484,26 @@ const StockAlerts = () => {
                           <td className="px-6 py-4">
                             <div className="text-sm text-gray-600">{alert.min_stock_level} {alert.unit}</div>
                           </td>
+                          {activeTab === 'excess' ? (
+                            <>
+                              <td className="px-6 py-4">
+                                <div className="text-sm font-medium text-amber-600">
+                                  {alert.sales_velocity_per_week != null ? `${alert.sales_velocity_per_week} /wk` : '—'}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="text-sm text-gray-600">
+                                  {alert.days_of_stock != null ? `${alert.days_of_stock} days` : '—'}
+                                </div>
+                              </td>
+                            </>
+                          ) : (
                           <td className="px-6 py-4">
                             <div className="text-sm font-semibold text-blue-600">
                               {alert.suggested_quantity} {alert.unit}
                             </div>
                           </td>
+                          )}
                           <td className="px-6 py-4 text-right">
                             {hasPermission('products:update') && (
                               <button

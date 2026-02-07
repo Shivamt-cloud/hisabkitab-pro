@@ -7,7 +7,7 @@ import { salesPersonService } from '../services/salespersonService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Breadcrumbs } from '../components/Breadcrumbs'
 import { Home, Save, X } from 'lucide-react'
-import { Expense, ExpenseType, CashDenominations } from '../types/expense'
+import { Expense, ExpenseType, CashDenominations, ManualExtraAmounts } from '../types/expense'
 import { SalesPerson } from '../types/salesperson'
 
 const ExpenseForm = () => {
@@ -31,6 +31,9 @@ const ExpenseForm = () => {
     receipt_number: '',
     category: '',
   })
+
+  const [manualExtra, setManualExtra] = useState<ManualExtraAmounts>({ cash: 0, upi: 0, card: 0, other: 0 })
+  const [remark, setRemark] = useState('')
 
   const [cashDenominations, setCashDenominations] = useState<CashDenominations>({
     notes_2000: 0,
@@ -72,6 +75,10 @@ const ExpenseForm = () => {
           if (expense.cash_denominations) {
             setCashDenominations(expense.cash_denominations)
           }
+          if (expense.manual_extra) {
+            setManualExtra(expense.manual_extra)
+          }
+          setRemark(expense.remark || '')
         }
       }
     }
@@ -85,8 +92,15 @@ const ExpenseForm = () => {
       newErrors.expense_date = 'Expense date is required'
     }
 
-    if (!formData.amount || parseFloat(formData.amount) <= 0) {
-      newErrors.amount = 'Valid amount is required'
+    const cashTotal = (formData.expense_type === 'opening' || formData.expense_type === 'closing')
+      ? calculateTotalFromDenominations(cashDenominations)
+      : parseFloat(formData.amount) || 0
+    const manualTotal = (manualExtra.cash || 0) + (manualExtra.upi || 0) + (manualExtra.card || 0) + (manualExtra.other || 0)
+    const totalAmount = (formData.expense_type === 'opening' || formData.expense_type === 'closing')
+      ? cashTotal + manualTotal
+      : parseFloat(formData.amount) || 0
+    if (totalAmount <= 0) {
+      newErrors.amount = 'Valid amount is required (cash denominations + manual/extra)'
     }
 
     if (!formData.description.trim() && formData.expense_type !== 'opening' && formData.expense_type !== 'closing') {
@@ -113,10 +127,23 @@ const ExpenseForm = () => {
         ? salesPersons.find(sp => sp.id === parseInt(formData.sales_person_id))
         : null
 
+      const cashTotal = (formData.expense_type === 'opening' || formData.expense_type === 'closing')
+        ? calculateTotalFromDenominations(cashDenominations)
+        : 0
+      const manualTotal = (formData.expense_type === 'opening' || formData.expense_type === 'closing')
+        ? (manualExtra.cash || 0) + (manualExtra.upi || 0) + (manualExtra.card || 0) + (manualExtra.other || 0)
+        : 0
+      // Opening: amount = cash + manual (full total). Closing: amount = cash only (manual is for report; physical cash is in denominations)
+      const finalAmount = formData.expense_type === 'opening'
+        ? cashTotal + manualTotal
+        : formData.expense_type === 'closing'
+          ? cashTotal
+          : parseFloat(formData.amount)
+
       const expenseData: Omit<Expense, 'id' | 'created_at' | 'updated_at'> = {
         expense_date: new Date(formData.expense_date).toISOString(),
         expense_type: formData.expense_type,
-        amount: parseFloat(formData.amount),
+        amount: finalAmount,
         description: formData.description.trim() || (formData.expense_type === 'opening' ? 'Opening Balance' : formData.expense_type === 'closing' ? 'Closing Balance' : ''),
         sales_person_id: formData.sales_person_id ? parseInt(formData.sales_person_id) : undefined,
         sales_person_name: selectedSalesPerson?.name,
@@ -124,6 +151,9 @@ const ExpenseForm = () => {
         receipt_number: formData.receipt_number.trim() || undefined,
         category: formData.category.trim() || undefined,
         cash_denominations: (formData.expense_type === 'opening' || formData.expense_type === 'closing') ? cashDenominations : undefined,
+        manual_extra: (formData.expense_type === 'opening' || formData.expense_type === 'closing') && ((manualExtra.cash || 0) + (manualExtra.upi || 0) + (manualExtra.card || 0) + (manualExtra.other || 0)) > 0
+          ? manualExtra
+          : undefined,
         company_id: getCurrentCompanyId() || undefined,
         created_by: parseInt(user?.id || '1'),
       }
@@ -171,13 +201,14 @@ const ExpenseForm = () => {
     )
   }
 
-  // Update amount when denominations change
+  // Update amount when denominations or manual extra change
   useEffect(() => {
     if (formData.expense_type === 'opening' || formData.expense_type === 'closing') {
-      const total = calculateTotalFromDenominations(cashDenominations)
-      setFormData(prev => ({ ...prev, amount: total.toString() }))
+      const cashTotal = calculateTotalFromDenominations(cashDenominations)
+      const manualTotal = (manualExtra.cash || 0) + (manualExtra.upi || 0) + (manualExtra.card || 0) + (manualExtra.other || 0)
+      setFormData(prev => ({ ...prev, amount: (cashTotal + manualTotal).toString() }))
     }
-  }, [cashDenominations, formData.expense_type])
+  }, [cashDenominations, manualExtra, formData.expense_type])
 
   return (
     <ProtectedRoute requiredPermission={isEditing ? 'expenses:update' : 'expenses:create'}>
@@ -303,6 +334,9 @@ const ExpenseForm = () => {
                   <label className="block text-sm font-semibold text-gray-700 mb-3">
                     Cash Denominations <span className="text-red-500">*</span>
                   </label>
+                  <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 mb-4">
+                    Add full information below so that it gets registered as data in the system.
+                  </p>
                   <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       {/* Notes */}
@@ -364,6 +398,62 @@ const ExpenseForm = () => {
                           ₹{calculateTotalFromDenominations(cashDenominations).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                         </span>
                       </div>
+                    </div>
+
+                    {/* Manual sales (closing) or Extra money (opening) */}
+                    <div className="mt-6 pt-4 border-t border-gray-200">
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">
+                        {formData.expense_type === 'closing' ? 'Manual sales (outside system)' : 'Extra money / Carry forward'}
+                      </h4>
+                      <p className="text-xs text-gray-500 mb-3">
+                        {formData.expense_type === 'closing'
+                          ? 'Sales received manually (cash, UPI, card) not recorded in system - included in final report'
+                          : 'Extra cash, UPI balance, or other money you have - included in opening'}
+                      </p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {[
+                          { key: 'cash' as const, label: 'Cash (₹)' },
+                          { key: 'upi' as const, label: 'UPI (₹)' },
+                          { key: 'card' as const, label: 'Card (₹)' },
+                          { key: 'other' as const, label: 'Other (₹)' },
+                        ].map(({ key, label }) => (
+                          <div key={key}>
+                            <label className="block text-xs text-gray-600 mb-1">{label}</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={manualExtra[key] || ''}
+                              onChange={(e) => setManualExtra((prev: ManualExtraAmounts) => ({ ...prev, [key]: parseFloat(e.target.value) || 0 }))}
+                              className="w-full px-2 py-2 border border-gray-300 rounded text-sm"
+                              placeholder="0"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      {((manualExtra.cash || 0) + (manualExtra.upi || 0) + (manualExtra.card || 0) + (manualExtra.other || 0)) > 0 && (
+                        <div className="mt-3 flex justify-between text-sm">
+                          <span className="text-gray-600">Manual/Extra total:</span>
+                          <span className="font-semibold text-blue-600">
+                            ₹{((manualExtra.cash || 0) + (manualExtra.upi || 0) + (manualExtra.card || 0) + (manualExtra.other || 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      )}
+                      <div className="mt-2 text-xs text-gray-500">
+                        Grand total: ₹{(calculateTotalFromDenominations(cashDenominations) + (manualExtra.cash || 0) + (manualExtra.upi || 0) + (manualExtra.card || 0) + (manualExtra.other || 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+
+                    {/* Remark */}
+                    <div className="mt-6 pt-4 border-t border-gray-200">
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Remark (optional)</label>
+                      <textarea
+                        value={remark}
+                        onChange={(e) => setRemark(e.target.value)}
+                        placeholder="Add any remark or note..."
+                        rows={3}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none"
+                      />
                     </div>
                   </div>
                 </div>
@@ -470,4 +560,3 @@ const ExpenseForm = () => {
 }
 
 export default ExpenseForm
-

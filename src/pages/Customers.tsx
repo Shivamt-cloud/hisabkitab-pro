@@ -32,13 +32,14 @@ const Customers = () => {
     }
   }
 
+  const searchTerm = searchQuery.trim()
   const filteredCustomers = customers.filter(customer =>
-    !searchQuery ||
-    customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    customer.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    customer.phone?.includes(searchQuery) ||
-    customer.gstin?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    customer.city?.toLowerCase().includes(searchQuery.toLowerCase())
+    !searchTerm ||
+    customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    customer.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (customer.phone && customer.phone.replace(/\s/g, '').includes(searchTerm.replace(/\s/g, ''))) ||
+    customer.gstin?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    customer.city?.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
   const handleDelete = async (id: number) => {
@@ -72,7 +73,14 @@ const Customers = () => {
                   <p className="text-sm text-gray-600 mt-1">Manage your customer database</p>
                 </div>
               </div>
-              {hasPermission('sales:create') && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => navigate('/customers/insights')}
+                  className="bg-gradient-to-r from-amber-500 to-orange-600 text-white font-semibold py-2.5 px-5 rounded-xl hover:shadow-lg transition-all flex items-center gap-2"
+                >
+                  Customer Insights
+                </button>
+                {hasPermission('sales:create') && (
                 <button
                   onClick={() => navigate('/customers/new')}
                   className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold py-3 px-6 rounded-xl hover:shadow-lg transition-all flex items-center gap-2 transform hover:scale-105"
@@ -80,7 +88,8 @@ const Customers = () => {
                   <Plus className="w-5 h-5" />
                   Add Customer
                 </button>
-              )}
+                )}
+              </div>
             </div>
           </div>
         </header>
@@ -110,14 +119,14 @@ const Customers = () => {
             <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-12 text-center border border-white/50">
               <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                {searchQuery ? 'No customers found' : 'No customers yet'}
+                {searchTerm ? 'No customers found' : 'No customers yet'}
               </h3>
               <p className="text-gray-600 mb-6">
-                {searchQuery 
+                {searchTerm 
                   ? 'Try adjusting your search terms'
                   : 'Get started by adding your first customer'}
               </p>
-              {!searchQuery && hasPermission('sales:create') && (
+              {!searchTerm && hasPermission('sales:create') && (
                 <button
                   onClick={() => navigate('/customers/new')}
                   className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold py-2 px-6 rounded-xl hover:shadow-lg transition-all inline-flex items-center gap-2"

@@ -25,6 +25,7 @@ export const cloudSupplierService = {
     }
 
     try {
+      const effectiveId = companyId ?? null
       let query = supabase!.from('suppliers').select('*')
 
       if (companyId !== undefined && companyId !== null) {
@@ -35,32 +36,26 @@ export const cloudSupplierService = {
 
       if (error) {
         console.error('Error fetching suppliers from cloud:', error)
-        // Fallback to local storage
         const allSuppliers = await getAll<Supplier>(STORES.SUPPLIERS)
-        if (companyId !== undefined && companyId !== null) {
-          return allSuppliers.filter(s => s.company_id === companyId || s.company_id === null || s.company_id === undefined)
-        } else if (companyId === null) {
-          return []
+        if (effectiveId !== undefined && effectiveId !== null) {
+          return allSuppliers.filter(s => s.company_id === effectiveId || s.company_id === null || s.company_id === undefined)
         }
         return allSuppliers
       }
 
-      // Sync to local storage for offline access
-      if (data) {
-        for (const supplier of data) {
-          await put(STORES.SUPPLIERS, supplier as Supplier)
-        }
+      if (data && data.length > 0) {
+        void Promise.all((data as Supplier[]).map((s) => put(STORES.SUPPLIERS, s))).catch((e) =>
+          console.warn('[cloudSupplierService] Background sync failed:', e)
+        )
       }
 
       return (data as Supplier[]) || []
     } catch (error) {
       console.error('Error in cloudSupplierService.getAll:', error)
-      // Fallback to local storage
       const allSuppliers = await getAll<Supplier>(STORES.SUPPLIERS)
-      if (companyId !== undefined && companyId !== null) {
-        return allSuppliers.filter(s => s.company_id === companyId || s.company_id === null || s.company_id === undefined)
-      } else if (companyId === null) {
-        return []
+      const effectiveId = companyId ?? null
+      if (effectiveId !== undefined && effectiveId !== null) {
+        return allSuppliers.filter(s => s.company_id === effectiveId || s.company_id === null || s.company_id === undefined)
       }
       return allSuppliers
     }

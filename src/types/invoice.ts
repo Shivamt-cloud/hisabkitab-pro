@@ -1,6 +1,8 @@
 export interface InvoiceData {
   invoice_number: string
   invoice_date: string
+  /** Used for receipt time when sale_date from DB is date-only (Supabase DATE column) */
+  created_at?: string
   customer?: {
     name: string
     email?: string

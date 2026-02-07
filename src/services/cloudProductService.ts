@@ -14,13 +14,11 @@ export const cloudProductService = {
    * Get all products from cloud
    */
   getAll: async (includeArchived: boolean = false, companyId?: number | null): Promise<Product[]> => {
-    // If Supabase not available or offline, use local storage
+    const effectiveId = companyId ?? undefined
     if (!isSupabaseAvailable() || !isOnline()) {
       let products = await getAll<Product>(STORES.PRODUCTS)
-      if (companyId !== undefined && companyId !== null) {
-        products = products.filter(p => p.company_id === companyId)
-      } else if (companyId === null) {
-        return []
+      if (effectiveId !== undefined) {
+        products = products.filter(p => p.company_id === effectiveId || p.company_id === null || p.company_id === undefined)
       }
       if (!includeArchived) {
         products = products.filter(p => p.status === 'active')
@@ -37,9 +35,8 @@ export const cloudProductService = {
 
     try {
       let query = supabase!.from('products').select('*')
-
-      if (companyId !== undefined && companyId !== null) {
-        query = query.eq('company_id', companyId)
+      if (effectiveId !== undefined) {
+        query = query.eq('company_id', effectiveId)
       }
 
       if (!includeArchived) {
@@ -50,12 +47,9 @@ export const cloudProductService = {
 
       if (error) {
         console.error('Error fetching products from cloud:', error)
-        // Fallback to local storage
         let products = await getAll<Product>(STORES.PRODUCTS)
-        if (companyId !== undefined && companyId !== null) {
-          products = products.filter(p => p.company_id === companyId)
-        } else if (companyId === null) {
-          return []
+        if (effectiveId !== undefined) {
+          products = products.filter(p => p.company_id === effectiveId || p.company_id === null || p.company_id === undefined)
         }
         if (!includeArchived) {
           products = products.filter(p => p.status === 'active')
@@ -70,11 +64,11 @@ export const cloudProductService = {
         }))
       }
 
-      // Sync to local storage for offline access
-      if (data) {
-        for (const product of data) {
-          await put(STORES.PRODUCTS, product as Product)
-        }
+      // Sync to local storage in background (don't block UI)
+      if (data && data.length > 0) {
+        void Promise.all((data as Product[]).map((p) => put(STORES.PRODUCTS, p))).catch((e) =>
+          console.warn('[cloudProductService] Background sync failed:', e)
+        )
       }
 
       // Join with categories
@@ -87,12 +81,9 @@ export const cloudProductService = {
       })) || []
     } catch (error) {
       console.error('Error in cloudProductService.getAll:', error)
-      // Fallback to local storage
       let products = await getAll<Product>(STORES.PRODUCTS)
-      if (companyId !== undefined && companyId !== null) {
-        products = products.filter(p => p.company_id === companyId)
-      } else if (companyId === null) {
-        return []
+      if (effectiveId !== undefined) {
+        products = products.filter(p => p.company_id === effectiveId || p.company_id === null || p.company_id === undefined)
       }
       if (!includeArchived) {
         products = products.filter(p => p.status === 'active')

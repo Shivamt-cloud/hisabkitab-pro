@@ -11,7 +11,8 @@ import {
   AlertTriangle,
   Filter,
   X,
-  Home
+  Home,
+  Layers
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
@@ -106,15 +107,26 @@ const Products = () => {
                   <p className="text-sm text-gray-600 mt-1">Manage your product inventory</p>
                 </div>
               </div>
-              {hasPermission('products:create') && (
-                <button
-                  onClick={() => navigate('/products/new')}
-                  className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold py-3 px-6 rounded-xl hover:shadow-xl transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
-                >
-                  <Plus className="w-5 h-5" />
-                  Add Product
-                </button>
-              )}
+              <div className="flex items-center gap-3">
+                {hasPermission('products:update') && (
+                  <button
+                    onClick={() => navigate('/products/bulk-operations')}
+                    className="bg-white border-2 border-gray-300 text-gray-700 font-semibold py-3 px-5 rounded-xl hover:bg-gray-50 hover:border-gray-400 transition-all flex items-center gap-2"
+                  >
+                    <Layers className="w-5 h-5" />
+                    Bulk Operations
+                  </button>
+                )}
+                {hasPermission('products:create') && (
+                  <button
+                    onClick={() => navigate('/products/new')}
+                    className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold py-3 px-6 rounded-xl hover:shadow-xl transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
+                  >
+                    <Plus className="w-5 h-5" />
+                    Add Product
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </header>

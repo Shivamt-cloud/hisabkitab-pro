@@ -130,6 +130,8 @@ export const cloudExpenseService = {
             receipt_number: expenseData.receipt_number || null,
             category: expenseData.category || null,
             cash_denominations: expenseData.cash_denominations || null, // JSONB object
+            manual_extra: expenseData.manual_extra || null,
+            remark: expenseData.remark || null,
             company_id: expenseData.company_id || null,
             created_by: expenseData.created_by,
           }])
@@ -194,6 +196,8 @@ export const cloudExpenseService = {
           receipt_number: updated.receipt_number || null,
           category: updated.category || null,
           cash_denominations: updated.cash_denominations || null, // JSONB object
+          manual_extra: updated.manual_extra || null, // JSONB: manual sales (closing) / extra money (opening)
+          remark: updated.remark || null,
           company_id: updated.company_id || null,
           created_by: updated.created_by,
           updated_at: updated.updated_at,

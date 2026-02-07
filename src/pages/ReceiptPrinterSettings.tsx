@@ -8,16 +8,44 @@ import { Home, Receipt, Save } from 'lucide-react'
 import { buildReceiptHTML, type ReceiptInvoiceData } from '../utils/exportUtils'
 import { saleService } from '../services/saleService'
 import { companyService } from '../services/companyService'
+import { customerService } from '../services/customerService'
+
+const DEFAULT_RECEIPT_PRINTER: ReceiptPrinterSettings = {
+  paper_width_mm: 80,
+  printer_type: 'GENERIC',
+  printer_device_name: '',
+  silent_print: false,
+  show_company_name: true,
+  show_company_address: true,
+  show_company_phone: true,
+  show_company_email: true,
+  show_company_gstin: true,
+  show_invoice_number: true,
+  show_date: true,
+  show_time: true,
+  show_payment_status: true,
+  show_customer_name: true,
+  show_customer_phone: true,
+  show_customer_address: true,
+  show_customer_gstin: true,
+  show_sales_person: true,
+  show_notes: true,
+  show_items: true,
+  show_item_discount: true,
+  show_item_mrp: true,
+  show_subtotal: true,
+  show_discount: true,
+  show_tax: true,
+  show_credit_applied: true,
+  show_return_amount: true,
+  show_credit_balance: true,
+  show_footer: true,
+}
 
 const ReceiptPrinterSettingsPage = () => {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const [receiptPrinter, setReceiptPrinter] = useState<ReceiptPrinterSettings>({
-    paper_width_mm: 80,
-    printer_type: 'GENERIC',
-    printer_device_name: '',
-    silent_print: false,
-  })
+  const [receiptPrinter, setReceiptPrinter] = useState<ReceiptPrinterSettings>({ ...DEFAULT_RECEIPT_PRINTER })
   const [availablePrinters, setAvailablePrinters] = useState<
     Array<{ name: string; displayName?: string; isDefault?: boolean }>
   >([])
@@ -38,10 +66,11 @@ const ReceiptPrinterSettingsPage = () => {
   const loadSettings = async () => {
     try {
       const settings = await settingsService.getAll()
-      if (settings.receipt_printer) {
-        setReceiptPrinter(settings.receipt_printer)
-      }
-      generatePreview(settings.receipt_printer || receiptPrinter, previewInvoice)
+      const merged = settings.receipt_printer
+        ? { ...DEFAULT_RECEIPT_PRINTER, ...settings.receipt_printer }
+        : DEFAULT_RECEIPT_PRINTER
+      setReceiptPrinter(merged)
+      generatePreview(merged, previewInvoice)
     } catch (e) {
       console.error('Error loading receipt printer settings:', e)
     } finally {
@@ -52,21 +81,36 @@ const ReceiptPrinterSettingsPage = () => {
   const sampleInvoice: ReceiptInvoiceData = {
     invoice_number: 'INV-TEST-001',
     invoice_date: new Date().toISOString(),
-    customer: { name: 'Walk-in Customer' },
+    customer: {
+      name: 'Demo Customer',
+      phone: '+91-9876543210',
+      gstin: '22DEMO0000D1Z5',
+      address: '123 Sample Street',
+      city: 'Demo City',
+      state: 'Demo State',
+      pincode: '110001',
+    },
+    sales_person: 'Sales Rep Name',
+    notes: 'Thank you for your purchase. Visit again!',
     items: [
-      { product_name: 'Sample Item A', quantity: 1, unit_price: 100, total: 100 },
-      { product_name: 'Sample Item B', quantity: 2, unit_price: 50, total: 100 },
+      { product_name: 'Sample Item A', quantity: 1, unit_price: 90, total: 90, mrp: 100, discount: 10, discount_percentage: 10 },
+      { product_name: 'Sample Item B', quantity: 2, unit_price: 45, total: 90, mrp: 50, discount: 5, discount_percentage: 10 },
     ],
-    subtotal: 200,
-    tax_amount: 0,
-    discount: 0,
-    grand_total: 200,
+    subtotal: 180,
+    tax_amount: 18,
+    discount: 10,
+    grand_total: 188,
     payment_method: 'cash',
+    payment_methods: [{ method: 'Cash', amount: 188 }],
     payment_status: 'paid',
+    return_amount: 0,
+    credit_applied: 0,
+    credit_balance: 0,
     company_info: {
       name: 'HisabKitab Demo Store',
       address: 'Main Road, Demo City',
       phone: '+91-9999999999',
+      email: 'demo@hisabkitabpro.com',
       gstin: '22AAAAA0000A1Z5',
     },
   }
@@ -104,12 +148,30 @@ const ReceiptPrinterSettingsPage = () => {
       } catch (err) {
         console.error('Error loading company for receipt preview:', err)
       }
+      let customerWithAddress: ReceiptInvoiceData['customer'] | undefined
+      if (latest.customer_name) {
+        try {
+          const cust = latest.customer_id ? await customerService.getById(latest.customer_id) : null
+          customerWithAddress = {
+            name: latest.customer_name,
+            phone: cust?.phone ?? undefined,
+            gstin: cust?.gstin ?? undefined,
+            address: cust?.address ?? undefined,
+            city: cust?.city ?? undefined,
+            state: cust?.state ?? undefined,
+            pincode: cust?.pincode ?? undefined,
+          }
+        } catch {
+          customerWithAddress = { name: latest.customer_name, phone: undefined, gstin: undefined }
+        }
+      }
       const invoice: ReceiptInvoiceData = {
         invoice_number: latest.invoice_number,
         invoice_date: latest.sale_date,
-        customer: latest.customer_name
-          ? { name: latest.customer_name, phone: undefined, gstin: undefined }
-          : undefined,
+        created_at: latest.created_at,
+        customer: customerWithAddress,
+        sales_person: latest.sales_person_name,
+        notes: latest.notes,
         items: latest.items.map(item => ({
           product_name: item.product_name,
           quantity: item.quantity,
@@ -169,7 +231,8 @@ const ReceiptPrinterSettingsPage = () => {
     setSaving(true)
     setSaved(false)
     try {
-      await settingsService.update({ receipt_printer: receiptPrinter }, user?.id ? parseInt(user.id) : undefined)
+      const toSave = { ...DEFAULT_RECEIPT_PRINTER, ...receiptPrinter }
+      await settingsService.update({ receipt_printer: toSave }, user?.id ? parseInt(user.id) : undefined)
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } catch (error) {
@@ -237,9 +300,13 @@ const ReceiptPrinterSettingsPage = () => {
     receiptPrinter.show_payment_status,
     receiptPrinter.show_customer_name,
     receiptPrinter.show_customer_phone,
+    receiptPrinter.show_customer_address,
     receiptPrinter.show_customer_gstin,
+    receiptPrinter.show_sales_person,
+    receiptPrinter.show_notes,
     receiptPrinter.show_items,
     receiptPrinter.show_item_discount,
+    receiptPrinter.show_item_mrp,
     receiptPrinter.show_subtotal,
     receiptPrinter.show_discount,
     receiptPrinter.show_tax,
@@ -392,6 +459,17 @@ const ReceiptPrinterSettingsPage = () => {
                     <label className="flex items-center gap-2 text-sm text-gray-700">
                       <input
                         type="checkbox"
+                        checked={receiptPrinter.show_company_email ?? true}
+                        onChange={e =>
+                          setReceiptPrinter({ ...receiptPrinter, show_company_email: e.target.checked })
+                        }
+                        className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                      />
+                      Email
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
                         checked={receiptPrinter.show_company_gstin ?? true}
                         onChange={e =>
                           setReceiptPrinter({ ...receiptPrinter, show_company_gstin: e.target.checked })
@@ -473,6 +551,17 @@ const ReceiptPrinterSettingsPage = () => {
                     <label className="flex items-center gap-2 text-sm text-gray-700">
                       <input
                         type="checkbox"
+                        checked={receiptPrinter.show_customer_address ?? true}
+                        onChange={e =>
+                          setReceiptPrinter({ ...receiptPrinter, show_customer_address: e.target.checked })
+                        }
+                        className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                      />
+                      Customer Address
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
                         checked={receiptPrinter.show_customer_gstin ?? true}
                         onChange={e =>
                           setReceiptPrinter({ ...receiptPrinter, show_customer_gstin: e.target.checked })
@@ -480,6 +569,28 @@ const ReceiptPrinterSettingsPage = () => {
                         className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
                       />
                       Customer GSTIN
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={receiptPrinter.show_sales_person ?? true}
+                        onChange={e =>
+                          setReceiptPrinter({ ...receiptPrinter, show_sales_person: e.target.checked })
+                        }
+                        className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                      />
+                      Sales Person
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={receiptPrinter.show_notes ?? true}
+                        onChange={e =>
+                          setReceiptPrinter({ ...receiptPrinter, show_notes: e.target.checked })
+                        }
+                        className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                      />
+                      Notes
                     </label>
                   </div>
 
@@ -538,7 +649,7 @@ const ReceiptPrinterSettingsPage = () => {
                         }
                         className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
                       />
-                      Discount
+                      Additional Discount
                     </label>
                     <label className="flex items-center gap-2 text-sm text-gray-700">
                       <input

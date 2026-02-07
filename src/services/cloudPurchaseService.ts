@@ -27,6 +27,45 @@ function normalizePurchaseItems(items: PurchaseItem[] | undefined, purchaseId?: 
  */
 export const cloudPurchaseService = {
   /**
+   * Fast fetch: Supabase only, no IndexedDB merge/sync. Use for Dashboard initial load.
+   * Falls back to IndexedDB when offline.
+   */
+  getAllFast: async (type?: PurchaseType, companyId?: number | null): Promise<Purchase[]> => {
+    if (!isSupabaseAvailable() || !isOnline()) {
+      let purchases = await getAll<Purchase>(STORES.PURCHASES)
+      if (companyId !== undefined && companyId !== null) {
+        purchases = purchases.filter(p => p.company_id === companyId || p.company_id == null)
+      } else if (companyId === null) return []
+      if (type) purchases = purchases.filter(p => p.type === type)
+      return purchases.map(p => ({ ...p, items: normalizePurchaseItems(p.items, p.id) }))
+    }
+    try {
+      let query = supabase!.from('purchases').select('*')
+      if (companyId !== undefined && companyId !== null) query = query.eq('company_id', companyId)
+      if (type) query = query.eq('type', type)
+      const { data, error } = await query.order('purchase_date', { ascending: false })
+      if (error) {
+        let purchases = await getAll<Purchase>(STORES.PURCHASES)
+        if (companyId !== undefined && companyId !== null) purchases = purchases.filter(p => p.company_id === companyId || p.company_id == null)
+        else if (companyId === null) return []
+        if (type) purchases = purchases.filter(p => p.type === type)
+        return purchases.map(p => ({ ...p, items: normalizePurchaseItems(p.items, p.id) }))
+      }
+      const normalized = (data || []).map((p: Purchase) => ({
+        ...p,
+        items: normalizePurchaseItems(p.items, p.id)
+      }))
+      return normalized
+    } catch (_) {
+      let purchases = await getAll<Purchase>(STORES.PURCHASES)
+      if (companyId !== undefined && companyId !== null) purchases = purchases.filter(p => p.company_id === companyId || p.company_id == null)
+      else if (companyId === null) return []
+      if (type) purchases = purchases.filter(p => p.type === type)
+      return purchases.map(p => ({ ...p, items: normalizePurchaseItems(p.items, p.id) }))
+    }
+  },
+
+  /**
    * Get all purchases from cloud
    */
   getAll: async (type?: PurchaseType, companyId?: number | null): Promise<Purchase[]> => {
@@ -77,14 +116,58 @@ export const cloudPurchaseService = {
         items: normalizePurchaseItems(purchase.items, purchase.id)
       }))
 
-      // Sync to local storage for offline access
-      if (normalized.length) {
-        for (const purchase of normalized) {
-          await put(STORES.PURCHASES, purchase)
-        }
+      // When IndexedDB is empty (incognito/fresh), skip merge and return immediately
+      let localPurchases: Purchase[] = []
+      try {
+        localPurchases = await getAll<Purchase>(STORES.PURCHASES)
+      } catch (_) {}
+      if (localPurchases.length === 0) {
+        void Promise.all(normalized.map((p) => put(STORES.PURCHASES, p))).catch((e) =>
+          console.warn('[cloudPurchaseService] Background sync failed:', e)
+        )
+        return normalized
       }
 
-      return normalized
+      // Merge with local sold_quantity so we never overwrite a valid local inventory update (e.g. after a sale) with stale cloud data
+      const merged = normalized.map((purchase: Purchase) => {
+        const local = localPurchases.find((p: Purchase) => p.id === purchase.id)
+        if (!local?.items?.length) return purchase
+        const mergedItems = purchase.items.map((pi: PurchaseItem) => {
+          const localItem = local.items!.find((li: PurchaseItem) => li.id === pi.id)
+          const cloudSold = pi.sold_quantity ?? 0
+          const localSold = localItem?.sold_quantity ?? 0
+          const sold = Math.max(cloudSold, localSold)
+          if (sold === cloudSold) return pi
+          return { ...pi, sold_quantity: sold }
+        })
+        return { ...purchase, items: mergedItems }
+      })
+
+      // Sync to local storage in background (don't block UI – IndexedDB writes are slow with large datasets)
+      if (merged.length > 0) {
+        void Promise.all(merged.map((p) => put(STORES.PURCHASES, p))).catch((e) =>
+          console.warn('[cloudPurchaseService] Background sync failed:', e)
+        )
+      }
+
+      // Push local sold_quantity increases to cloud in background (don't block)
+      void (async () => {
+        for (let i = 0; i < merged.length; i++) {
+          const p = merged[i]
+          const orig = normalized[i]
+          if (!orig || !p.items?.length) continue
+          const hadLocalIncrease = p.items.some((pi: PurchaseItem, idx: number) => (pi.sold_quantity ?? 0) > (orig.items?.[idx]?.sold_quantity ?? 0))
+          if (!hadLocalIncrease) continue
+          try {
+            await supabase!.from('purchases').update({
+              items: p.items,
+              updated_at: p.updated_at,
+            }).eq('id', p.id).select().single()
+          } catch (_) {}
+        }
+      })()
+
+      return merged
     } catch (error) {
       console.error('Error in cloudPurchaseService.getAll:', error)
       // Fallback to local storage
@@ -248,20 +331,27 @@ export const cloudPurchaseService = {
           updated_at: updated.updated_at,
         }
 
-        const { data, error } = await supabase!
-          .from('purchases')
-          .update(updateData)
-          .eq('id', id)
-          .select()
-          .single()
+        let result: { data: Purchase | null; error: any } = { data: null, error: null }
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const { data, error } = await supabase!
+            .from('purchases')
+            .update(updateData)
+            .eq('id', id)
+            .select()
+            .single()
+          result = { data, error }
+          if (!error) break
+          console.error(`Error updating purchase in cloud (attempt ${attempt + 1}):`, error)
+          if (attempt === 0) await new Promise(r => setTimeout(r, 500))
+        }
 
-        if (error) {
-          console.error('Error updating purchase in cloud:', error)
-          // Purchase is already updated locally, so we continue
-        } else if (data) {
+        if (result.error) {
+          console.error('Error updating purchase in cloud after retry:', result.error)
+          // Purchase is already updated locally; getAll() will merge local sold_quantity when fetching
+        } else if (result.data) {
           // Update local with cloud data
-          await put(STORES.PURCHASES, data as Purchase)
-          return data as Purchase
+          await put(STORES.PURCHASES, result.data as Purchase)
+          return result.data as Purchase
         }
       } catch (error) {
         console.error('Error in cloudPurchaseService.update:', error)

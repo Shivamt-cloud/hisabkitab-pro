@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { usePlanUpgrade } from '../context/PlanUpgradeContext'
 import { UserMenu } from '../components/UserMenu'
 import { saleService } from '../services/saleService'
 import { purchaseService, supplierService } from '../services/purchaseService'
@@ -11,7 +12,10 @@ import { settingsService } from '../services/settingsService'
 import { companyService } from '../services/companyService'
 import { supplierPaymentService } from '../services/supplierPaymentService'
 import { paymentService } from '../services/paymentService'
+import { expenseService } from '../services/expenseService'
 import { getTierPricing } from '../utils/tierPricing'
+import { SATISFIED_CUSTOMERS_COUNT } from '../constants'
+import type { Expense } from '../types/expense'
 import { 
   ShoppingCart, 
   History, 
@@ -41,6 +45,7 @@ import {
   Barcode,
   BarChart3,
   ReceiptText,
+  Wallet,
   ExternalLink,
   Wrench,
   Heart,
@@ -50,7 +55,10 @@ import {
   BookOpen,
   Search,
   ListOrdered,
+  ClipboardList,
+  Tag,
   X,
+  Lock,
 } from 'lucide-react'
 import SubscriptionRechargeModal from '../components/SubscriptionRechargeModal'
 
@@ -93,7 +101,8 @@ const FOOTER_ROTATION_INTERVAL_MS = 5000 // Switch to next set of apps every 5 s
 const FOOTER_APPS_VISIBLE = 4 // How many app cards to show at a time (rest rotate in)
 
 const Dashboard = () => {
-  const { hasPermission, user, getCurrentCompanyId, currentCompanyId } = useAuth()
+  const { hasPermission, hasPlanFeature, user, getCurrentCompanyId, currentCompanyId } = useAuth()
+  const { showPlanUpgrade } = usePlanUpgrade()
   const navigate = useNavigate()
   const [footerRotationIndex, setFooterRotationIndex] = useState(0)
   const [reports, setReports] = useState<ReportSummary[]>([])
@@ -109,6 +118,7 @@ const Dashboard = () => {
     totalSuppliers: 0,
     todaySales: 0,
     thisWeekSales: 0,
+    reorderListCount: 0,
   })
   const [companyName, setCompanyName] = useState<string>('')
   const [subscriptionInfo, setSubscriptionInfo] = useState<{
@@ -128,6 +138,14 @@ const Dashboard = () => {
     customerCount: number
     supplierCount: number
   } | null>(null)
+  const [cashFlow, setCashFlow] = useState<{
+    byPayment: { cash: number; upi: number; card: number; other: number; credit: number }
+    totalSales: number
+    totalExpenses: number
+    netCash: number
+  } | null>(null)
+  const [summaryLoading, setSummaryLoading] = useState(true)
+  const [fullDataLoading, setFullDataLoading] = useState(true)
   const [showSetGoalModal, setShowSetGoalModal] = useState(false)
   const [setGoalForm, setSetGoalForm] = useState({ daily: '' as string | number, monthly: '' as string | number })
   const [setGoalSaving, setSetGoalSaving] = useState(false)
@@ -322,29 +340,33 @@ const Dashboard = () => {
   }
 
   const calculateReports = async () => {
-    // Use stable company ID so load uses same key as save (fixes sales target reset on refresh)
     const companyId = getCurrentCompanyId()
     const effectiveCompanyId = companyId ?? user?.company_id ?? undefined
-    const [allSales, allPurchases, allProducts, allCustomers, allSuppliers, upcomingChecks, generalSettingsRes, paymentStatsRes] = await Promise.all([
-      saleService.getAll(true, companyId),
-      purchaseService.getAll(undefined, companyId),
-      productService.getAll(false, companyId),
-      customerService.getAll(false, companyId),
-      supplierService.getAll(companyId),
-      supplierPaymentService.getUpcomingChecks(companyId, 30),
-      settingsService.getGeneral(effectiveCompanyId),
-      paymentService.getStats(companyId),
+
+    setSummaryLoading(true)
+    setFullDataLoading(true)
+
+    // Phase 1: Fast path – load sales and purchases first so report summary always loads
+    const [allSales, allPurchases] = await Promise.all([
+      saleService.getAllFast(true, companyId),
+      purchaseService.getAllFast(undefined, companyId),
     ])
-    setGeneralSettings({
-      sales_target_daily: generalSettingsRes.sales_target_daily,
-      sales_target_monthly: generalSettingsRes.sales_target_monthly,
-    })
+    // Load expenses separately – failure must not block report summary
+    let allExpenses: Expense[] = []
+    try {
+      allExpenses = await expenseService.getAll(companyId)
+    } catch (e) {
+      console.warn('[Dashboard] Expense load failed, cash flow will show 0 expenses:', e)
+    }
+    const paymentStatsRes = paymentService.getStatsFromSalesPurchases(allSales, allPurchases)
+
     setOutstandingStats({
       customerOutstanding: paymentStatsRes.customerOutstanding,
       supplierOutstanding: paymentStatsRes.supplierOutstanding,
       customerCount: paymentStatsRes.customerCount,
       supplierCount: paymentStatsRes.supplierCount,
     })
+    setSummaryLoading(false)
 
     // Get date range based on selected time period
     const { startDate, endDate } = getDateRange()
@@ -416,16 +438,51 @@ const Dashboard = () => {
     // Calculate total purchases (handle both GST and simple purchases)
     const totalPurchases = filteredPurchases.reduce((sum, purchase) => {
       if (purchase.type === 'gst') {
-        // GST purchase has grand_total
         return sum + ((purchase as any).grand_total || 0)
       } else {
-        // Simple purchase has total_amount
         return sum + ((purchase as any).total_amount || 0)
       }
     }, 0)
-    
-    // Calculate profit based on actual sold items with date filter (item-wise profit calculation)
-    // Note: calculateProfit is async, so we'll calculate profit from filtered sales directly
+
+    // Filter expenses by date range (exclude opening/closing balance entries)
+    const filteredExpenses = allExpenses.filter(exp => {
+      if (exp.expense_type === 'opening' || exp.expense_type === 'closing') return false
+      if (!startDate && !endDate) return true
+      const expDate = new Date(exp.expense_date).getTime()
+      if (startDate && expDate < new Date(startDate).getTime()) return false
+      if (endDate) {
+        const endDateTime = new Date(endDate).getTime() + 86400000
+        if (expDate > endDateTime) return false
+      }
+      return true
+    })
+    const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0)
+    const netCash = totalSales - totalPurchases - totalExpenses
+
+    // Aggregate sales by payment method (Cash, UPI, Card, Other, Credit)
+    const byPayment = { cash: 0, upi: 0, card: 0, other: 0, credit: 0 }
+    const norm = (m: string) => m.toLowerCase().trim()
+    filteredSales.forEach(sale => {
+      if (sale.payment_methods && sale.payment_methods.length > 0) {
+        sale.payment_methods.forEach(pm => {
+          const method = norm(pm.method)
+          if (method === 'cash') byPayment.cash += pm.amount
+          else if (method === 'upi') byPayment.upi += pm.amount
+          else if (method.includes('card')) byPayment.card += pm.amount
+          else if (method === 'credit') byPayment.credit += pm.amount
+          else byPayment.other += pm.amount
+        })
+      } else {
+        const method = norm(sale.payment_method || 'cash')
+        if (method === 'cash') byPayment.cash += sale.grand_total
+        else if (method === 'upi') byPayment.upi += sale.grand_total
+        else if (method.includes('card')) byPayment.card += sale.grand_total
+        else if (method === 'credit') byPayment.credit += sale.grand_total
+        else byPayment.other += sale.grand_total
+      }
+    })
+    setCashFlow({ byPayment, totalSales, totalExpenses, netCash })
+
     const totalProfit = filteredSales.reduce((sum, sale) => {
       const saleProfit = sale.items.reduce((itemSum, item) => {
         if (item.sale_type === 'sale' && item.purchase_price) {
@@ -435,7 +492,61 @@ const Dashboard = () => {
       }, 0)
       return sum + saleProfit
     }, 0)
-    
+
+    // Sales/purchase trends for period comparison
+    const now = new Date()
+    let thisPeriod: number
+    let lastPeriod: number
+    let thisPeriodPurchases: number
+    let lastPeriodPurchases: number
+    if (timePeriod === 'thisMonth' || timePeriod === 'all') {
+      thisPeriod = totalSales
+      const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0)
+      lastPeriod = allSales.filter(s => {
+        const saleDate = new Date(s.sale_date)
+        return saleDate >= lastMonthStart && saleDate <= lastMonthEnd
+      }).reduce((sum, s) => sum + s.grand_total, 0)
+      thisPeriodPurchases = totalPurchases
+      lastPeriodPurchases = allPurchases.filter(p => {
+        const purchaseDate = new Date(p.purchase_date)
+        return purchaseDate >= lastMonthStart && purchaseDate <= lastMonthEnd
+      }).reduce((sum, purchase) => {
+        if (purchase.type === 'gst') return sum + ((purchase as any).grand_total || 0)
+        return sum + ((purchase as any).total_amount || 0)
+      }, 0)
+    } else {
+      thisPeriod = totalSales
+      lastPeriod = 0
+      thisPeriodPurchases = totalPurchases
+      lastPeriodPurchases = 0
+    }
+    const salesTrend = lastPeriod > 0 ? ((thisPeriod - lastPeriod) / lastPeriod * 100) : 0
+    const purchasesTrend = lastPeriodPurchases > 0 ? ((thisPeriodPurchases - lastPeriodPurchases) / lastPeriodPurchases * 100) : 0
+
+    // Phase 1 complete – show critical summary first
+    const phase1Reports: ReportSummary[] = [
+      { title: 'Total Sales', value: `₹${totalSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`, change: salesTrend >= 0 ? `+${salesTrend.toFixed(1)}%` : `${salesTrend.toFixed(1)}%`, trend: salesTrend >= 0 ? 'up' : (salesTrend < 0 ? 'down' : 'neutral'), icon: <TrendingUp className="w-8 h-8" />, bgGradient: 'from-green-500 to-emerald-600', textColor: 'text-green-700' },
+      { title: 'Total Purchases', value: `₹${totalPurchases.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`, change: purchasesTrend !== 0 ? (purchasesTrend >= 0 ? `+${purchasesTrend.toFixed(1)}%` : `${purchasesTrend.toFixed(1)}%`) : '—', trend: purchasesTrend >= 0 ? 'up' : (purchasesTrend < 0 ? 'down' : 'neutral'), icon: <ShoppingBag className="w-8 h-8" />, bgGradient: 'from-blue-500 to-cyan-600', textColor: 'text-blue-700' },
+      { title: 'Total Profit', value: `₹${totalProfit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`, change: totalSales > 0 ? `${((totalProfit / totalSales) * 100).toFixed(1)}% margin` : '—', trend: totalProfit >= 0 ? 'up' : 'down', icon: <TrendingUp className="w-8 h-8" />, bgGradient: 'from-purple-500 to-pink-600', textColor: 'text-purple-700' },
+      { title: 'Total Products', value: '…', change: '—', trend: 'neutral', icon: <Package className="w-8 h-8" />, bgGradient: 'from-orange-500 to-red-600', textColor: 'text-orange-700' },
+      { title: 'Low Stock Alert', value: '…', change: '—', trend: 'neutral', icon: <AlertTriangle className="w-8 h-8" />, bgGradient: 'from-yellow-500 to-orange-600', textColor: 'text-yellow-700', onClick: () => navigate('/stock/alerts') },
+      { title: 'Out of Stock', value: '…', change: '—', trend: 'neutral', icon: <AlertTriangle className="w-8 h-8" />, bgGradient: 'from-red-500 to-pink-600', textColor: 'text-red-700', onClick: () => navigate('/stock/alerts') },
+      { title: 'Upcoming Checks', value: '…', change: '—', trend: 'neutral', icon: <CreditCard className="w-8 h-8" />, bgGradient: 'from-indigo-500 to-purple-600', textColor: 'text-indigo-700', onClick: () => navigate('/checks/upcoming') },
+    ]
+    setReports(phase1Reports)
+
+    // Phase 2: Secondary data – products, customers, suppliers, checks, settings
+    const [allProducts, allCustomers, allSuppliers, upcomingChecks, generalSettingsRes] = await Promise.all([
+      productService.getAll(false, companyId),
+      customerService.getAll(false, companyId),
+      supplierService.getAll(companyId),
+      supplierPaymentService.getUpcomingChecks(companyId, 30),
+      settingsService.getGeneral(effectiveCompanyId),
+    ])
+    setGeneralSettings({ sales_target_daily: generalSettingsRes.sales_target_daily, sales_target_monthly: generalSettingsRes.sales_target_monthly })
+    setFullDataLoading(false)
+
     // Create a map of product_id to max min_stock_level from purchase items
     const productMinStockMap = new Map<number, number>()
     // Calculate actual available stock from purchase items
@@ -520,6 +631,23 @@ const Dashboard = () => {
       const actualAvailableStock = productAvailableStockMap.get(p.id) ?? p.stock_quantity
       return actualAvailableStock === 0
     }).length
+
+    const upcomingChecksTotal = upcomingChecks.reduce((sum, check) => sum + check.amount, 0)
+
+    // Reorder List count: same logic as Reorder List page (product-level + article-level below min)
+    const reorderListProductCount = allProducts.filter(p => {
+      const minStockLevel = p.min_stock_level ?? productMinStockMap.get(p.id)
+      const actualAvailableStock = productAvailableStockMap.get(p.id) ?? p.stock_quantity
+      return (minStockLevel !== undefined && minStockLevel > 0) && (actualAvailableStock < minStockLevel)
+    }).length
+    let reorderListArticleCount = 0
+    articleToPurchaseItemMap.forEach((itemData) => {
+      if (itemData.minStock > 0 && itemData.availableQty <= itemData.minStock) {
+        const product = allProducts.find(p => p.id === itemData.product_id)
+        if (product) reorderListArticleCount++
+      }
+    })
+    const reorderListCount = reorderListProductCount + reorderListArticleCount
     
     console.log('[Dashboard] Stock alerts calculation:', {
       totalProducts,
@@ -545,68 +673,24 @@ const Dashboard = () => {
         })
     })
 
-    // Calculate this month's sales
-    const now = new Date()
-    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const nowDate = new Date()
+    const thisMonthStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1)
     const thisMonthSales = allSales.filter(s => {
       const saleDate = new Date(s.sale_date)
-      return saleDate >= thisMonthStart && saleDate <= now
+      return saleDate >= thisMonthStart && saleDate <= nowDate
     }).reduce((sum, s) => sum + s.grand_total, 0)
-
-    // Calculate today's sales
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const today = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate())
     const todaySales = allSales.filter(s => {
       const saleDate = new Date(s.sale_date)
-      return saleDate >= today && saleDate <= now
+      return saleDate >= today && saleDate <= nowDate
     }).reduce((sum, s) => sum + s.grand_total, 0)
-
-    // Calculate this week's sales
-    const weekStart = new Date(now)
-    weekStart.setDate(now.getDate() - now.getDay())
+    const weekStart = new Date(nowDate)
+    weekStart.setDate(nowDate.getDate() - nowDate.getDay())
     weekStart.setHours(0, 0, 0, 0)
     const thisWeekSales = allSales.filter(s => {
       const saleDate = new Date(s.sale_date)
-      return saleDate >= weekStart && saleDate <= now
+      return saleDate >= weekStart && saleDate <= nowDate
     }).reduce((sum, s) => sum + s.grand_total, 0)
-
-    // Calculate trends (current period vs previous period)
-    let thisPeriod: number
-    let lastPeriod: number
-    let thisPeriodPurchases: number
-    let lastPeriodPurchases: number
-
-    if (timePeriod === 'thisMonth' || timePeriod === 'all') {
-      // This month vs last month
-      thisPeriod = filteredSales.reduce((sum, s) => sum + s.grand_total, 0)
-      const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0)
-      lastPeriod = allSales.filter(s => {
-        const saleDate = new Date(s.sale_date)
-        return saleDate >= lastMonthStart && saleDate <= lastMonthEnd
-      }).reduce((sum, s) => sum + s.grand_total, 0)
-      
-      // Calculate purchase trends
-      thisPeriodPurchases = totalPurchases
-      lastPeriodPurchases = allPurchases.filter(p => {
-        const purchaseDate = new Date(p.purchase_date)
-        return purchaseDate >= lastMonthStart && purchaseDate <= lastMonthEnd
-      }).reduce((sum, purchase) => {
-        if (purchase.type === 'gst') {
-          return sum + ((purchase as any).grand_total || 0)
-        } else {
-          return sum + ((purchase as any).total_amount || 0)
-        }
-      }, 0)
-    } else {
-      // For other periods, compare with same period before
-      thisPeriod = totalSales
-      lastPeriod = 0 // Simplified for now
-      thisPeriodPurchases = totalPurchases
-      lastPeriodPurchases = 0 // Simplified for now
-    }
-
-    const salesTrend = lastPeriod > 0 ? ((thisPeriod - lastPeriod) / lastPeriod * 100) : 0
-    const purchasesTrend = lastPeriodPurchases > 0 ? ((thisPeriodPurchases - lastPeriodPurchases) / lastPeriodPurchases * 100) : 0
 
     // Update dashboard stats
     setDashboardStats({
@@ -616,6 +700,7 @@ const Dashboard = () => {
       totalSuppliers: allSuppliers.length,
       todaySales,
       thisWeekSales,
+      reorderListCount,
     })
 
     const reportsData: ReportSummary[] = [
@@ -678,7 +763,7 @@ const Dashboard = () => {
     {
       title: 'Upcoming Checks',
       value: upcomingChecks.length.toString(),
-      change: `₹${upcomingChecks.reduce((sum, check) => sum + check.amount, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+      change: `₹${upcomingChecksTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
       trend: upcomingChecks.length > 0 ? 'up' : 'neutral',
       icon: <CreditCard className="w-8 h-8" />,
       bgGradient: 'from-indigo-500 to-purple-600',
@@ -687,50 +772,35 @@ const Dashboard = () => {
     }
     ]
     setReports(reportsData)
+
+    // Background sync: keep IndexedDB and payment records in sync for other pages (non-blocking)
+    void (async () => {
+      try {
+        const [sales, purchases] = await Promise.all([
+          saleService.getAll(true, companyId),
+          purchaseService.getAll(undefined, companyId),
+        ])
+        await paymentService.initializeFromSalesAndPurchases(companyId, { sales, purchases })
+      } catch (e) {
+        console.warn('[Dashboard] Background sync failed:', e)
+      }
+    })()
   }
 
   const allSalesOptions = [
-    {
-      title: 'New Sale',
-      description: 'Create a new sales invoice',
-      icon: <ShoppingCart className="w-10 h-10" />,
-      gradient: 'from-blue-500 to-blue-600',
-      hoverGradient: 'from-blue-600 to-blue-700',
-      link: '/sales/new',
-      permission: 'sales:create'
-    },
-    {
-      title: 'New Sale Tab',
-      description: 'Open sale form in new tab (for multiple customers)',
-      icon: <ShoppingCart className="w-10 h-10" />,
-      gradient: 'from-green-500 to-emerald-600',
-      hoverGradient: 'from-green-600 to-emerald-700',
-      link: '/sales/new',
-      permission: 'sales:create',
-      openInNewTab: true // Flag to open in new tab
-    },
-    {
-      title: 'Sales History',
-      description: 'View all sales (Admin Only)',
-      icon: <History className="w-10 h-10" />,
-      gradient: 'from-purple-500 to-pink-600',
-      hoverGradient: 'from-purple-600 to-pink-700',
-      link: '/sales/history',
-      permission: 'sales:read',
-      adminOnly: true // Only show to admin
-    }
+    { title: 'Quick Sale', description: 'Scan barcode → auto-add → pay (fast checkout)', icon: <ShoppingCart className="w-10 h-10" />, gradient: 'from-emerald-500 to-teal-600', hoverGradient: 'from-emerald-600 to-teal-700', link: '/sales/quick', permission: 'sales:create', planFeature: 'sales_quick_sale' as const },
+    { title: 'New Sale', description: 'Create a new sales invoice (full form)', icon: <ShoppingCart className="w-10 h-10" />, gradient: 'from-blue-500 to-blue-600', hoverGradient: 'from-blue-600 to-blue-700', link: '/sales/new', permission: 'sales:create', planFeature: 'sales_new_sale' as const },
+    { title: 'New Sale Tab', description: 'Open sale form in new tab (for multiple customers)', icon: <ShoppingCart className="w-10 h-10" />, gradient: 'from-green-500 to-emerald-600', hoverGradient: 'from-green-600 to-emerald-700', link: '/sales/new', permission: 'sales:create', openInNewTab: true, planFeature: 'sales_new_sale_tab' as const },
   ]
 
-  // Filter sales options based on permissions and admin status
   const salesOptions = useMemo(() => {
     return allSalesOptions.filter(option => {
-      // Check permission first
       if (!hasPermission(option.permission)) return false
-      // If adminOnly, check if user is admin
+      if (!hasPlanFeature(option.planFeature)) return false
       if ((option as any).adminOnly && user?.role !== 'admin') return false
       return true
     })
-  }, [hasPermission, user])
+  }, [hasPermission, hasPlanFeature, user])
 
   const allPurchaseOptions = [
     {
@@ -758,7 +828,9 @@ const Dashboard = () => {
       gradient: 'from-indigo-500 to-purple-600',
       hoverGradient: 'from-indigo-600 to-purple-700',
       link: '/sales-category-management',
-      permission: 'users:read'
+      permission: 'users:read',
+      permissionAlt: 'sales_persons:read',
+      planFeature: 'purchase_sales_category_mgmt' as const
     },
     {
       title: 'GST Purchase',
@@ -767,7 +839,8 @@ const Dashboard = () => {
       gradient: 'from-indigo-500 to-purple-600',
       hoverGradient: 'from-indigo-600 to-purple-700',
       link: '/purchases/new-gst',
-      permission: 'purchases:create'
+      permission: 'purchases:create',
+      planFeature: 'purchase_gst' as const
     },
     {
       title: 'Simple Purchase',
@@ -785,7 +858,8 @@ const Dashboard = () => {
       gradient: 'from-violet-500 to-purple-600',
       hoverGradient: 'from-violet-600 to-purple-700',
       link: '/purchases/history',
-      permission: 'purchases:read'
+      permission: 'purchases:read',
+      planFeature: 'purchase_history' as const
     },
     {
       title: 'Upcoming Checks',
@@ -794,64 +868,56 @@ const Dashboard = () => {
       gradient: 'from-indigo-500 to-purple-600',
       hoverGradient: 'from-indigo-600 to-purple-700',
       link: '/checks/upcoming',
-      permission: 'purchases:read'
+      permission: 'purchases:read',
+      planFeature: 'purchase_upcoming_checks' as const
     }
   ]
 
-  // Filter purchase options based on permissions
-  const purchaseOptions = useMemo(() => {
+  // Purchase: show plan-gated options to all (with lock when locked); show non-plan-gated only when permission
+  const purchaseOptionsToShow = useMemo(() => {
     return allPurchaseOptions.filter(option => {
-      // Special handling for Sales & Category Management - check both users:read and sales_persons:read
-      if (option.link === '/sales-category-management') {
-        return hasPermission('users:read') || hasPermission('sales_persons:read')
-      }
-      return hasPermission(option.permission)
+      const hasPerm = (option as any).permissionAlt
+        ? (hasPermission(option.permission) || hasPermission((option as any).permissionAlt))
+        : hasPermission(option.permission)
+      if ((option as any).planFeature) return true
+      return hasPerm
     })
   }, [hasPermission])
 
   const allExpenseOptions = [
-    {
-      title: 'Daily Expenses',
-      description: 'Manage and track daily business expenses',
-      icon: <Receipt className="w-10 h-10" />,
-      gradient: 'from-red-500 to-pink-600',
-      hoverGradient: 'from-red-600 to-pink-700',
-      link: '/expenses',
-      permission: 'expenses:read'
-    },
-    {
-      title: 'Daily Report',
-      description: 'View comprehensive daily business summary',
-      icon: <FileText className="w-10 h-10" />,
-      gradient: 'from-green-500 to-emerald-600',
-      hoverGradient: 'from-green-600 to-emerald-700',
-      link: '/daily-report',
-      permission: 'expenses:read'
-    }
+    { title: 'Daily Expenses', description: 'Manage and track daily business expenses', icon: <Receipt className="w-10 h-10" />, gradient: 'from-red-500 to-pink-600', hoverGradient: 'from-red-600 to-pink-700', link: '/expenses', permission: 'expenses:read', planFeature: 'expense_daily_expenses' as const },
+    { title: 'Daily Report', description: 'View comprehensive daily business summary', icon: <FileText className="w-10 h-10" />, gradient: 'from-green-500 to-emerald-600', hoverGradient: 'from-green-600 to-emerald-700', link: '/daily-report', permission: 'expenses:read', planFeature: 'expense_daily_report' as const },
   ]
 
-  // Filter expense options based on permissions
   const expenseOptions = useMemo(() => {
-    return allExpenseOptions.filter(option => {
-      return hasPermission(option.permission)
-    })
-  }, [hasPermission])
+    return allExpenseOptions.filter(option => hasPermission(option.permission) && hasPlanFeature(option.planFeature))
+  }, [hasPermission, hasPlanFeature])
 
-  // Filter reports based on permissions
-  const visibleReports = useMemo(() => {
-    return reports.filter(report => {
-      if (report.title === 'Total Sales' || report.title === 'Total Profit') {
-        return hasPermission('sales:read')
-      }
-      if (report.title === 'Total Purchases') {
-        return hasPermission('purchases:read')
-      }
-      if (report.title === 'Low Stock Alert' || report.title === 'Out of Stock' || report.title === 'Total Products') {
-        return hasPermission('products:read')
-      }
-      return hasPermission('reports:read')
+  const reportTitleToPlanFeature: Record<string, string> = {
+    'Total Sales': 'report_total_sales',
+    'Total Purchases': 'report_total_purchases',
+    'Total Profit': 'report_total_profit',
+    'Total Products': 'report_total_products',
+    'Low Stock Alert': 'report_low_stock',
+    'Out of Stock': 'report_out_of_stock',
+    'Upcoming Checks': 'report_upcoming_checks',
+  }
+  const reportCardAccess = useMemo(() => {
+    const map: Record<string, boolean> = {}
+    reports.forEach(report => {
+      const permCheck = report.title === 'Total Sales' || report.title === 'Total Profit'
+        ? hasPermission('sales:read')
+        : report.title === 'Total Purchases'
+          ? hasPermission('purchases:read')
+          : (report.title === 'Low Stock Alert' || report.title === 'Out of Stock' || report.title === 'Total Products')
+            ? hasPermission('products:read')
+            : hasPermission('reports:read')
+      const planFeature = reportTitleToPlanFeature[report.title]
+      const planCheck = planFeature ? hasPlanFeature(planFeature as any) : true
+      map[report.title] = !!(permCheck && planCheck)
     })
-  }, [reports, hasPermission])
+    return map
+  }, [reports, hasPermission, hasPlanFeature])
 
   const getTrendIcon = (trend: 'up' | 'down' | 'neutral') => {
     switch (trend) {
@@ -936,6 +1002,10 @@ const Dashboard = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div>
+              <div className="flex items-center gap-2 mb-2 text-emerald-600 font-semibold">
+                <Users className="w-4 h-4" />
+                <span>{SATISFIED_CUSTOMERS_COUNT.toLocaleString()}+ Satisfied Customers</span>
+              </div>
               <h1 className="text-4xl font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
                 {companyName && companyName.trim() ? `${companyName} - HisabKitab-Pro` : 'HisabKitab-Pro'}
               </h1>
@@ -1128,7 +1198,7 @@ const Dashboard = () => {
           <span>Press <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono">Ctrl+K</kbd> (or <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono">⌘K</kbd> on Mac) to search products, customers, sales, purchases</span>
         </button>
         <p className="text-xs text-gray-500 pl-6">
-          Shortcuts: <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">⌘⇧S</kbd> / <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Ctrl+Shift+S</kbd> New Sale · <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">⌘⇧P</kbd> / <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Ctrl+Shift+P</kbd> New Purchase · <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">⌘S</kbd> / <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Ctrl+S</kbd> Save · <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">⌘P</kbd> / <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Ctrl+P</kbd> Print (on invoice)
+          Shortcuts: <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">⌘⇧Q</kbd> Quick Sale · <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">⌘⇧S</kbd> New Sale · <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">⌘⇧P</kbd> New Purchase · <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">⌘S</kbd> / <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Ctrl+S</kbd> Save · <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">⌘P</kbd> / <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Ctrl+P</kbd> Print (on invoice)
         </p>
       </div>
 
@@ -1164,8 +1234,9 @@ const Dashboard = () => {
               <p className="text-gray-600 text-lg">Quick access to sales and purchase operations</p>
             </div>
 
-            {/* Sales target – just below heading; manager can set goal directly */}
+            {/* Sales target – show always; lock when plan doesn't include */}
             {hasPermission('sales:read') && (
+              hasPlanFeature('dashboard_sales_target') ? (
               <div className="mb-8 p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl border border-emerald-200">
                 <div className="flex items-center justify-between gap-2 mb-3">
                   <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
@@ -1224,28 +1295,50 @@ const Dashboard = () => {
                   </p>
                 )}
               </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => showPlanUpgrade('dashboard_sales_target')}
+                  className="mb-8 w-full p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl border border-emerald-200 hover:border-emerald-300 hover:shadow-md transition-all text-left flex items-center justify-between gap-2"
+                >
+                  <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-emerald-600" />
+                    Sales target
+                  </h3>
+                  <Lock className="w-5 h-5 text-emerald-600" />
+                </button>
+              )
             )}
 
             {/* Sales Options */}
-            {salesOptions.length > 0 && (
-              <div className="mb-8">
-                <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
-                  <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-blue-600 rounded-full"></div>
-                  Sales
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                  {salesOptions.map((option, index) => (
-                    <button
-                      key={index}
-                      onClick={() => {
+            <div className="mb-8">
+              <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-blue-600 rounded-full"></div>
+                Sales
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                {allSalesOptions.map((option, index) => {
+                  const canAccess = hasPermission(option.permission) && hasPlanFeature(option.planFeature) && (!(option as any).adminOnly || user?.role === 'admin')
+                  const handleClick = canAccess
+                    ? () => {
                         if ((option as any).openInNewTab) {
                           window.open(option.link, '_blank')
                         } else {
                           navigate(option.link)
                         }
-                      }}
+                      }
+                    : () => showPlanUpgrade(option.planFeature)
+                  return (
+                    <button
+                      key={index}
+                      onClick={handleClick}
                       className={`group relative bg-gradient-to-br ${option.gradient} text-white rounded-2xl p-6 transform transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-blue-500/25 text-left overflow-hidden`}
                     >
+                      {!canAccess && (
+                        <div className="absolute top-3 right-3 z-20 rounded-full bg-white/90 p-1.5 shadow-md" title="Upgrade to unlock">
+                          <Lock className="w-4 h-4 text-emerald-600" />
+                        </div>
+                      )}
                       <div className={`absolute inset-0 bg-gradient-to-br ${option.hoverGradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300`}></div>
                       <div className="relative z-10">
                         <div className="mb-4 transform group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300">
@@ -1258,56 +1351,78 @@ const Dashboard = () => {
                         <div className="w-20 h-20 bg-white rounded-full blur-2xl"></div>
                       </div>
                     </button>
-                  ))}
-                </div>
+                  )
+                })}
               </div>
-            )}
+            </div>
 
-            {/* Purchase Options */}
-            {purchaseOptions.length > 0 && (
+            {/* Purchase Options - show all (plan-gated with lock when locked) */}
+            {purchaseOptionsToShow.length > 0 && (
               <div className="mb-8">
                 <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
                   <div className="w-1 h-6 bg-gradient-to-b from-cyan-500 to-blue-600 rounded-full"></div>
                   Purchase
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                  {purchaseOptions.map((option, index) => (
-                    <button
-                      key={index}
-                      onClick={() => navigate(option.link)}
-                      className={`group relative bg-gradient-to-br ${option.gradient} text-white rounded-2xl p-6 transform transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-cyan-500/25 text-left overflow-hidden`}
-                    >
-                      <div className={`absolute inset-0 bg-gradient-to-br ${option.hoverGradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300`}></div>
-                      <div className="relative z-10">
-                        <div className="mb-4 transform group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300">
-                          {option.icon}
+                  {purchaseOptionsToShow.map((option, index) => {
+                    const hasPerm = (option as any).permissionAlt
+                      ? (hasPermission(option.permission) || hasPermission((option as any).permissionAlt))
+                      : hasPermission(option.permission)
+                    const planFeature = (option as any).planFeature
+                    const canAccess = hasPerm && (planFeature ? hasPlanFeature(planFeature) : true)
+                    const handleClick = canAccess
+                      ? () => navigate(option.link)
+                      : () => planFeature && showPlanUpgrade(planFeature)
+                    return (
+                      <button
+                        key={index}
+                        onClick={handleClick}
+                        className={`group relative bg-gradient-to-br ${option.gradient} text-white rounded-2xl p-6 transform transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-cyan-500/25 text-left overflow-hidden`}
+                      >
+                        {!canAccess && planFeature && (
+                          <div className="absolute top-3 right-3 z-20 rounded-full bg-white/90 p-1.5 shadow-md" title="Upgrade to unlock">
+                            <Lock className="w-4 h-4 text-cyan-600" />
+                          </div>
+                        )}
+                        <div className={`absolute inset-0 bg-gradient-to-br ${option.hoverGradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300`}></div>
+                        <div className="relative z-10">
+                          <div className="mb-4 transform group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300">
+                            {option.icon}
+                          </div>
+                          <h3 className="text-xl font-bold mb-2">{option.title}</h3>
+                          <p className="text-white/90 text-sm leading-relaxed">{option.description}</p>
                         </div>
-                        <h3 className="text-xl font-bold mb-2">{option.title}</h3>
-                        <p className="text-white/90 text-sm leading-relaxed">{option.description}</p>
-                      </div>
-                      <div className="absolute top-4 right-4 opacity-20 group-hover:opacity-30 transition-opacity">
-                        <div className="w-20 h-20 bg-white rounded-full blur-2xl"></div>
-                      </div>
-                    </button>
-                  ))}
+                        <div className="absolute top-4 right-4 opacity-20 group-hover:opacity-30 transition-opacity">
+                          <div className="w-20 h-20 bg-white rounded-full blur-2xl"></div>
+                        </div>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             )}
 
-            {/* Expense Options */}
-            {expenseOptions.length > 0 && (
-              <div className="mt-8 pt-8 border-t border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
-                  <div className="w-1 h-6 bg-gradient-to-b from-red-500 to-pink-600 rounded-full"></div>
-                  Daily Expenses & Reports
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                  {expenseOptions.map((option, index) => (
+            {/* Expense Options - Daily Expenses & Reports */}
+            <div className="mt-8 pt-8 border-t border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                <div className="w-1 h-6 bg-gradient-to-b from-red-500 to-pink-600 rounded-full"></div>
+                Daily Expenses & Reports
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                {allExpenseOptions.map((option, index) => {
+                  const canAccess = hasPermission(option.permission) && hasPlanFeature(option.planFeature)
+                  const handleClick = canAccess ? () => navigate(option.link) : () => showPlanUpgrade(option.planFeature)
+                  return (
                     <button
                       key={index}
-                      onClick={() => navigate(option.link)}
+                      onClick={handleClick}
                       className={`group relative bg-gradient-to-br ${option.gradient} text-white rounded-2xl p-6 transform transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-red-500/25 text-left overflow-hidden`}
                     >
+                      {!canAccess && (
+                        <div className="absolute top-3 right-3 z-20 rounded-full bg-white/90 p-1.5 shadow-md" title="Upgrade to unlock">
+                          <Lock className="w-4 h-4 text-pink-600" />
+                        </div>
+                      )}
                       <div className={`absolute inset-0 bg-gradient-to-br ${option.hoverGradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300`}></div>
                       <div className="relative z-10">
                         <div className="mb-4 transform group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300">
@@ -1320,10 +1435,10 @@ const Dashboard = () => {
                         <div className="w-20 h-20 bg-white rounded-full blur-2xl"></div>
                       </div>
                     </button>
-                  ))}
-                </div>
+                  )
+                })}
               </div>
-            )}
+            </div>
 
             {/* Stock Management Options */}
             {hasPermission('products:read') && (
@@ -1350,13 +1465,23 @@ const Dashboard = () => {
                     </div>
                   </button>
                   <button
-                    onClick={() => navigate('/stock/reorder')}
+                    onClick={() => hasPlanFeature('purchase_reorder') ? navigate('/stock/reorder') : showPlanUpgrade('purchase_reorder')}
                     className="group relative bg-gradient-to-br from-emerald-500 to-teal-600 text-white rounded-2xl p-6 transform transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-emerald-500/25 text-left overflow-hidden"
                   >
+                    {!hasPlanFeature('purchase_reorder') && (
+                      <div className="absolute top-3 right-3 z-20 rounded-full bg-white/90 p-1.5 shadow-md" title="Upgrade to unlock">
+                        <Lock className="w-4 h-4 text-emerald-600" />
+                      </div>
+                    )}
                     <div className="absolute inset-0 bg-gradient-to-br from-teal-600 to-cyan-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                     <div className="relative z-10">
-                      <div className="mb-4 transform group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300">
+                      <div className="mb-4 transform group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300 flex items-center gap-2">
                         <ListOrdered className="w-10 h-10" />
+                        {dashboardStats.reorderListCount > 0 && hasPlanFeature('purchase_reorder') && (
+                          <span className="bg-white/90 text-emerald-700 text-sm font-bold rounded-full min-w-[1.5rem] h-6 px-2 flex items-center justify-center">
+                            {dashboardStats.reorderListCount}
+                          </span>
+                        )}
                       </div>
                       <h3 className="text-xl font-bold mb-2">Reorder List</h3>
                       <p className="text-white/90 text-sm leading-relaxed">Products below min stock with last purchase qty/rate</p>
@@ -1365,6 +1490,29 @@ const Dashboard = () => {
                       <div className="w-20 h-20 bg-white rounded-full blur-2xl"></div>
                     </div>
                   </button>
+                  {hasPermission('purchases:create') && (
+                    <button
+                      onClick={() => hasPlanFeature('purchase_reorder') ? navigate('/purchases/reorder') : showPlanUpgrade('purchase_reorder')}
+                      className="group relative bg-gradient-to-br from-violet-500 to-purple-600 text-white rounded-2xl p-6 transform transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-violet-500/25 text-left overflow-hidden"
+                    >
+                      {!hasPlanFeature('purchase_reorder') && (
+                        <div className="absolute top-3 right-3 z-20 rounded-full bg-white/90 p-1.5 shadow-md" title="Upgrade to unlock">
+                          <Lock className="w-4 h-4 text-violet-600" />
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-br from-purple-600 to-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                      <div className="relative z-10">
+                        <div className="mb-4 transform group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300">
+                          <ClipboardList className="w-10 h-10" />
+                        </div>
+                        <h3 className="text-xl font-bold mb-2">Reorder Form</h3>
+                        <p className="text-white/90 text-sm leading-relaxed">Select supplier, see previous purchase, then create GST purchase</p>
+                      </div>
+                      <div className="absolute top-4 right-4 opacity-20 group-hover:opacity-30 transition-opacity">
+                        <div className="w-20 h-20 bg-white rounded-full blur-2xl"></div>
+                      </div>
+                    </button>
+                  )}
                   {hasPermission('products:update') && (
                     <button
                       onClick={() => navigate('/stock/adjust')}
@@ -1388,7 +1536,7 @@ const Dashboard = () => {
             )}
 
             {/* No permissions message */}
-            {salesOptions.length === 0 && purchaseOptions.length === 0 && expenseOptions.length === 0 && !hasPermission('products:read') && (
+            {salesOptions.length === 0 && purchaseOptionsToShow.length === 0 && expenseOptions.length === 0 && !hasPermission('products:read') && (
               <div className="text-center py-12 text-gray-500">
                 <p className="text-lg font-medium">You don't have permission to access sales, purchase, or expense operations.</p>
               </div>
@@ -1503,10 +1651,124 @@ const Dashboard = () => {
               </div>
             </div>
 
+            {/* Cash Flow Overview – show always; lock when plan doesn't include */}
+            {hasPermission('sales:read') && (
+              hasPlanFeature('dashboard_cash_flow') ? (
+              <div className="mb-8">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide flex items-center gap-2">
+                  <Wallet className="w-4 h-4 text-indigo-600" />
+                  Cash flow overview
+                </h3>
+                {summaryLoading ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                      {[1, 2, 3, 4, 5, 6].map((i) => (
+                        <div key={i} className="p-3 bg-white rounded-xl border border-gray-200 shadow-sm animate-pulse">
+                          <div className="h-4 bg-gray-200 rounded w-14 mb-2"></div>
+                          <div className="h-7 bg-gray-100 rounded w-20"></div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="p-3 bg-white rounded-xl border border-gray-200 shadow-sm animate-pulse">
+                        <div className="h-4 bg-gray-200 rounded w-20 mb-2"></div>
+                        <div className="h-7 bg-gray-100 rounded w-24"></div>
+                      </div>
+                      <div className="p-3 bg-white rounded-xl border border-gray-200 shadow-sm animate-pulse">
+                        <div className="h-4 bg-gray-200 rounded w-16 mb-2"></div>
+                        <div className="h-7 bg-gray-100 rounded w-24"></div>
+                      </div>
+                    </div>
+                  </div>
+                ) : cashFlow && cashFlow.byPayment ? (
+                  <div className="space-y-4">
+                    {/* Top row: Sales by payment method + Total Sale */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 overflow-x-auto">
+                      <div className="p-3 min-w-[7rem] bg-gradient-to-br from-emerald-50 to-green-50 rounded-xl border border-emerald-200">
+                        <p className="text-xs font-medium text-emerald-700 uppercase tracking-wide mb-0.5">Cash</p>
+                        <p className="text-sm font-bold text-emerald-900 break-all">₹{(cashFlow.byPayment.cash ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                      </div>
+                      <div className="p-3 min-w-[7rem] bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-200">
+                        <p className="text-xs font-medium text-blue-700 uppercase tracking-wide mb-0.5">UPI</p>
+                        <p className="text-sm font-bold text-blue-900">₹{(cashFlow.byPayment.upi ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                      </div>
+                      <div className="p-3 min-w-[7rem] bg-gradient-to-br from-violet-50 to-purple-50 rounded-xl border border-violet-200">
+                        <p className="text-xs font-medium text-violet-700 uppercase tracking-wide mb-0.5">Card</p>
+                        <p className="text-sm font-bold text-violet-900 break-all">₹{(cashFlow.byPayment.card ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                      </div>
+                      <div className="p-3 min-w-[7rem] bg-gradient-to-br from-slate-50 to-gray-100 rounded-xl border border-slate-200">
+                        <p className="text-xs font-medium text-slate-700 uppercase tracking-wide mb-0.5">Other</p>
+                        <p className="text-sm font-bold text-slate-900">₹{(cashFlow.byPayment.other ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                      </div>
+                      <div className="p-3 min-w-[7rem] bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl border border-amber-200">
+                        <p className="text-xs font-medium text-amber-700 uppercase tracking-wide mb-0.5">Credit</p>
+                        <p className="text-sm font-bold text-amber-900 break-all">₹{(cashFlow.byPayment.credit ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                      </div>
+                      <div className="p-3 min-w-[7rem] bg-gradient-to-br from-teal-50 to-cyan-50 rounded-xl border border-teal-200">
+                        <p className="text-xs font-medium text-teal-700 uppercase tracking-wide mb-0.5">Total Sale</p>
+                        <p className="text-sm font-bold text-teal-900">₹{(cashFlow.totalSales ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                      </div>
+                    </div>
+                    {/* Bottom row: Expenses & Net Cash */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="p-3 bg-gradient-to-br from-rose-50 to-red-50 rounded-xl border border-rose-200">
+                        <p className="text-xs font-medium text-rose-700 uppercase tracking-wide mb-0.5">Total Expenses</p>
+                        <p className="text-sm font-bold text-rose-900 break-all">₹{(cashFlow.totalExpenses ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                      </div>
+                      <div className={`p-3 rounded-xl border ${
+                        (cashFlow.netCash ?? 0) >= 0
+                          ? 'bg-gradient-to-br from-indigo-50 to-violet-50 border-indigo-200'
+                          : 'bg-gradient-to-br from-amber-50 to-orange-50 border-amber-200'
+                      }`}>
+                        <p className="text-xs font-medium uppercase tracking-wide mb-0.5 text-gray-700">Net Cash</p>
+                        <p className={`text-sm font-bold ${(cashFlow.netCash ?? 0) >= 0 ? 'text-indigo-900' : 'text-amber-900'}`}>
+                          ₹{Math.abs(cashFlow.netCash ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                          {(cashFlow.netCash ?? 0) < 0 && <span className="text-xs font-medium ml-1">(outflow)</span>}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => showPlanUpgrade('dashboard_cash_flow')}
+                className="mb-8 w-full p-4 bg-gradient-to-r from-indigo-50 to-violet-50 rounded-xl border border-indigo-200 hover:border-indigo-300 hover:shadow-md transition-all text-left flex items-center justify-between gap-2"
+              >
+                <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+                  <Wallet className="w-4 h-4 text-indigo-600" />
+                  Cash flow overview
+                </h3>
+                <Lock className="w-5 h-5 text-indigo-600" />
+              </button>
+            )
+            )}
+
             {/* Top 5 products & Top 5 customers */}
-            {hasPermission('sales:read') && (topProducts.length > 0 || topCustomers.length > 0) && (
+            {hasPermission('sales:read') && (
+              summaryLoading ? (
+                <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm animate-pulse">
+                    <div className="h-4 bg-gray-200 rounded w-1/2 mb-3"></div>
+                    <div className="space-y-2">
+                      {[1, 2, 3, 4, 5].map((i) => (
+                        <div key={i} className="h-4 bg-gray-100 rounded"></div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm animate-pulse">
+                    <div className="h-4 bg-gray-200 rounded w-1/2 mb-3"></div>
+                    <div className="space-y-2">
+                      {[1, 2, 3, 4, 5].map((i) => (
+                        <div key={i} className="h-4 bg-gray-100 rounded"></div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
               <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                {topProducts.length > 0 && (
+                {hasPlanFeature('dashboard_top_5_products') && topProducts.length > 0 ? (
                   <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm">
                     <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide flex items-center gap-2">
                       <Package className="w-4 h-4" />
@@ -1521,8 +1783,20 @@ const Dashboard = () => {
                       ))}
                     </ul>
                   </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => showPlanUpgrade('dashboard_top_5_products')}
+                    className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md transition-all text-left flex items-center justify-between gap-2"
+                  >
+                    <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+                      <Package className="w-4 h-4" />
+                      Top 5 products (period)
+                    </h3>
+                    <Lock className="w-5 h-5 text-gray-500" />
+                  </button>
                 )}
-                {topCustomers.length > 0 && (
+                {hasPlanFeature('dashboard_top_5_customers') && topCustomers.length > 0 ? (
                   <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm">
                     <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide flex items-center gap-2">
                       <Users className="w-4 h-4" />
@@ -1537,12 +1811,35 @@ const Dashboard = () => {
                       ))}
                     </ul>
                   </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => showPlanUpgrade('dashboard_top_5_customers')}
+                    className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md transition-all text-left flex items-center justify-between gap-2"
+                  >
+                    <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+                      <Users className="w-4 h-4" />
+                      Top 5 customers (period)
+                    </h3>
+                    <Lock className="w-5 h-5 text-gray-500" />
+                  </button>
                 )}
               </div>
+            )
             )}
 
-            {/* Outstanding summary: receivables + payables with link */}
-            {hasPermission('sales:read') && outstandingStats !== null && (
+            {/* Outstanding summary – show always; lock when plan doesn't include */}
+            {hasPermission('sales:read') && (
+              hasPlanFeature('dashboard_outstanding_summary') ? (
+              summaryLoading ? (
+              <div className="w-full mb-6 p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl border border-amber-200 animate-pulse">
+                <div className="h-4 bg-amber-200 rounded w-1/3 mb-3"></div>
+                <div className="flex gap-6">
+                  <div className="flex-1"><div className="h-6 bg-amber-100 rounded w-24"></div><div className="h-8 bg-amber-100 rounded w-20 mt-1"></div></div>
+                  <div className="flex-1"><div className="h-6 bg-amber-100 rounded w-24"></div><div className="h-8 bg-amber-100 rounded w-20 mt-1"></div></div>
+                </div>
+              </div>
+            ) : outstandingStats !== null && (
               <button
                 type="button"
                 onClick={() => navigate('/payments/outstanding')}
@@ -1568,22 +1865,53 @@ const Dashboard = () => {
                   View lists <ArrowUpRight className="w-4 h-4" />
                 </p>
               </button>
+            )) : (
+              <button
+                type="button"
+                onClick={() => showPlanUpgrade('dashboard_outstanding_summary')}
+                className="w-full mb-6 p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl border border-amber-200 hover:border-amber-300 hover:shadow-md transition-all text-left flex items-center justify-between gap-2"
+              >
+                <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+                  <DollarSign className="w-4 h-4" />
+                  Outstanding summary
+                </h3>
+                <Lock className="w-5 h-5 text-amber-600" />
+              </button>
+            )
             )}
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              {visibleReports.length === 0 ? (
-                <div className="col-span-2 text-center py-12 text-gray-500">
-                  <p className="text-lg font-medium">No reports available with your current permissions.</p>
-                </div>
+              {summaryLoading ? (
+                Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="rounded-xl p-6 border border-gray-200 animate-pulse bg-gradient-to-br from-white to-gray-50">
+                    <div className="h-10 w-10 bg-gray-200 rounded-xl mb-4"></div>
+                    <div className="h-4 bg-gray-200 rounded w-1/3 mb-2"></div>
+                    <div className="h-8 bg-gray-200 rounded w-1/2"></div>
+                  </div>
+                ))
               ) : (
-                visibleReports.map((report, index) => (
+                reports.map((report, index) => {
+                  const planFeature = reportTitleToPlanFeature[report.title] as keyof typeof reportTitleToPlanFeature | undefined
+                  const canAccess = reportCardAccess[report.title]
+                  const isLocked = !canAccess && planFeature
+                  const handleClick = canAccess && report.onClick
+                    ? report.onClick
+                    : isLocked
+                      ? () => showPlanUpgrade(planFeature as any)
+                      : undefined
+                  return (
                 <div
                   key={index}
-                  onClick={report.onClick}
+                  onClick={handleClick}
                   className={`group relative bg-gradient-to-br from-white to-gray-50 rounded-xl p-6 border border-gray-200/50 hover:border-gray-300 hover:shadow-xl transition-all duration-300 overflow-hidden ${
-                    report.onClick ? 'cursor-pointer hover:scale-105' : ''
+                    (canAccess && report.onClick) || isLocked ? 'cursor-pointer hover:scale-105' : ''
                   }`}
                 >
+                  {isLocked && (
+                    <div className="absolute top-3 right-3 z-20 rounded-full bg-white/90 p-1.5 shadow-md" title="Upgrade to unlock">
+                      <Lock className="w-4 h-4 text-amber-600" />
+                    </div>
+                  )}
                   <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br opacity-0 group-hover:opacity-5 transition-opacity duration-300" style={{background: `linear-gradient(135deg, var(--tw-gradient-stops))`}}></div>
                   <div className="relative z-10">
                     <div className="flex items-start justify-between mb-4">
@@ -1612,40 +1940,92 @@ const Dashboard = () => {
                   </div>
                   <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-gray-200 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                 </div>
-                ))
+                  )
+                })
               )}
             </div>
 
             {hasPermission('reports:read') && (
               <div className="mt-8 pt-8 border-t border-gray-200/50 space-y-4">
-                <button 
-                  onClick={() => navigate('/reports/daily-activity')}
-                  className="group w-full bg-gradient-to-r from-green-600 via-emerald-600 to-teal-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-green-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                <button
+                  onClick={() => hasPlanFeature('report_daily_activity') ? navigate('/reports/daily-activity') : showPlanUpgrade('report_daily_activity')}
+                  className="group relative w-full bg-gradient-to-r from-green-600 via-emerald-600 to-teal-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-green-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
+                  {!hasPlanFeature('report_daily_activity') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <Clock className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span>Daily Activity Report</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                 </button>
-                <button 
-                  onClick={() => navigate('/reports/sales')}
-                  className="group w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                <button
+                  onClick={() => hasPlanFeature('report_sales') ? navigate('/reports/sales') : showPlanUpgrade('report_sales')}
+                  className="group relative w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
+                  {!hasPlanFeature('report_sales') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <TrendingUp className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span>View Sales Reports</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                 </button>
-                <button 
-                  onClick={() => navigate('/reports/commissions')}
-                  className="group w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                <button
+                  onClick={() => hasPlanFeature('report_purchases') ? navigate('/reports/purchases') : showPlanUpgrade('report_purchases')}
+                  className="group relative w-full bg-gradient-to-r from-amber-600 via-orange-600 to-red-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-amber-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
+                  {!hasPlanFeature('report_purchases') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  <ShoppingBag className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                  <span>View Purchase Reports</span>
+                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                </button>
+                <button
+                  onClick={() => hasPlanFeature('report_profit_analysis') ? navigate('/reports/profit-analysis') : showPlanUpgrade('report_profit_analysis')}
+                  className="group relative w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-emerald-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                >
+                  {!hasPlanFeature('report_profit_analysis') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  <BarChart3 className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                  <span>Profit Analysis</span>
+                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                </button>
+                <button
+                  onClick={() => hasPlanFeature('report_expenses') ? navigate('/reports/expenses') : showPlanUpgrade('report_expenses')}
+                  className="group relative w-full bg-gradient-to-r from-rose-600 via-pink-600 to-orange-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-rose-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                >
+                  {!hasPlanFeature('report_expenses') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  <DollarSign className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                  <span>Expense Reports</span>
+                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                </button>
+                <button
+                  onClick={() => hasPlanFeature('report_comparative') ? navigate('/reports/comparative') : showPlanUpgrade('report_comparative')}
+                  className="group relative w-full bg-gradient-to-r from-cyan-600 via-teal-600 to-emerald-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-cyan-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                >
+                  {!hasPlanFeature('report_comparative') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  <BarChart3 className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                  <span>Comparative Reports (Month vs Month, Year vs Year)</span>
+                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                </button>
+                {hasPermission('sales:read') && (
+                  <button
+                    onClick={() => hasPlanFeature('report_customer_insights') ? navigate('/customers/insights') : showPlanUpgrade('report_customer_insights')}
+                    className="group relative w-full bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-amber-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                  >
+                    {!hasPlanFeature('report_customer_insights') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                    <Users className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                    <span>Customer Insights</span>
+                    <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                  </button>
+                )}
+                <button
+                  onClick={() => hasPlanFeature('report_commission') ? navigate('/reports/commissions') : showPlanUpgrade('report_commission')}
+                  className="group relative w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                >
+                  {!hasPlanFeature('report_commission') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <TrendingUp className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span>View Commission Reports</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                 </button>
-                <button 
-                  onClick={() => navigate('/reports/ca')}
-                  className="group w-full bg-gradient-to-r from-slate-600 via-slate-700 to-slate-800 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-slate-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                <button
+                  onClick={() => hasPlanFeature('report_ca') ? navigate('/reports/ca') : showPlanUpgrade('report_ca')}
+                  className="group relative w-full bg-gradient-to-r from-slate-600 via-slate-700 to-slate-800 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-slate-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
+                  {!hasPlanFeature('report_ca') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <FileText className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span>CA Reports (GSTR-1, GSTR-2, GSTR-3B)</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -1654,17 +2034,18 @@ const Dashboard = () => {
             )}
             {hasPermission('sales:read') && (
               <div className="mt-6 pt-6 border-t border-gray-200/50 space-y-4">
-                <button 
-                  onClick={() => navigate('/payments/outstanding')}
-                  className="group w-full bg-gradient-to-r from-orange-600 via-red-600 to-pink-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-orange-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                <button
+                  onClick={() => hasPlanFeature('report_outstanding') ? navigate('/payments/outstanding') : showPlanUpgrade('report_outstanding')}
+                  className="group relative w-full bg-gradient-to-r from-orange-600 via-red-600 to-pink-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-orange-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
+                  {!hasPlanFeature('report_outstanding') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <DollarSign className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span>Outstanding Payments</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                 </button>
               </div>
             )}
-            {hasPermission('settings:update') && (
+            {hasPermission('settings:update') && user?.role === 'admin' && (
               <div className="mt-6 pt-6 border-t border-gray-200/50 space-y-4">
                 <button 
                   onClick={() => navigate('/settings')}
@@ -1676,25 +2057,18 @@ const Dashboard = () => {
                 </button>
               </div>
             )}
-            {hasPermission('products:update') && (
-              <div className="mt-6 pt-6 border-t border-gray-200/50 space-y-4">
-                <button 
-                  onClick={() => navigate('/backup-restore')}
-                  className="group w-full bg-gradient-to-r from-teal-600 via-cyan-600 to-blue-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-teal-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
-                >
-                  <Database className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                  <span>Backup & Restore</span>
-                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
-                </button>
-              </div>
-            )}
-            {(hasPermission('reports:read') ||
-              hasPermission('barcode_label_settings:read') ||
-              hasPermission('barcode_label_settings:update') ||
-              hasPermission('receipt_printer_settings:read') ||
-              hasPermission('receipt_printer_settings:update') ||
-              hasPermission('business_overview:read')) && (
-              <div className="mt-6 pt-6 border-t border-gray-200/50 space-y-4">
+            <div className="mt-6 pt-6 border-t border-gray-200/50 space-y-4">
+              <button 
+                onClick={() => (hasPermission('products:update') && hasPlanFeature('settings_backup_restore')) ? navigate('/backup-restore') : showPlanUpgrade('settings_backup_restore')}
+                className="group relative w-full bg-gradient-to-r from-teal-600 via-cyan-600 to-blue-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-teal-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+              >
+                {!(hasPermission('products:update') && hasPlanFeature('settings_backup_restore')) && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                <Database className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                <span>Backup & Restore</span>
+                <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+              </button>
+            </div>
+            <div className="mt-6 pt-6 border-t border-gray-200/50 space-y-4">
                 {hasPermission('reports:read') && (
                   <>
                     <button 
@@ -1715,42 +2089,57 @@ const Dashboard = () => {
                     </button>
                   </>
                 )}
-                {(hasPermission('barcode_label_settings:read') || hasPermission('barcode_label_settings:update')) && (
+                <button 
+                  onClick={() => (hasPermission('barcode_label_settings:read') || hasPermission('barcode_label_settings:update')) ? navigate('/settings/barcode-label') : showPlanUpgrade('settings_barcode_label')}
+                  className="group relative w-full bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                >
+                  {!(hasPermission('barcode_label_settings:read') || hasPermission('barcode_label_settings:update')) && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  <Barcode className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                  <span>Barcode Label Settings</span>
+                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                </button>
+                <button 
+                  onClick={() => (hasPermission('receipt_printer_settings:read') || hasPermission('receipt_printer_settings:update')) ? navigate('/settings/receipt-printer') : showPlanUpgrade('settings_receipt_printer')}
+                  className="group relative w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                >
+                  {!(hasPermission('receipt_printer_settings:read') || hasPermission('receipt_printer_settings:update')) && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                  <span>Receipt Printer Settings</span>
+                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                </button>
+                {hasPermission('products:read') && (
                   <button 
-                    onClick={() => navigate('/settings/barcode-label')}
-                    className="group w-full bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                    onClick={() => navigate('/settings/price-lists')}
+                    className="group w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-emerald-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                   >
-                    <Barcode className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                    <span>Barcode Label Settings</span>
+                    <Tag className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                    <span>Price Lists</span>
                     <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                   </button>
                 )}
-                {(hasPermission('receipt_printer_settings:read') || hasPermission('receipt_printer_settings:update')) && (
-                  <button 
-                    onClick={() => navigate('/settings/receipt-printer')}
-                    className="group w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
-                  >
-                    <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                    <span>Receipt Printer Settings</span>
-                    <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
-                  </button>
-                )}
-                {hasPermission('business_overview:read') && (
-                  <button
-                    onClick={() => navigate('/business-overview')}
-                    className="group w-full relative overflow-hidden bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white font-bold py-5 px-6 rounded-2xl hover:shadow-2xl hover:shadow-amber-500/30 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-3 border-2 border-amber-400/30"
-                  >
-                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_50%,_rgba(255,255,255,0.15)_0%,_transparent_50%)]" />
-                    <BarChart3 className="w-6 h-6 relative z-10 group-hover:rotate-6 transition-transform" />
-                    <span className="relative z-10">Business Overview</span>
-                    <ArrowUpRight className="w-5 h-5 relative z-10 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
-                    <p className="absolute bottom-2 left-6 right-6 text-center text-xs font-medium text-white/90 opacity-0 group-hover:opacity-100 transition-opacity">
-                      Employees, salary, expenses, sales, cost & P&L at a glance
-                    </p>
-                  </button>
-                )}
+                <button 
+                  onClick={() => hasPermission('settings:update') ? navigate('/settings/automated-exports') : showPlanUpgrade('settings_automated_exports')}
+                  className="group relative w-full bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-violet-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                >
+                  {!hasPermission('settings:update') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  <Calendar className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                  <span>Automated Exports</span>
+                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                </button>
+                <button
+                  onClick={() => hasPermission('business_overview:read') ? navigate('/business-overview') : showPlanUpgrade('report_business_overview')}
+                  className="group relative w-full overflow-hidden bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white font-bold py-5 px-6 rounded-2xl hover:shadow-2xl hover:shadow-amber-500/30 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-3 border-2 border-amber-400/30"
+                >
+                  {!hasPermission('business_overview:read') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_50%,_rgba(255,255,255,0.15)_0%,_transparent_50%)]" />
+                  <BarChart3 className="w-6 h-6 relative z-10 group-hover:rotate-6 transition-transform" />
+                  <span className="relative z-10">Business Overview</span>
+                  <ArrowUpRight className="w-5 h-5 relative z-10 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                  <p className="absolute bottom-2 left-6 right-6 text-center text-xs font-medium text-white/90 opacity-0 group-hover:opacity-100 transition-opacity">
+                    Employees, salary, expenses, sales, cost & P&L at a glance
+                  </p>
+                </button>
               </div>
-            )}
           </section>
 
         </div>

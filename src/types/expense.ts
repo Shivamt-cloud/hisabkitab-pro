@@ -11,6 +11,14 @@ export type ExpenseType =
   | 'marketing' // Marketing/advertising
   | 'other' // Other expenses
 
+/** Manual sales (closing) or extra money (opening) by payment method - outside system */
+export interface ManualExtraAmounts {
+  cash?: number
+  upi?: number
+  card?: number
+  other?: number
+}
+
 export interface CashDenominations {
   notes_2000?: number // Number of ₹2000 notes
   notes_500?: number // Number of ₹500 notes
@@ -38,6 +46,10 @@ export interface Expense {
   category?: string // Expense category for grouping
   // Cash denominations for opening/closing
   cash_denominations?: CashDenominations
+  /** For closing: manual sales (outside system). For opening: extra money (carry forward). */
+  manual_extra?: ManualExtraAmounts
+  /** Optional remark for opening/closing entries */
+  remark?: string
   company_id?: number
   created_by: number
   created_at: string

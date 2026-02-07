@@ -13,9 +13,12 @@ interface InvoiceProps {
   showActions?: boolean
 }
 
+const TZ_INDIA = 'Asia/Kolkata'
+
 const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: InvoiceProps) => {
   const invoiceRef = useRef<HTMLDivElement>(null)
   const [template, setTemplate] = useState<InvoiceTemplateType>('detailed')
+  const [timeFormat12h, setTimeFormat12h] = useState(true)
 
   useEffect(() => {
     settingsService.getAll()
@@ -24,6 +27,7 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
         if (t === 'compact' || t === 'detailed' || t === 'with_logo') setTemplate(t)
         else if (t === 'standard') setTemplate('detailed')
         else if (t === 'minimal') setTemplate('compact')
+        setTimeFormat12h((s?.general?.time_format ?? '12h') === '12h')
       })
       .catch(() => {})
   }, [])
@@ -64,7 +68,8 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
     const invoiceDate = new Date(invoiceData.invoice_date).toLocaleDateString('en-IN', {
       day: '2-digit',
       month: 'long',
-      year: 'numeric'
+      year: 'numeric',
+      timeZone: TZ_INDIA
     })
     const grandTotal = invoiceData.grand_total.toFixed(2)
     const companyName = invoiceData.company_info?.name || 'HisabKitab'
@@ -252,16 +257,12 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
               <strong>Date:</strong> {new Date(invoiceData.invoice_date).toLocaleDateString('en-IN', {
                 day: '2-digit',
                 month: 'long',
-                year: 'numeric'
+                year: 'numeric',
+                timeZone: TZ_INDIA
               })}
             </p>
             <p className="text-gray-600 text-sm">
-              <strong>Time:</strong> {new Date(invoiceData.invoice_date).toLocaleTimeString('en-IN', {
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: true
-              })}
+              <strong>Time:</strong> {getInvoiceTimeStr(invoiceData, timeFormat12h)}
             </p>
           </div>
         </div>
@@ -577,8 +578,23 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
   )
 }
 
+// Helper: use created_at for time when invoice_date is date-only (Supabase DATE column → 5:30 AM IST)
+const getInvoiceTimeStr = (invoiceData: InvoiceData, hour12 = true): string => {
+  const invDate = new Date(invoiceData.invoice_date)
+  const isDateOnly = !invoiceData.invoice_date.includes('T') || (invDate.getUTCHours() === 0 && invDate.getUTCMinutes() === 0 && invDate.getUTCSeconds() === 0)
+  const timeSource = (isDateOnly && invoiceData.created_at) ? new Date(invoiceData.created_at) : invDate
+  return timeSource.toLocaleTimeString('en-IN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12,
+    timeZone: TZ_INDIA
+  })
+}
+
 // Helper function to generate HTML for download
 const generateInvoiceHTML = (invoiceData: InvoiceData): string => {
+  const timeStr = getInvoiceTimeStr(invoiceData)
   return `
     <div class="invoice-container">
       <div class="invoice-header">
@@ -598,14 +614,10 @@ const generateInvoiceHTML = (invoiceData: InvoiceData): string => {
           <p><strong>Date:</strong> ${new Date(invoiceData.invoice_date).toLocaleDateString('en-IN', {
             day: '2-digit',
             month: 'long',
-            year: 'numeric'
+            year: 'numeric',
+            timeZone: TZ_INDIA
           })}</p>
-          <p><strong>Time:</strong> ${new Date(invoiceData.invoice_date).toLocaleTimeString('en-IN', {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: true
-          })}</p>
+          <p><strong>Time:</strong> ${timeStr}</p>
         </div>
       </div>
       <div class="billing-section">
