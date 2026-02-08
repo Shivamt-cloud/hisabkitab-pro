@@ -1,5 +1,5 @@
 import { useState, FormEvent, useEffect } from 'react'
-import { useAuth } from '../context/AuthContext'
+import { useAuth, isAuthNotAvailableError } from '../context/AuthContext'
 import { useNavigate, Link } from 'react-router-dom'
 import { LogIn, Mail, Lock, AlertCircle, User, Package, ShoppingCart, TrendingUp, Users, BarChart3, Shield, CheckCircle, MessageCircle, Globe, X, Building2, Phone, MapPin, FileText, UserPlus, BookOpen, Search, Target, WifiOff, Download } from 'lucide-react'
 import { COUNTRY_OPTIONS, detectCountry, formatPrice, getCountryPricing, getSavedCountry, isSupportedCountryCode, saveCountry, type CountryPricing } from '../utils/pricing'
@@ -45,6 +45,7 @@ const Login = () => {
   })
   const [isSubmittingForm, setIsSubmittingForm] = useState(false)
   const [subscriptionExpired, setSubscriptionExpired] = useState<{ daysExpired: number; currentTier: SubscriptionTier } | null>(null)
+  const [authNotAvailable, setAuthNotAvailable] = useState(false)
   const { login } = useAuth()
   const navigate = useNavigate()
 
@@ -70,6 +71,7 @@ const Login = () => {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError('')
+    setAuthNotAvailable(false)
     setIsLoading(true)
 
     try {
@@ -84,9 +86,15 @@ const Login = () => {
           const currentTier = (parts[2] || 'basic') as SubscriptionTier
           setSubscriptionExpired({ daysExpired, currentTier })
           setError('')
+          setAuthNotAvailable(false)
+        } else if (isAuthNotAvailableError(result.error)) {
+          setError('Session not ready. Please refresh the page and try again.')
+          setSubscriptionExpired(null)
+          setAuthNotAvailable(true)
         } else {
           setError(result.error || 'Invalid email or password')
           setSubscriptionExpired(null)
+          setAuthNotAvailable(false)
         }
       }
     } catch (err) {
@@ -132,7 +140,13 @@ const Login = () => {
           // Navigate to home page
           navigate('/')
         } else {
-          setError(result.error || 'Unable to sign in. Please contact support or use email/password login.')
+          if (isAuthNotAvailableError(result.error)) {
+            setError('Session not ready. Please refresh the page and try again.')
+            setAuthNotAvailable(true)
+          } else {
+            setError(result.error || 'Unable to sign in. Please contact support or use email/password login.')
+            setAuthNotAvailable(false)
+          }
         }
       } else {
         // User doesn't exist OR exists but has no company - show registration form
@@ -794,9 +808,20 @@ Please review and process this registration request.
               </h2>
 
               {error && (
-                <div className="mb-6 w-full bg-red-50 border-2 border-red-200 text-red-700 px-5 py-4 rounded-xl flex items-center gap-3 shadow-lg">
-                  <AlertCircle className="w-6 h-6 flex-shrink-0" />
-                  <span className="text-base font-semibold">{error}</span>
+                <div className="mb-6 w-full bg-red-50 border-2 border-red-200 text-red-700 px-5 py-4 rounded-xl flex flex-col gap-3 shadow-lg">
+                  <div className="flex items-center gap-3">
+                    <AlertCircle className="w-6 h-6 flex-shrink-0" />
+                    <span className="text-base font-semibold">{error}</span>
+                  </div>
+                  {authNotAvailable && (
+                    <button
+                      type="button"
+                      onClick={() => window.location.reload()}
+                      className="self-center px-4 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 transition-colors"
+                    >
+                      Refresh page
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -981,6 +1006,7 @@ Please review and process this registration request.
                   setShowEmailInput(false)
                   setGoogleEmail('')
                   setError('')
+                  setAuthNotAvailable(false)
                 }}
                 className="text-white hover:bg-white/20 rounded-full p-2 transition-colors"
               >
@@ -991,9 +1017,20 @@ Please review and process this registration request.
             {/* Modal Body */}
             <form onSubmit={handleEmailSubmit} className="p-6 space-y-6">
               {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-2">
-                  <AlertCircle className="w-5 h-5" />
-                  <span className="text-sm">{error}</span>
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                    <span className="text-sm">{error}</span>
+                  </div>
+                  {authNotAvailable && (
+                    <button
+                      type="button"
+                      onClick={() => window.location.reload()}
+                      className="self-start px-3 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700"
+                    >
+                      Refresh page
+                    </button>
+                  )}
                 </div>
               )}
 

@@ -1,3 +1,14 @@
+/** ID proof types for customer (e.g. Aadhaar, PAN, Passport). */
+export const CUSTOMER_ID_TYPES: { value: string; label: string }[] = [
+  { value: '', label: 'Select ID type' },
+  { value: 'aadhaar', label: 'Aadhaar Card' },
+  { value: 'pan', label: 'PAN Card' },
+  { value: 'passport', label: 'Passport' },
+  { value: 'voter_id', label: 'Voter ID' },
+  { value: 'driving_license', label: 'Driving License' },
+  { value: 'other', label: 'Other' },
+]
+
 export interface Customer {
   id: number
   name: string
@@ -9,6 +20,10 @@ export interface Customer {
   state?: string
   pincode?: string
   contact_person?: string
+  /** Type of ID submitted (Aadhaar, PAN, Passport, etc.) */
+  id_type?: string
+  /** ID number/details for the selected id_type */
+  id_number?: string
   is_active: boolean
   credit_limit?: number
   outstanding_amount?: number

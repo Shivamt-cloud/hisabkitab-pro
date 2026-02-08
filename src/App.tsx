@@ -12,6 +12,10 @@ import SimplePurchaseForm from './pages/SimplePurchaseForm'
 import SalesHistory from './pages/SalesHistory'
 import SaleForm from './pages/SaleForm'
 import QuickSale from './pages/QuickSale'
+import Rentals from './pages/Rentals'
+import RentForm from './pages/RentForm'
+import RentalView from './pages/RentalView'
+import RentReports from './pages/RentReports'
 import Suppliers from './pages/Suppliers'
 import SupplierForm from './pages/SupplierForm'
 import SupplierAccount from './pages/SupplierAccount'
@@ -226,6 +230,46 @@ function App() {
             element={
               <ProtectedRoute requiredPermission="sales:create">
                 <QuickSale />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/rentals"
+            element={
+              <ProtectedRoute requiredPermission="sales:read" requiredPlanFeature="sales_rent">
+                <Rentals />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/rentals/new"
+            element={
+              <ProtectedRoute requiredPermission="sales:create" requiredPlanFeature="sales_rent">
+                <RentForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/rentals/:id/edit"
+            element={
+              <ProtectedRoute requiredPermission="sales:create" requiredPlanFeature="sales_rent">
+                <RentForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/rentals/:id"
+            element={
+              <ProtectedRoute requiredPermission="sales:read" requiredPlanFeature="sales_rent">
+                <RentalView />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/rentals/report"
+            element={
+              <ProtectedRoute requiredPermission="sales:read" requiredPlanFeature="sales_rent">
+                <RentReports />
               </ProtectedRoute>
             }
           />

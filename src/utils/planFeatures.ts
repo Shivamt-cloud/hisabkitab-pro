@@ -21,6 +21,7 @@ export type PlanFeature =
   | 'sales_new_sale'
   | 'sales_new_sale_tab'
   | 'sales_history'
+  | 'sales_rent'
   // Purchase Options
   | 'purchase_customers'
   | 'purchase_suppliers'
@@ -73,6 +74,7 @@ export const PLAN_FEATURE_MAP: Record<PlanFeature, PlanTier | 'admin'> = {
   sales_new_sale: 'basic',
   sales_new_sale_tab: 'basic',
   sales_history: 'standard',
+  sales_rent: 'standard',
   // Purchase options
   purchase_customers: 'basic',
   purchase_suppliers: 'basic',
@@ -145,6 +147,7 @@ export const PLAN_FEATURE_LABELS: Partial<Record<PlanFeature, string>> = {
   report_business_overview: 'Business Overview',
   sales_quick_sale: 'Quick Sale',
   sales_history: 'Sales History',
+  sales_rent: 'Rent / Bookings',
   expense_daily_expenses: 'Daily Expenses',
   expense_daily_report: 'Daily Report',
 }

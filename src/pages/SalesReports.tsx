@@ -31,6 +31,16 @@ import {
 
 type ReportView = SalesReportView
 
+/** Format time for display: use created_at (actual record time) when available, else date-only as 12:00 AM */
+function formatRecordTime(dateStr: string, createdAt?: string | null): string {
+  if (createdAt) {
+    const d = new Date(createdAt)
+    if (!Number.isNaN(d.getTime())) return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+  }
+  const d = !dateStr ? new Date() : dateStr.includes('T') ? new Date(dateStr) : new Date(dateStr + 'T00:00:00')
+  return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+}
+
 const SalesReports = () => {
   const { hasPermission, getCurrentCompanyId } = useAuth()
   const { toast } = useToast()
@@ -669,7 +679,7 @@ const SalesReports = () => {
             <tbody className="divide-y divide-gray-200 bg-white">
               {dateSales.map((sale) => (
                 <tr key={sale.id} className="hover:bg-gray-50 transition-colors">
-                  {isColumnVisible('sales', 'sale_date') && <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-600">{new Date(sale.sale_date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</td>}
+                  {isColumnVisible('sales', 'sale_date') && <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-600">{formatRecordTime(sale.sale_date, sale.created_at)}</td>}
                   {isColumnVisible('sales', 'invoice_number') && <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{sale.invoice_number}</td>}
                   {isColumnVisible('sales', 'customer_name') && <td className="px-4 py-3 text-sm text-gray-900">{sale.customer_name || 'Walk-in'}</td>}
                   {isColumnVisible('sales', 'sales_person_name') && <td className="px-4 py-3 text-sm text-gray-600">{sale.sales_person_name || '—'}</td>}

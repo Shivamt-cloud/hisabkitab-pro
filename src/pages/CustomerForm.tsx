@@ -7,7 +7,7 @@ import { priceSegmentService } from '../services/priceListService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Breadcrumbs } from '../components/Breadcrumbs'
 import { Home, Save, X } from 'lucide-react'
-import { Customer } from '../types/customer'
+import { Customer, CUSTOMER_ID_TYPES } from '../types/customer'
 
 interface FormData {
   name: string
@@ -19,6 +19,8 @@ interface FormData {
   state: string
   pincode: string
   contact_person: string
+  id_type: string
+  id_number: string
   credit_limit: string
   price_segment_id: string
   is_active: boolean
@@ -46,6 +48,8 @@ const CustomerForm = () => {
     state: '',
     pincode: '',
     contact_person: '',
+    id_type: '',
+    id_number: '',
     credit_limit: '',
     price_segment_id: '',
     is_active: true,
@@ -54,6 +58,8 @@ const CustomerForm = () => {
   const [errors, setErrors] = useState<{ [key: string]: string }>({})
   const [creditBalance, setCreditBalance] = useState<number | undefined>(undefined)
   const [priceSegments, setPriceSegments] = useState<{ id: number; name: string }[]>([])
+  const [loadingCustomer, setLoadingCustomer] = useState(!!(isEditing && id))
+  const [customerNotFound, setCustomerNotFound] = useState(false)
 
   useEffect(() => {
     const loadSegments = async () => {
@@ -65,31 +71,49 @@ const CustomerForm = () => {
 
   useEffect(() => {
     if (isEditing && id) {
-      const loadCustomer = async () => {
-        const customer = await customerService.getById(parseInt(id))
-        if (customer) {
-          setFormData({
-            name: customer.name || '',
-            email: customer.email || '',
-            phone: customer.phone || '',
-            gstin: customer.gstin || '',
-            address: customer.address || '',
-            city: customer.city || '',
-            state: customer.state || '',
-            pincode: customer.pincode || '',
-            contact_person: customer.contact_person || '',
-            credit_limit: customer.credit_limit?.toString() || '',
-            price_segment_id: customer.price_segment_id?.toString() || '',
-            is_active: customer.is_active,
-          })
-          // Load credit balance
-          setCreditBalance(customer.credit_balance || 0)
-        }
+      const numId = parseInt(id, 10)
+      if (Number.isNaN(numId)) {
+        setCustomerNotFound(true)
+        setLoadingCustomer(false)
+        return
       }
-      loadCustomer()
+      setLoadingCustomer(true)
+      setCustomerNotFound(false)
+      customerService
+        .getById(numId)
+        .then((customer) => {
+          if (customer) {
+            setFormData({
+              name: customer.name || '',
+              email: customer.email || '',
+              phone: customer.phone || '',
+              gstin: customer.gstin || '',
+              address: customer.address || '',
+              city: customer.city || '',
+              state: customer.state || '',
+              pincode: customer.pincode || '',
+              contact_person: customer.contact_person || '',
+              id_type: customer.id_type || '',
+              id_number: customer.id_number || '',
+              credit_limit: customer.credit_limit?.toString() || '',
+              price_segment_id: customer.price_segment_id?.toString() || '',
+              is_active: customer.is_active,
+            })
+            setCreditBalance(customer.credit_balance || 0)
+          } else {
+            setCustomerNotFound(true)
+          }
+        })
+        .catch(() => {
+          setCustomerNotFound(true)
+        })
+        .finally(() => {
+          setLoadingCustomer(false)
+        })
     } else {
-      // Reset credit balance for new customer
       setCreditBalance(0)
+      setLoadingCustomer(false)
+      setCustomerNotFound(false)
     }
   }, [isEditing, id])
 
@@ -150,6 +174,8 @@ const CustomerForm = () => {
         state: formData.state.trim() || undefined,
         pincode: formData.pincode.trim() || undefined,
         contact_person: formData.contact_person.trim() || undefined,
+        id_type: formData.id_type.trim() || undefined,
+        id_number: formData.id_number.trim() || undefined,
         credit_limit: formData.credit_limit ? parseFloat(formData.credit_limit) : undefined,
         price_segment_id: formData.price_segment_id ? parseInt(formData.price_segment_id) : undefined,
         is_active: formData.is_active,
@@ -179,6 +205,38 @@ const CustomerForm = () => {
     } else {
       navigate('/customers')
     }
+  }
+
+  if (loadingCustomer) {
+    return (
+      <ProtectedRoute requiredPermission={isEditing ? 'sales:update' : 'sales:create'}>
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+          <div className="text-center">
+            <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+            <p className="text-gray-600 font-medium">Loading customer…</p>
+          </div>
+        </div>
+      </ProtectedRoute>
+    )
+  }
+
+  if (customerNotFound) {
+    return (
+      <ProtectedRoute requiredPermission="sales:update">
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+          <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md text-center">
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Customer not found</h2>
+            <p className="text-gray-600 mb-6">The customer may have been deleted or the link is invalid.</p>
+            <button
+              onClick={() => navigate('/customers')}
+              className="bg-blue-600 text-white font-semibold px-6 py-2.5 rounded-xl hover:bg-blue-700"
+            >
+              Back to Customers
+            </button>
+          </div>
+        </div>
+      </ProtectedRoute>
+    )
   }
 
   return (
@@ -295,6 +353,29 @@ const CustomerForm = () => {
                     ))}
                   </select>
                   <p className="text-xs text-gray-500 mt-1">Used for price lists (wholesale, VIP, etc.)</p>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">ID proof submitted</label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <select
+                      value={formData.id_type}
+                      onChange={(e) => setFormData({ ...formData, id_type: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                    >
+                      {CUSTOMER_ID_TYPES.map((opt) => (
+                        <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      value={formData.id_number}
+                      onChange={(e) => setFormData({ ...formData, id_number: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      placeholder={formData.id_type ? `Enter ${CUSTOMER_ID_TYPES.find(t => t.value === formData.id_type)?.label || 'ID'} number/details` : 'Select ID type first or enter details'}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">e.g. Aadhaar, PAN, Passport – for your records only</p>
                 </div>
               </div>
             </div>

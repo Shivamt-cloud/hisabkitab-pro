@@ -551,6 +551,9 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
           {invoiceData.company_info?.website && (
             <p className="mt-2">Visit us at: {invoiceData.company_info.website}</p>
           )}
+          <p className="mt-4 pt-3 border-t border-gray-100 text-indigo-600 font-semibold">
+            Powered by <a href="https://hisabkitabpro.com" target="_blank" rel="noopener noreferrer" className="hover:underline">HisabKitab Pro</a> · hisabkitabpro.com
+          </p>
           <p className="mt-2 text-gray-400">This is a computer-generated invoice and does not require a signature.</p>
         </div>
       </div>
@@ -760,7 +763,9 @@ const generateInvoiceHTML = (invoiceData: InvoiceData): string => {
       </div>
       <div class="footer">
         <p><strong>Thank you for your business!</strong></p>
-        <p>This is a computer-generated invoice and does not require a signature.</p>
+        <p style="margin-top: 12px; font-weight: 600; color: #4f46e5; font-size: 13px;">Powered by HisabKitab Pro · hisabkitabpro.com</p>
+        <p style="margin-top: 8px;"><a href="https://hisabkitabpro.com" target="_blank" rel="noopener noreferrer" style="color: #4f46e5;">hisabkitabpro.com</a></p>
+        <p style="margin-top: 12px;">This is a computer-generated invoice and does not require a signature.</p>
       </div>
     </div>
   `

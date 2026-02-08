@@ -245,11 +245,41 @@ const Expenses = () => {
                         </td>
                         <td className="px-6 py-4">
                           <span className="text-sm font-semibold text-red-600">
-                            ₹{expense.amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                            {expense.expense_type === 'opening' || expense.expense_type === 'closing'
+                              ? (() => {
+                                  const manual = expense.manual_extra || {}
+                                  const manualSum = (manual.cash || 0) + (manual.upi || 0) + (manual.card || 0) + (manual.other || 0)
+                                  const grandTotal = expense.amount + manualSum
+                                  return <>₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</>
+                                })()
+                              : <>₹{expense.amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</>
+                            }
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="text-xs text-gray-600 capitalize">{expense.payment_method}</span>
+                          {expense.expense_type === 'opening' || expense.expense_type === 'closing' ? (
+                            (() => {
+                              const manual = expense.manual_extra || {}
+                              const parts: string[] = []
+                              if (expense.expense_type === 'closing') {
+                                if (expense.amount > 0) parts.push(`Cash ₹${expense.amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)
+                                if ((manual.cash || 0) > 0) parts.push(`Cash(sales) ₹${(manual.cash || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)
+                              } else {
+                                const cashPart = expense.amount - ((manual.upi || 0) + (manual.card || 0) + (manual.other || 0))
+                                if (cashPart > 0) parts.push(`Cash ₹${cashPart.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)
+                              }
+                              if ((manual.upi || 0) > 0) parts.push(`UPI ₹${(manual.upi || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)
+                              if ((manual.card || 0) > 0) parts.push(`Card ₹${(manual.card || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)
+                              if ((manual.other || 0) > 0) parts.push(`Other ₹${(manual.other || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)
+                              return (
+                                <span className="text-xs text-gray-600">
+                                  {parts.length > 0 ? parts.join(' · ') : <span className="capitalize">{expense.payment_method}</span>}
+                                </span>
+                              )
+                            })()
+                          ) : (
+                            <span className="text-xs text-gray-600 capitalize">{expense.payment_method}</span>
+                          )}
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">

@@ -411,6 +411,8 @@ const BusinessOverview = () => {
     pdf.setTextColor(100, 100, 100)
     pdf.text('Business Overview – HisabKitab Pro', margin, y)
     pdf.text(`Period: ${periodLabel}`, pageWidth - margin, y, { align: 'right' })
+    const pageHeight = pdf.internal.pageSize.height
+    pdf.text('Powered by HisabKitab Pro · hisabkitabpro.com', pageWidth / 2, pageHeight - 10, { align: 'center' })
 
     const safeLabel = periodLabel.replace(/[^a-zA-Z0-9\-]/g, '-').slice(0, 50)
     pdf.save(`Business-Overview-${safeLabel || 'report'}.pdf`)
@@ -546,6 +548,10 @@ const BusinessOverview = () => {
       y += 5
       list.forEach(e => addTableRow([new Date(e.expense_date).toLocaleDateString('en-IN'), formatMoney(e.amount), (e.description || '—').substring(0, 42)]))
     }
+
+    pdf.setFontSize(8)
+    pdf.setTextColor(100, 100, 100)
+    pdf.text('Powered by HisabKitab Pro · hisabkitabpro.com', pageWidth / 2, pageH - 10, { align: 'center' })
 
     const safeTitle = title.replace(/[^a-zA-Z0-9\-]/g, '-').slice(0, 40)
     pdf.save(`${safeTitle}-${periodLabel.replace(/[^a-zA-Z0-9\-]/g, '-').slice(0, 20)}.pdf`)

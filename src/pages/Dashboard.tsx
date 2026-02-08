@@ -791,6 +791,7 @@ const Dashboard = () => {
     { title: 'Quick Sale', description: 'Scan barcode → auto-add → pay (fast checkout)', icon: <ShoppingCart className="w-10 h-10" />, gradient: 'from-emerald-500 to-teal-600', hoverGradient: 'from-emerald-600 to-teal-700', link: '/sales/quick', permission: 'sales:create', planFeature: 'sales_quick_sale' as const },
     { title: 'New Sale', description: 'Create a new sales invoice (full form)', icon: <ShoppingCart className="w-10 h-10" />, gradient: 'from-blue-500 to-blue-600', hoverGradient: 'from-blue-600 to-blue-700', link: '/sales/new', permission: 'sales:create', planFeature: 'sales_new_sale' as const },
     { title: 'New Sale Tab', description: 'Open sale form in new tab (for multiple customers)', icon: <ShoppingCart className="w-10 h-10" />, gradient: 'from-green-500 to-emerald-600', hoverGradient: 'from-green-600 to-emerald-700', link: '/sales/new', permission: 'sales:create', openInNewTab: true, planFeature: 'sales_new_sale_tab' as const },
+    { title: 'Rent / Bookings', description: 'Goods on rent – pickup & return dates, security deposit', icon: <Calendar className="w-10 h-10" />, gradient: 'from-indigo-500 to-purple-600', hoverGradient: 'from-indigo-600 to-purple-700', link: '/rentals', permission: 'sales:read', planFeature: 'sales_rent' as const },
   ]
 
   const salesOptions = useMemo(() => {
@@ -1974,6 +1975,17 @@ const Dashboard = () => {
                   <span>View Purchase Reports</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                 </button>
+                {hasPermission('sales:read') && (
+                  <button
+                    onClick={() => hasPlanFeature('sales_rent') ? navigate('/rentals/report') : showPlanUpgrade('sales_rent')}
+                    className="group relative w-full bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-violet-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                  >
+                    {!hasPlanFeature('sales_rent') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                    <Calendar className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                    <span>Rent &amp; Bookings Report</span>
+                    <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                  </button>
+                )}
                 <button
                   onClick={() => hasPlanFeature('report_profit_analysis') ? navigate('/reports/profit-analysis') : showPlanUpgrade('report_profit_analysis')}
                   className="group relative w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-emerald-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"

@@ -391,10 +391,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 }
 
+const AUTH_NOT_AVAILABLE_ERROR = 'AUTH_NOT_AVAILABLE'
+
 const FALLBACK_AUTH: AuthContextType = {
   user: null,
   isLoading: false,
-  login: async () => ({ success: false, error: 'Auth not available' }),
+  login: async () => ({ success: false, error: AUTH_NOT_AVAILABLE_ERROR }),
   logout: () => {},
   hasPermission: () => false,
   hasPlanFeature: () => false,
@@ -416,5 +418,10 @@ export function useAuth(): AuthContextType {
     return FALLBACK_AUTH
   }
   return context
+}
+
+/** Use when checking login error so UI can show a reload prompt instead of a generic message. */
+export function isAuthNotAvailableError(error: string | undefined): boolean {
+  return error === AUTH_NOT_AVAILABLE_ERROR
 }
 

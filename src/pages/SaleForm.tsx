@@ -63,7 +63,7 @@ const SaleForm = () => {
   const loadCustomers = async () => {
     try {
       const companyId = getCurrentCompanyId()
-      const activeCustomers = await customerService.getAll(false, companyId)
+      const activeCustomers = await customerService.getAllFast(false, companyId)
       setCustomers(activeCustomers)
       
       // Set default "Walk-in Customer" if available and no customer is selected

@@ -23,7 +23,7 @@ const Customers = () => {
     setLoading(true)
     try {
       const companyId = getCurrentCompanyId()
-      const allCustomers = await customerService.getAll(true, companyId)
+      const allCustomers = await customerService.getAllFast(true, companyId)
       setCustomers(allCustomers)
     } catch (error) {
       console.error('Error loading customers:', error)

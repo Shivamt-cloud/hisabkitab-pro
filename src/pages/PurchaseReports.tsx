@@ -24,6 +24,16 @@ import {
 
 type ReportView = PurchaseReportView
 
+/** Format time for display: use created_at (actual record time) when available, else date-only as 12:00 AM */
+function formatRecordTime(dateStr: string, createdAt?: string | null): string {
+  if (createdAt) {
+    const d = new Date(createdAt)
+    if (!Number.isNaN(d.getTime())) return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+  }
+  const d = !dateStr ? new Date() : dateStr.includes('T') ? new Date(dateStr) : new Date(dateStr + 'T00:00:00')
+  return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+}
+
 const PurchaseReports = () => {
   const { getCurrentCompanyId } = useAuth()
   const { toast } = useToast()
@@ -447,7 +457,7 @@ const PurchaseReports = () => {
             <tbody className="divide-y divide-gray-200 bg-white">
               {datePurchases.map((p) => (
                 <tr key={p.id} className="hover:bg-gray-50 transition-colors">
-                  {isColumnVisible('purchases', 'purchase_date') && <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-600">{new Date(p.purchase_date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</td>}
+                  {isColumnVisible('purchases', 'purchase_date') && <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-600">{formatRecordTime(p.purchase_date, p.created_at)}</td>}
                   {isColumnVisible('purchases', 'invoice_number') && <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{(p as any).invoice_number || `PUR-${p.id}`}</td>}
                   {isColumnVisible('purchases', 'supplier_name') && <td className="px-4 py-3 text-sm text-gray-900">{(p as any).supplier_name || '—'}</td>}
                   {isColumnVisible('purchases', 'items_count') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-900">{p.items.length} item{p.items.length !== 1 ? 's' : ''}</td>}

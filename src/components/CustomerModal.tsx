@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { customerService } from '../services/customerService'
 import { priceSegmentService } from '../services/priceListService'
-import { Customer } from '../types/customer'
+import { Customer, CUSTOMER_ID_TYPES } from '../types/customer'
 import { X, Save, User } from 'lucide-react'
 
 interface CustomerModalProps {
@@ -27,6 +27,8 @@ const CustomerModal = ({ isOpen, onClose, onCustomerAdded }: CustomerModalProps)
     state: '',
     pincode: '',
     contact_person: '',
+    id_type: '',
+    id_number: '',
     credit_limit: '',
     price_segment_id: '',
     is_active: true,
@@ -103,7 +105,10 @@ const CustomerModal = ({ isOpen, onClose, onCustomerAdded }: CustomerModalProps)
         state: formData.state.trim() || undefined,
         pincode: formData.pincode.trim() || undefined,
         contact_person: formData.contact_person.trim() || undefined,
+        id_type: formData.id_type.trim() || undefined,
+        id_number: formData.id_number.trim() || undefined,
         credit_limit: formData.credit_limit ? parseFloat(formData.credit_limit) : undefined,
+        price_segment_id: formData.price_segment_id ? parseInt(formData.price_segment_id, 10) : undefined,
         is_active: formData.is_active,
         company_id: getCurrentCompanyId() || undefined,
       }
@@ -121,6 +126,8 @@ const CustomerModal = ({ isOpen, onClose, onCustomerAdded }: CustomerModalProps)
         state: '',
         pincode: '',
         contact_person: '',
+        id_type: '',
+        id_number: '',
         credit_limit: '',
         price_segment_id: '',
         is_active: true,
@@ -147,6 +154,8 @@ const CustomerModal = ({ isOpen, onClose, onCustomerAdded }: CustomerModalProps)
       state: '',
       pincode: '',
       contact_person: '',
+      id_type: '',
+      id_number: '',
       credit_limit: '',
       price_segment_id: '',
       is_active: true,
@@ -254,6 +263,31 @@ const CustomerModal = ({ isOpen, onClose, onCustomerAdded }: CustomerModalProps)
                   onChange={(e) => setFormData({ ...formData, contact_person: e.target.value })}
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                   placeholder="Contact name"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">ID proof submitted</label>
+                <select
+                  value={formData.id_type}
+                  onChange={(e) => setFormData({ ...formData, id_type: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                >
+                  {CUSTOMER_ID_TYPES.map((opt) => (
+                    <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">ID number / details</label>
+                <input
+                  type="text"
+                  value={formData.id_number}
+                  onChange={(e) => setFormData({ ...formData, id_number: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                  placeholder={formData.id_type ? `Enter ${CUSTOMER_ID_TYPES.find(t => t.value === formData.id_type)?.label || 'ID'} details` : 'Select ID type or enter details'}
                 />
               </div>
             </div>

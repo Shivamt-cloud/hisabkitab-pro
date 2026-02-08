@@ -12,6 +12,7 @@
 3. [Dashboard](#3-dashboard)
 4. [Products](#4-products)
 5. [Sales](#5-sales)
+5b. [Rentals & Bookings](#5b-rentals--bookings)
 6. [Purchases](#6-purchases)
 7. [Customers](#7-customers)
 8. [Suppliers](#8-suppliers)
@@ -315,6 +316,65 @@ Follow these steps to create a sale (invoice), reduce stock, and record payment.
 3. Add items being returned and quantities.
 4. Complete the return; stock will increase and a return amount may be applied (e.g. credit to customer).
 
+### 5.5 Quick Sale
+
+1. From Dashboard or menu, click **Quick Sale** (`/sales/quick`).
+2. A simplified sale form for faster billing: search product, add quantity, complete.
+3. Use when you need to create a bill quickly without full invoice details.
+
+---
+
+## 5b. Rentals & Bookings
+
+**Purpose:** Manage rental/booking business – create bookings, track pick-up and return, collect payments, and view rent reports.
+
+### 5b.1 Rentals List
+
+1. Go to **Rentals** from Dashboard or menu (`/rentals`).
+2. You see all rentals with status: **Booked**, **Picked up**, **Returned**, **Overdue**, **Cancelled**.
+3. Filter by status. Click a rental to **View** details or **Edit**.
+
+### 5b.2 Create a New Rental (Booking) – Step by Step
+
+**Before you start**
+
+- Products must be added. Customer can be Walk-in or select from Customers.
+
+**Step 1 – Open New Rent**
+
+1. From **Rentals**, click **New Rental** (or go to `/rentals/new`).
+2. You see the **Rent Form** with: customer, products, booking date, return date, pricing, payment.
+
+**Step 2 – Fill booking details**
+
+1. **Customer:** Select from list or Walk-in.
+2. **Products:** Add items being rented (quantity, rent price).
+3. **Booking date** and **Return date** – set the rental period.
+4. **Discount** (if any), **Notes**.
+
+**Step 3 – Payment and save**
+
+1. Set **Payment status** (Paid / Pending / Partial).
+2. Enter payment method and amount if paid.
+3. Click **Save** or **Create Rental**.
+
+**Step 4 – Track status**
+
+- Update status as: **Booked** → **Picked up** → **Returned** (or **Overdue** / **Cancelled**).
+- Use the rental detail view to update status and record additional payments.
+
+### 5b.3 View Rental Detail and Receipt
+
+1. From **Rentals**, click a rental row.
+2. You see full details: items, dates, payments, status.
+3. Use **Print Receipt** or **Download PDF** to get a copy for the customer.
+
+### 5b.4 Rent Reports
+
+1. Go to **Rentals** → **Reports** (or `/rentals/report`).
+2. View rent revenue, outstanding, and trends by date range.
+3. Export to PDF or Excel if available.
+
 ---
 
 ## 6. Purchases
@@ -434,6 +494,33 @@ Use this when there is **no GST** on the purchase (e.g. small vendor, non-GST bi
 1. Go to **Purchase History** from Dashboard or menu.
 2. You see all purchases (date, supplier, invoice number, amount, type, payment status).
 3. Use filters (date, supplier, type). Click a row to **View** or **Edit** (if allowed).
+
+### 6.4 Purchase Reorders (Reorder)
+
+**Purpose:** Create reorder lists for low-stock products and convert them to purchases. Available on Standard and Premium plans.
+
+**Step 1 – View Reorder List**
+
+1. Go to **Purchase Reorders** from Dashboard or menu (`/purchases/reorders`).
+2. You see all reorders with status: **Placed**, **Partial Received**, **Received**, **Cancelled**.
+
+**Step 2 – Create a New Reorder**
+
+1. Click **New Reorder** (or go to `/purchases/reorder`).
+2. Add products (from low-stock list or manually) with **quantity** and **unit price**.
+3. Select **supplier** (optional). Add notes if needed.
+4. Click **Save**. The reorder is created with status **Placed**.
+
+**Step 3 – Edit or Receive Reorder**
+
+1. Click a reorder row to **View** or **Edit** (if status allows).
+2. Use **Receive** to record received quantities. Update **Received Qty** for each line.
+3. Status changes to **Partial Received** or **Received** when done.
+4. You can convert the reorder to a GST or Simple Purchase if the app supports it.
+
+**Step 4 – Export Reorder**
+
+1. From the reorder list or detail view, use **Export PDF** or **Export Excel** to download the reorder for sending to supplier or your records.
 
 ---
 
@@ -652,27 +739,80 @@ Follow these steps to add a supplier so you can record purchases from them and t
 
 ## 13. Reports & Analytics
 
-**Purpose:** Sales reports, profit analysis, and analytics.
+**Purpose:** Sales reports, profit analysis, comparative reports, and analytics. Many reports support **Export to PDF** and **Export to Excel**.
 
 ### 13.1 Sales Reports
 
-1. Go to **Sales Reports** (or **Reports** → Sales).
+1. Go to **Sales Reports** (or **Reports** → Sales) (`/reports/sales`).
 2. Select **date range**, **grouping** (e.g. by product, customer, date).
-3. View **sales**, **revenue**, **quantity**. Export if available.
+3. View **sales**, **revenue**, **quantity**. Export to PDF or Excel if available.
 
-### 13.2 Analytics Dashboard
+### 13.2 Purchase Reports
 
-1. Go to **Analytics** from Dashboard or menu.
-2. You see **charts and metrics**: sales over time, top products, profit, etc. Use filters (date, company) as provided.
+1. Go to **Purchase Reports** (or **Reports** → Purchases) (`/reports/purchases`).
+2. Select **date range**, **supplier**, **type** (GST / Simple).
+3. View purchase totals, supplier-wise summary. Export if available.
 
-### 13.3 Daily Activity
+### 13.3 Profit Analysis
 
-1. Go to **Daily Activity** (or **Reports** → Daily Activity).
+1. Go to **Profit Analysis** (or **Reports** → Profit Analysis) (`/reports/profit-analysis`).
+2. View **profit by product**, **sale**, or **period**.
+3. Use filters (date, company). Export to PDF or Excel.
+
+### 13.4 Expense Reports
+
+1. Go to **Expense Reports** (or **Reports** → Expenses) (`/reports/expenses`).
+2. View expenses by **type** (salary, transport, etc.), **date**, **employee**.
+3. Export if available. Standard/Premium plans.
+
+### 13.5 Comparative Reports
+
+1. Go to **Comparative Reports** (or **Reports** → Comparative) (`/reports/comparative`).
+2. Compare **sales vs purchases**, **period-over-period**, or **category-wise**.
+3. Use filters. Export to PDF or Excel. Standard/Premium plans.
+
+### 13.6 CA Reports
+
+1. Go to **CA Reports** (or **Reports** → CA) (`/reports/ca`).
+2. Chartered Accountant–oriented reports: sales, purchases, expenses, GST summary.
+3. Export for CA use. **Premium plan only**.
+
+### 13.7 Commission Reports
+
+1. Go to **Commission Reports** (or **Reports** → Commissions) (`/reports/commissions`).
+2. View commission by **sales person**, **category**, **period**.
+3. Export if available. Standard/Premium plans.
+
+### 13.8 Daily Activity
+
+1. Go to **Daily Activity** (or **Reports** → Daily Activity) (`/reports/daily-activity`).
 2. View **activity** for a date: sales, purchases, expenses, by user/device if supported.
+3. Standard/Premium plans.
 
-### 13.4 Commission Reports
+### 13.9 Analytics Dashboard
 
-1. Go to **Commission Reports** (see [Section 9.4](#94-commission-reports)).
+1. Go to **Analytics** from Dashboard or menu (`/analytics`).
+2. You see **charts and metrics**: sales over time, top products, profit, etc.
+3. Use filters (date, company) as provided. Standard/Premium plans.
+
+### 13.10 Business Overview
+
+1. Go to **Business Overview** (`/business-overview`).
+2. High-level summary: sales, purchases, expenses, profit, employees, COGS.
+3. View by **period** (day, week, month, year). Export to PDF.
+4. **Premium plan only**.
+
+### 13.11 Rent Reports
+
+1. Go to **Rentals** → **Reports** (or `/rentals/report`).
+2. View rent revenue, outstanding, active rentals by period.
+3. Export to PDF or Excel if available. Requires Rentals feature.
+
+### 13.12 Audit Logs
+
+1. Go to **Audit Logs** (`/audit-logs`) from Settings or menu.
+2. View **audit trail** of key actions (who did what, when).
+3. **Premium plan only**.
 
 ---
 
@@ -810,11 +950,18 @@ Follow these steps to add a supplier so you can record purchases from them and t
 | Home / Overview          | Dashboard (`/`)                |
 | Products                | Products (`/products`)          |
 | New sale                | New Sale (`/sales/new`)        |
+| Quick sale              | Quick Sale (`/sales/quick`)    |
 | Sales list              | Sales History (`/sales/history`) |
+| Rentals / Bookings      | Rentals (`/rentals`)           |
+| New rental              | New Rental (`/rentals/new`)    |
+| Rent reports            | Rent Reports (`/rentals/report`) |
 | GST purchase            | GST Purchase (`/purchases/new-gst`) |
 | Simple purchase         | Simple Purchase (`/purchases/new-simple`) |
 | Purchase list           | Purchase History (`/purchases/history`) |
+| Purchase reorders       | Purchase Reorders (`/purchases/reorders`) |
+| New reorder             | New Reorder (`/purchases/reorder`) |
 | Customers               | Customers (`/customers`)       |
+| Customer insights       | Customer Insights (`/customers/insights`) |
 | Suppliers               | Suppliers (`/suppliers`)       |
 | Sales persons & commissions | Sales & Category Management (`/sales-category-management`) |
 | Daily expenses          | Expenses (`/expenses`)         |
@@ -824,8 +971,19 @@ Follow these steps to add a supplier so you can record purchases from them and t
 | Outstanding payments    | Outstanding Payments (`/payments/outstanding`) |
 | Upcoming cheques        | Upcoming Checks (`/checks/upcoming`) |
 | Sales reports           | Sales Reports (`/reports/sales`) |
+| Purchase reports        | Purchase Reports (`/reports/purchases`) |
+| Profit analysis         | Profit Analysis (`/reports/profit-analysis`) |
+| Expense reports         | Expense Reports (`/reports/expenses`) |
+| Comparative reports     | Comparative Reports (`/reports/comparative`) |
+| CA reports              | CA Reports (`/reports/ca`)     |
+| Commission reports      | Commission Reports (`/reports/commissions`) |
+| Daily activity          | Daily Activity (`/reports/daily-activity`) |
 | Analytics               | Analytics (`/analytics`)       |
+| Business overview       | Business Overview (`/business-overview`) |
+| Audit logs              | Audit Logs (`/audit-logs`)     |
 | Backup & restore        | Backup & Restore (`/backup-restore`) |
+| Price lists             | Price Lists (`/settings/price-lists`) |
+| Automated exports       | Automated Exports (`/settings/automated-exports`) |
 | Notifications           | Notifications (`/notifications`) |
 | Settings                | System Settings (`/settings`)   |
 | Subscription payments   | Subscription Payments (`/subscription/payments`) |

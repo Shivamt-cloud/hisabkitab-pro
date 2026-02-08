@@ -20,10 +20,14 @@ async function initializeData(): Promise<void> {
 }
 
 export const customerService = {
-  // Get all customers (from cloud, with local fallback)
+  /** Fast list load: Supabase only, no local sync. Use for dropdowns and list pages. */
+  getAllFast: async (includeInactive: boolean = false, companyId?: number | null): Promise<Customer[]> => {
+    return cloudCustomerService.getAllFast(includeInactive, companyId)
+  },
+
+  // Get all customers (Supabase first, then sync to local; fallback to local when offline)
   getAll: async (includeInactive: boolean = false, companyId?: number | null): Promise<Customer[]> => {
     await initializeData()
-    // Use cloud service which handles fallback to local
     const customers = await cloudCustomerService.getAll(includeInactive, companyId)
     return customers
   },

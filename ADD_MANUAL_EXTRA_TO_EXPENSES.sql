@@ -1,6 +1,11 @@
--- Add manual_extra and remark columns to expenses table
--- manual_extra: For Opening=extra money/carry forward, For Closing=manual sales outside system (Cash, UPI, Card, Other)
--- remark: Optional user remark for opening/closing entries
+-- =====================================================
+-- Add manual_extra and remark to expenses (Opening & Closing)
+-- Run this in Supabase SQL Editor once. Fixes:
+--   OPENING: Extra money / Carry forward (Cash, UPI, Card, Other) + Remark
+--   CLOSING: Manual sales (outside system) (Cash, UPI, Card, Other) + Remark
+-- =====================================================
+-- manual_extra: Opening = extra/carry-forward; Closing = manual sales (format: {cash, upi, card, other})
+-- remark: Optional remark for opening/closing entries
 
 ALTER TABLE expenses
 ADD COLUMN IF NOT EXISTS manual_extra JSONB,

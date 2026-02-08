@@ -7,6 +7,10 @@ import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
 
+/** Shown on all PDFs and Excel exports so readers can reach us */
+export const POWERED_BY_TEXT = 'Powered by HisabKitab Pro · hisabkitabpro.com'
+export const POWERED_BY_URL = 'https://hisabkitabpro.com'
+
 /**
  * Export data to Excel file
  */
@@ -19,8 +23,8 @@ export function exportToExcel(
   // Create workbook and worksheet
   const workbook = XLSX.utils.book_new()
   
-  // Add headers row
-  const worksheetData = [headers, ...data]
+  // Add headers row + data + powered-by footer
+  const worksheetData = [headers, ...data, [], [POWERED_BY_TEXT]]
   
   // Create worksheet from array
   const worksheet = XLSX.utils.aoa_to_sheet(worksheetData)
@@ -55,7 +59,7 @@ export function exportMultiSheetExcel(
 ): void {
   const workbook = XLSX.utils.book_new()
   for (const { sheetName, headers, rows } of sheets) {
-    const worksheetData = [headers, ...rows]
+    const worksheetData = [headers, ...rows, [], [POWERED_BY_TEXT]]
     const worksheet = XLSX.utils.aoa_to_sheet(worksheetData)
     const maxWidths = headers.map((header, colIndex) => {
       const dataWidth = Math.max(
@@ -374,6 +378,14 @@ export function exportDataToPDF(
     yPosition += 7
   })
 
+  // Powered-by footer on last page
+  const pageHeight = pdf.internal.pageSize.height
+  pdf.setFontSize(9)
+  pdf.setFont('helvetica', 'normal')
+  pdf.setTextColor(100, 100, 100)
+  pdf.text(POWERED_BY_TEXT, pageWidth / 2, pageHeight - 10, { align: 'center' })
+  pdf.setTextColor(0, 0, 0)
+
   // Save PDF
   pdf.save(`${filename}.pdf`)
 }
@@ -526,9 +538,15 @@ export function exportInvoiceToPDF(
   pdf.text(`Payment Status: ${invoiceData.payment_status.toUpperCase()}`, margin, yPosition)
 
   // Footer
-  yPosition = pdf.internal.pageSize.height - 20
-  pdf.setFontSize(8)
+  const pageHeight = pdf.internal.pageSize.height
+  yPosition = pageHeight - 25
+  pdf.setFontSize(10)
   pdf.text('Thank you for your business!', pageWidth / 2, yPosition, { align: 'center' })
+  yPosition += 8
+  pdf.setFontSize(9)
+  pdf.setTextColor(80, 80, 80)
+  pdf.text(POWERED_BY_TEXT, pageWidth / 2, yPosition, { align: 'center' })
+  pdf.setTextColor(0, 0, 0)
 
   // Save PDF
   pdf.save(`${filename}.pdf`)
@@ -974,10 +992,12 @@ export function buildReceiptHTML(
       ${whatsappNumber ? `<div style="margin-top: 2px; font-size: 9px;">WhatsApp: ${whatsappNumber}</div>` : ''}
       ${instagramHandle ? `<div style="margin-top: 2px; font-size: 9px;">Instagram: ${instagramHandle}</div>` : ''}
       ${facebookPage ? `<div style="margin-top: 2px; font-size: 9px;">Facebook: ${facebookPage}</div>` : ''}
+      <div style="margin-top: 6px; font-size: 10px; font-weight: 600; color: #4f46e5;">${POWERED_BY_TEXT}</div>
       <div style="margin-top: 4px; font-size: 9px;">This is a computer-generated receipt</div>
     </div>
     ` : `
     <div class="footer">
+      <div style="margin-top: 6px; font-size: 10px; font-weight: 600; color: #4f46e5;">${POWERED_BY_TEXT}</div>
       <div style="margin-top: 4px; font-size: 9px;">This is a computer-generated receipt</div>
     </div>`}
   </div>
@@ -1122,9 +1142,9 @@ export function exportReorderToPdf(
     pdf.addPage()
     y = margin
   }
-  pdf.setFontSize(9)
+  pdf.setFontSize(10)
   pdf.setFont('helvetica', 'bold')
-  pdf.text('Powered by HisabKitab-Pro', margin, y)
+  pdf.text(POWERED_BY_TEXT, margin, y)
   y += 6
   pdf.setFont('helvetica', 'normal')
   REORDER_AD_TEXT.forEach((line) => {
@@ -1165,6 +1185,7 @@ export function exportReorderToExcel(
     ['Total Tax', '', '', data.total_tax],
     ['Grand Total', '', '', data.grand_total],
     [],
+    [POWERED_BY_TEXT],
     ...REORDER_AD_TEXT.map((t) => [t]),
     [REORDER_AD_LINK],
   ]

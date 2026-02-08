@@ -2,7 +2,7 @@
 // Provides a simple interface to interact with IndexedDB
 
 const DB_NAME = 'hisabkitab_db'
-const DB_VERSION = 17 // Add price_segments and product_segment_prices for price lists
+const DB_VERSION = 18 // Add RENTALS for rent/booking feature
 
 // Object store names (tables)
 export const STORES = {
@@ -36,6 +36,7 @@ export const STORES = {
   PURCHASE_REORDER_ITEMS: 'purchase_reorder_items',
   PRICE_SEGMENTS: 'price_segments',
   PRODUCT_SEGMENT_PRICES: 'product_segment_prices',
+  RENTALS: 'rentals',
 } as const
 
 let dbInstance: IDBDatabase | null = null
@@ -487,6 +488,15 @@ export function initDB(config: DBConfig = {}): Promise<IDBDatabase> {
         pricesStore.createIndex('product_id', 'product_id', { unique: false })
         pricesStore.createIndex('segment_id', 'segment_id', { unique: false })
         pricesStore.createIndex('company_id', 'company_id', { unique: false })
+      }
+
+      if (!db.objectStoreNames.contains(STORES.RENTALS)) {
+        const rentalsStore = db.createObjectStore(STORES.RENTALS, { keyPath: 'id' })
+        rentalsStore.createIndex('company_id', 'company_id', { unique: false })
+        rentalsStore.createIndex('customer_id', 'customer_id', { unique: false })
+        rentalsStore.createIndex('booking_date', 'booking_date', { unique: false })
+        rentalsStore.createIndex('status', 'status', { unique: false })
+        rentalsStore.createIndex('rental_number', 'rental_number', { unique: false })
       }
       }) // Close upgradePromise Promise
     }

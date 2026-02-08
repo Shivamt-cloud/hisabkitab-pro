@@ -3,6 +3,23 @@ import { supabase, isSupabaseAvailable, isOnline } from './supabaseClient'
 import { Customer } from '../types/customer'
 import { getAll, put, getById, deleteById, getByIndex, STORES } from '../database/db'
 
+function sortCustomers(customers: Customer[]): Customer[] {
+  return customers.sort((a, b) => new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime())
+}
+
+function filterCustomersLocal(
+  customers: Customer[],
+  includeInactive: boolean,
+  companyId?: number | null
+): Customer[] {
+  if (companyId === null) return []
+  let list = companyId !== undefined && companyId !== null
+    ? customers.filter((c) => c.company_id === companyId)
+    : customers
+  if (!includeInactive) list = list.filter((c) => c.is_active)
+  return sortCustomers(list)
+}
+
 /**
  * Cloud Customer Service
  * Handles customer operations with Supabase cloud storage
@@ -10,49 +27,56 @@ import { getAll, put, getById, deleteById, getByIndex, STORES } from '../databas
  */
 export const cloudCustomerService = {
   /**
-   * Get all customers from cloud
+   * Fast fetch: Supabase only, no IndexedDB sync. Use for list/dropdown so data loads fast.
    */
-  getAll: async (includeInactive: boolean = false, companyId?: number | null): Promise<Customer[]> => {
-    // If Supabase not available or offline, use local storage
+  getAllFast: async (includeInactive: boolean = false, companyId?: number | null): Promise<Customer[]> => {
     if (!isSupabaseAvailable() || !isOnline()) {
-      let customers = await getAll<Customer>(STORES.CUSTOMERS)
+      const customers = await getAll<Customer>(STORES.CUSTOMERS)
+      return filterCustomersLocal(customers, includeInactive, companyId)
+    }
+    try {
+      let query = supabase!.from('customers').select('*')
       if (companyId !== undefined && companyId !== null) {
-        customers = customers.filter(c => c.company_id === companyId)
-      } else if (companyId === null) {
-        return []
+        query = query.eq('company_id', companyId)
       }
       if (!includeInactive) {
-        customers = customers.filter(c => c.is_active)
+        query = query.eq('is_active', true)
       }
-      return customers.sort((a, b) => new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime())
+      const { data, error } = await query.order('created_at', { ascending: false })
+      if (error) {
+        const customers = await getAll<Customer>(STORES.CUSTOMERS)
+        return filterCustomersLocal(customers, includeInactive, companyId)
+      }
+      return (data as Customer[]) || []
+    } catch (_) {
+      const customers = await getAll<Customer>(STORES.CUSTOMERS)
+      return filterCustomersLocal(customers, includeInactive, companyId)
+    }
+  },
+
+  /**
+   * Get all customers from cloud (Supabase first), then sync to local. Falls back to local when offline.
+   */
+  getAll: async (includeInactive: boolean = false, companyId?: number | null): Promise<Customer[]> => {
+    if (!isSupabaseAvailable() || !isOnline()) {
+      const customers = await getAll<Customer>(STORES.CUSTOMERS)
+      return filterCustomersLocal(customers, includeInactive, companyId)
     }
 
     try {
       let query = supabase!.from('customers').select('*')
-
       if (companyId !== undefined && companyId !== null) {
         query = query.eq('company_id', companyId)
       }
-
       if (!includeInactive) {
         query = query.eq('is_active', true)
       }
-
       const { data, error } = await query.order('created_at', { ascending: false })
 
       if (error) {
         console.error('Error fetching customers from cloud:', error)
-        // Fallback to local storage
-        let customers = await getAll<Customer>(STORES.CUSTOMERS)
-        if (companyId !== undefined && companyId !== null) {
-          customers = customers.filter(c => c.company_id === companyId)
-        } else if (companyId === null) {
-          return []
-        }
-        if (!includeInactive) {
-          customers = customers.filter(c => c.is_active)
-        }
-        return customers.sort((a, b) => new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime())
+        const customers = await getAll<Customer>(STORES.CUSTOMERS)
+        return filterCustomersLocal(customers, includeInactive, companyId)
       }
 
       if (data && data.length > 0) {
@@ -64,17 +88,8 @@ export const cloudCustomerService = {
       return (data as Customer[]) || []
     } catch (error) {
       console.error('Error in cloudCustomerService.getAll:', error)
-      // Fallback to local storage
-      let customers = await getAll<Customer>(STORES.CUSTOMERS)
-      if (companyId !== undefined && companyId !== null) {
-        customers = customers.filter(c => c.company_id === companyId)
-      } else if (companyId === null) {
-        return []
-      }
-      if (!includeInactive) {
-        customers = customers.filter(c => c.is_active)
-      }
-      return customers.sort((a, b) => new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime())
+      const customers = await getAll<Customer>(STORES.CUSTOMERS)
+      return filterCustomersLocal(customers, includeInactive, companyId)
     }
   },
 
@@ -138,10 +153,13 @@ export const cloudCustomerService = {
             state: customerData.state || null,
             pincode: customerData.pincode || null,
             contact_person: customerData.contact_person || null,
+            id_type: customerData.id_type || null,
+            id_number: customerData.id_number || null,
             is_active: customerData.is_active !== undefined ? customerData.is_active : true,
             credit_limit: customerData.credit_limit || null,
             outstanding_amount: customerData.outstanding_amount || 0,
             credit_balance: customerData.credit_balance || 0,
+            price_segment_id: customerData.price_segment_id ?? null,
             company_id: customerData.company_id || null,
           }])
           .select()
@@ -206,6 +224,8 @@ export const cloudCustomerService = {
           state: updated.state || null,
           pincode: updated.pincode || null,
           contact_person: updated.contact_person || null,
+          id_type: updated.id_type || null,
+          id_number: updated.id_number || null,
           is_active: updated.is_active !== undefined ? updated.is_active : true,
           credit_limit: updated.credit_limit || null,
           outstanding_amount: updated.outstanding_amount || 0,

@@ -73,7 +73,7 @@ export function GlobalSearch() {
     const companyId = getCurrentCompanyId()
     Promise.all([
       productService.getAll(true, companyId ?? undefined),
-      customerService.getAll(true, companyId ?? undefined),
+      customerService.getAllFast(true, companyId ?? undefined),
       saleService.getAll(true, companyId ?? undefined),
       purchaseService.getAll(undefined, companyId ?? undefined),
     ])

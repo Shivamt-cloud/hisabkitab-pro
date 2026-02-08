@@ -154,6 +154,7 @@ const ExpenseForm = () => {
         manual_extra: (formData.expense_type === 'opening' || formData.expense_type === 'closing') && ((manualExtra.cash || 0) + (manualExtra.upi || 0) + (manualExtra.card || 0) + (manualExtra.other || 0)) > 0
           ? manualExtra
           : undefined,
+        remark: (formData.expense_type === 'opening' || formData.expense_type === 'closing') ? (remark.trim() || undefined) : undefined,
         company_id: getCurrentCompanyId() || undefined,
         created_by: parseInt(user?.id || '1'),
       }
@@ -304,7 +305,11 @@ const ExpenseForm = () => {
                 />
                 {errors.amount && <p className="text-sm text-red-600 mt-1">{errors.amount}</p>}
                 {(formData.expense_type === 'opening' || formData.expense_type === 'closing') && (
-                  <p className="text-xs text-gray-500 mt-1">Amount will be calculated from denominations below</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {formData.expense_type === 'opening'
+                      ? 'Amount = Grand total (Cash + Extra money) from below'
+                      : 'Amount = Grand total (Cash + Manual sales) from below'}
+                  </p>
                 )}
               </div>
 
@@ -393,8 +398,10 @@ const ExpenseForm = () => {
                     </div>
                     <div className="mt-4 pt-4 border-t border-gray-300">
                       <div className="flex justify-between items-center">
-                        <span className="text-lg font-semibold text-gray-900">Total Amount:</span>
-                        <span className="text-2xl font-bold text-green-600">
+                        <span className="text-sm font-semibold text-gray-700">
+                          {formData.expense_type === 'opening' ? 'Cash (denominations)' : 'Cash (denominations)'}:
+                        </span>
+                        <span className="text-lg font-bold text-gray-900">
                           ₹{calculateTotalFromDenominations(cashDenominations).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                         </span>
                       </div>
@@ -433,24 +440,42 @@ const ExpenseForm = () => {
                       </div>
                       {((manualExtra.cash || 0) + (manualExtra.upi || 0) + (manualExtra.card || 0) + (manualExtra.other || 0)) > 0 && (
                         <div className="mt-3 flex justify-between text-sm">
-                          <span className="text-gray-600">Manual/Extra total:</span>
+                          <span className="text-gray-600">
+                            {formData.expense_type === 'closing' ? 'Manual sales total:' : 'Extra money total:'}
+                          </span>
                           <span className="font-semibold text-blue-600">
                             ₹{((manualExtra.cash || 0) + (manualExtra.upi || 0) + (manualExtra.card || 0) + (manualExtra.other || 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                           </span>
                         </div>
                       )}
-                      <div className="mt-2 text-xs text-gray-500">
-                        Grand total: ₹{(calculateTotalFromDenominations(cashDenominations) + (manualExtra.cash || 0) + (manualExtra.upi || 0) + (manualExtra.card || 0) + (manualExtra.other || 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                      {/* Grand total = Amount (cash) + Manual/Extra - clear for opening vs closing */}
+                      <div className="mt-4 pt-4 border-t border-gray-200 bg-green-50 rounded-lg px-4 py-3 border border-green-200">
+                        <div className="flex justify-between items-center gap-2 text-sm text-gray-700 mb-1">
+                          <span>Cash (denominations)</span>
+                          <span>₹{calculateTotalFromDenominations(cashDenominations).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                        </div>
+                        <div className="flex justify-between items-center gap-2 text-sm text-gray-700 mb-1">
+                          <span>{formData.expense_type === 'closing' ? 'Manual sales' : 'Extra money'}</span>
+                          <span>₹{((manualExtra.cash || 0) + (manualExtra.upi || 0) + (manualExtra.card || 0) + (manualExtra.other || 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                        </div>
+                        <div className="flex justify-between items-center pt-2 mt-2 border-t border-green-200">
+                          <span className="font-bold text-gray-900">
+                            Grand total ({formData.expense_type === 'opening' ? 'Cash + Extra money' : 'Cash + Manual sales'})
+                          </span>
+                          <span className="text-xl font-bold text-green-700">
+                            ₹{(calculateTotalFromDenominations(cashDenominations) + (manualExtra.cash || 0) + (manualExtra.upi || 0) + (manualExtra.card || 0) + (manualExtra.other || 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Remark */}
+                    {/* Remark - optional */}
                     <div className="mt-6 pt-4 border-t border-gray-200">
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Remark (optional)</label>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Remark <span className="text-gray-400 font-normal">(optional)</span></label>
                       <textarea
                         value={remark}
                         onChange={(e) => setRemark(e.target.value)}
-                        placeholder="Add any remark or note..."
+                        placeholder="Add any remark or note (optional)..."
                         rows={3}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none"
                       />

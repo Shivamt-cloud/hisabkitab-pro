@@ -181,8 +181,10 @@ const UserManual = () => {
               <li>Select Supplier, Date, Invoice No.</li>
               <li>Add Items (Product, Qty, Price)</li>
               <li>Select Payment Status & Save</li>
-              <li>Stock updates & purchase saved</li>
+              <li>Stock updates &amp; purchase saved</li>
             </ol>
+            <h3 className="font-semibold text-gray-800 mb-2">6.4 Purchase Reorders</h3>
+            <p className="text-gray-700 mb-2">Create reorder lists for low-stock products. Go to Purchase Reorders → New Reorder. Add products (qty, price), select supplier. Status: Placed → Partial Received → Received. Export PDF/Excel to send to supplier. (Standard/Premium plans)</p>
           </section>
 
           <section className="mb-8">
@@ -196,6 +198,7 @@ const UserManual = () => {
               <li>Click Save</li>
               <li>Next: Edit details, Use in Sales, Track outstanding dues</li>
             </ol>
+            <p className="text-gray-700 mb-2"><strong>Customer Insights:</strong> Go to Customers → Insights to view customer-wise sales, top buyers, trends. (Standard+)</p>
           </section>
 
           <section className="mb-8">
@@ -251,9 +254,11 @@ const UserManual = () => {
           </section>
 
           <section className="mb-8">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">17. Subscription & Printer Settings</h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-4">16–17. System Settings & Subscription</h2>
             <p className="text-gray-700 mb-2"><strong>Subscription:</strong> View validity, Recharge plan, Download payment receipts.</p>
-            <p className="text-gray-700 mb-4"><strong>Barcode & Receipt Printer:</strong> Configure label size, Configure receipt format.</p>
+            <p className="text-gray-700 mb-2"><strong>Barcode &amp; Receipt Printer:</strong> Configure label size, Configure receipt format.</p>
+            <p className="text-gray-700 mb-2"><strong>Price Lists:</strong> Configure price segments and price lists for products.</p>
+            <p className="text-gray-700 mb-4"><strong>Automated Exports:</strong> Schedule automated PDF/Excel exports to email or storage. (Premium)</p>
           </section>
 
           <section className="mb-8 p-4 bg-blue-50 rounded-lg border border-blue-200">
