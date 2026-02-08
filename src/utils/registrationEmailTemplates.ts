@@ -1363,18 +1363,21 @@ ${(() => {
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 **Email Address:** ${data.userEmail}
+
 ${data.userPassword && !data.userPassword.includes('[Password not available') ? `
 **Password:** ${data.userPassword}
+
+📌 **Note:** This is the same password that was set when your account was created. Keep it safe and confidential. We recommend changing it after your first login for added security.
 ` : `
-**Password:** ${data.userPassword || '[Not available - Please contact admin or use password reset]'}
-⚠️ **Note:** Your password is not available in this email. If you don't remember your password, please contact your administrator or use the password reset feature.
+**Password:** Your password is the same password that you created when you filled the registration form. If you don't remember it, please use the "Forgot Password" option on the login page or contact your administrator.
 `}
+
 **Login URL:** ${data.loginUrl || 'https://hisabkitabpro.com'}
 
 ⚠️ **IMPORTANT SECURITY INFORMATION:**
 • Keep your password secure and confidential
 • Do not share your login credentials with anyone
-${data.userPassword && !data.userPassword.includes('[Password not available') ? '• Change your password after first login (recommended)' : '• If you need to reset your password, contact your administrator'}
+${data.userPassword && !data.userPassword.includes('[Password not available') ? '• Change your password after first login (recommended)' : '• Use "Forgot Password" on the login page if you need to reset'}
 • Log out when using shared devices
 
 **👤 YOUR ACCOUNT DETAILS:**

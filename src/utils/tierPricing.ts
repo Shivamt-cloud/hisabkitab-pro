@@ -46,10 +46,13 @@ export function calculateTierPrice(basePrice: number, tier: SubscriptionTier): n
 }
 
 /**
- * Get tier pricing info
+ * Get tier pricing info. Returns Basic plan when tier is null/undefined or invalid.
  */
-export function getTierPricing(tier: SubscriptionTier): TierPricing {
-  return TIER_PRICING[tier]
+export function getTierPricing(tier: SubscriptionTier | null | undefined): TierPricing {
+  if (tier && tier in TIER_PRICING) {
+    return TIER_PRICING[tier as SubscriptionTier]
+  }
+  return TIER_PRICING.basic
 }
 
 /**
