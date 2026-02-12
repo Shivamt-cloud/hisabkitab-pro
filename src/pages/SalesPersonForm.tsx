@@ -21,6 +21,8 @@ const SalesPersonForm = () => {
     phone: '',
     employee_id: '',
     commission_rate: '',
+    joining_date: '',
+    current_salary: '',
     is_active: true,
   })
 
@@ -38,6 +40,8 @@ const SalesPersonForm = () => {
               phone: person.phone || '',
               employee_id: person.employee_id || '',
               commission_rate: person.commission_rate?.toString() || '',
+              joining_date: person.joining_date ? person.joining_date.slice(0, 10) : '',
+              current_salary: person.current_salary != null ? String(person.current_salary) : '',
               is_active: person.is_active !== undefined ? person.is_active : true,
             })
           } else {
@@ -95,6 +99,8 @@ const SalesPersonForm = () => {
         phone: formData.phone.trim() || undefined,
         employee_id: formData.employee_id.trim() || undefined,
         commission_rate: formData.commission_rate ? parseFloat(formData.commission_rate) : undefined,
+        joining_date: formData.joining_date.trim() ? formData.joining_date.trim() : undefined,
+        current_salary: formData.current_salary ? parseFloat(formData.current_salary) : undefined,
         is_active: formData.is_active,
       }
 
@@ -219,6 +225,34 @@ const SalesPersonForm = () => {
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     placeholder="EMP001"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Joining Date</label>
+                  <input
+                    type="date"
+                    value={formData.joining_date}
+                    onChange={(e) => setFormData({ ...formData, joining_date: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Current Salary (₹/month)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.current_salary}
+                    onChange={(e) => setFormData({ ...formData, current_salary: e.target.value })}
+                    className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none ${
+                      errors.current_salary ? 'border-red-300' : 'border-gray-300'
+                    }`}
+                    placeholder="e.g. 25000"
+                  />
+                  {errors.current_salary && <p className="mt-1 text-sm text-red-600">{errors.current_salary}</p>}
                 </div>
 
                 <div>

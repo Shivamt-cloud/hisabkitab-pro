@@ -5,6 +5,10 @@ export interface SalesPerson {
   phone?: string
   employee_id?: string
   commission_rate?: number // Default commission rate (percentage)
+  /** Joining date (ISO date string) */
+  joining_date?: string
+  /** Current monthly salary (₹) */
+  current_salary?: number
   is_active: boolean
   created_at: string
   updated_at?: string

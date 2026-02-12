@@ -37,6 +37,8 @@ type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'cus
 const EXPENSE_TYPE_LABELS: Record<string, string> = {
   salary: 'Employee Salary',
   sales_person_payment: 'Sales Person Payment',
+  employee_commission: 'Employee Commission',
+  employee_goods_purchase: 'Employee Goods Purchase',
   purchase: 'Purchase',
   transport: 'Transport',
   office: 'Office',
@@ -193,7 +195,7 @@ const BusinessOverview = () => {
 
       const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0)
       const totalSalaryPayments = filteredExpenses
-        .filter(e => e.expense_type === 'salary' || e.expense_type === 'sales_person_payment')
+        .filter(e => e.expense_type === 'salary' || e.expense_type === 'sales_person_payment' || e.expense_type === 'employee_commission')
         .reduce((sum, e) => sum + e.amount, 0)
 
       const expenseByType = {} as Record<ExpenseType, number>
@@ -436,7 +438,7 @@ const BusinessOverview = () => {
       lines.push('Name\tEmail\tRole')
       detailRecords.employees.forEach(u => lines.push(`${u.name}\t${u.email}\t${u.role}`))
     } else if (detailView === 'salary') {
-      const list = detailRecords.expenses.filter(e => e.expense_type === 'salary' || e.expense_type === 'sales_person_payment')
+      const list = detailRecords.expenses.filter(e => e.expense_type === 'salary' || e.expense_type === 'sales_person_payment' || e.expense_type === 'employee_commission')
       lines.push('Date\tType\tAmount\tDescription\tSales Person')
       list.forEach(e => lines.push(`${new Date(e.expense_date).toLocaleDateString('en-IN')}\t${EXPENSE_TYPE_LABELS[e.expense_type] || e.expense_type}\t${formatMoney(e.amount)}\t${e.description || '—'}\t${e.sales_person_name || '—'}`))
     } else if (detailView === 'expenses') {
@@ -513,7 +515,7 @@ const BusinessOverview = () => {
       y += 5
       detailRecords.employees.forEach(u => addTableRow([u.name, u.email, u.role]))
     } else if (detailView === 'salary') {
-      const list = detailRecords.expenses.filter(e => e.expense_type === 'salary' || e.expense_type === 'sales_person_payment')
+      const list = detailRecords.expenses.filter(e => e.expense_type === 'salary' || e.expense_type === 'sales_person_payment' || e.expense_type === 'employee_commission')
       addTableRow(['Date', 'Type', 'Amount', 'Description', 'Sales Person'], true)
       pdf.line(margin, y, pageWidth - margin, y)
       y += 5
@@ -896,7 +898,7 @@ const BusinessOverview = () => {
                         </table>
                       ))}
                       {detailView === 'salary' && (() => {
-                        const list = detailRecords.expenses.filter(e => e.expense_type === 'salary' || e.expense_type === 'sales_person_payment')
+                        const list = detailRecords.expenses.filter(e => e.expense_type === 'salary' || e.expense_type === 'sales_person_payment' || e.expense_type === 'employee_commission')
                         return list.length === 0 ? (
                           <p className="text-white/60 text-center py-8">No salary / payment entries in this period.</p>
                         ) : (

@@ -48,6 +48,7 @@ export const SALES_REPORT_COLUMNS: Record<SalesReportView, { key: string; label:
   sales: [
     { key: 'sale_date', label: 'Date' },
     { key: 'invoice_number', label: 'Invoice' },
+    { key: 'sale_type', label: 'Type' },
     { key: 'customer_name', label: 'Customer' },
     { key: 'sales_person_name', label: 'Sales Person' },
     { key: 'items_count', label: 'Items' },
@@ -55,6 +56,7 @@ export const SALES_REPORT_COLUMNS: Record<SalesReportView, { key: string; label:
     { key: 'discount', label: 'Discount' },
     { key: 'tax_amount', label: 'Tax' },
     { key: 'grand_total', label: 'Amount' },
+    { key: 'return_amount', label: 'Return' },
     { key: 'payment_status', label: 'Payment' },
     { key: 'payment_method', label: 'Payment Method' },
     { key: 'internal_remarks', label: 'Remark' },
@@ -67,7 +69,7 @@ export const DEFAULT_VISIBLE_COLUMNS: Record<SalesReportView, string[]> = {
   category: ['category_name', 'total_quantity', 'total_revenue', 'total_cost', 'total_profit', 'profit_margin', 'product_count', 'sale_count'],
   customer: ['customer_name', 'total_quantity', 'total_revenue', 'total_cost', 'total_profit', 'profit_margin', 'sale_count', 'average_order_value'],
   salesperson: ['sales_person_name', 'total_quantity', 'total_revenue', 'total_cost', 'total_profit', 'profit_margin', 'commission_amount', 'sale_count'],
-  sales: ['sale_date', 'invoice_number', 'customer_name', 'items_count', 'grand_total', 'payment_status', 'internal_remarks'],
+  sales: ['sale_date', 'invoice_number', 'sale_type', 'customer_name', 'items_count', 'grand_total', 'return_amount', 'payment_status', 'payment_method', 'internal_remarks'],
 }
 
 const STORAGE_PREFIX = 'salesReport_visibleColumns_'

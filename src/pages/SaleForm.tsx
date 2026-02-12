@@ -53,6 +53,7 @@ const SaleForm = () => {
   const [editingQty, setEditingQty] = useState<Record<string, string>>({}) // per-row quantity while user is typing (e.g. ".5")
   const [saleSegmentId, setSaleSegmentId] = useState<number | null>(null) // Price segment for this sale (null = Retail/default)
   const [priceSegments, setPriceSegments] = useState<Array<{ id: number; name: string; description?: string; is_default: boolean }>>([])
+  const [isSubmitting, setIsSubmitting] = useState(false) // Prevent double-click on Complete Sale
 
   // Segment pricing: key = priceKey(productId, segmentId, article). When user selects segment, override product prices.
   const segmentPricesMapRef = useRef<Map<string, number>>(new Map())
@@ -2053,13 +2054,14 @@ const SaleForm = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    
+    if (isSubmitting) return
     if (saleItems.length === 0) {
       setErrors({ items: 'Please add at least one item to the sale' })
       return
     }
+    setIsSubmitting(true)
     
-    // Calculate return items total (for credit allocation)
+    // Calculate return items total (for validation)
     const returnItemsTotal = saleItems
       .filter(item => item.sale_type === 'return')
       .reduce((sum, item) => sum + item.total, 0)
@@ -2069,30 +2071,18 @@ const SaleForm = () => {
     const subtotalAmount = getRoundedSubtotal()
     const grandTotal = getGrandTotal() // Already rounded (uses discount and credit internally)
     
-    // Separate payment methods: exclude credit from payment total calculation
-    const nonCreditPayments = paymentMethods.filter(p => p.method !== 'credit')
-    const creditPayments = paymentMethods.filter(p => p.method === 'credit')
+    // Use whatever payment methods the user entered (Cash, UPI, Card, Credit, etc.) – no auto-forcing credit for returns
+    const finalPaymentMethods = paymentMethods.filter(p => (p.amount || 0) > 0)
+    const nonCreditPayments = finalPaymentMethods.filter(p => p.method !== 'credit')
+    const creditPayments = finalPaymentMethods.filter(p => p.method === 'credit')
     const paymentTotal = nonCreditPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
     const creditPaymentTotal = creditPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
-    
-    // If there are return items and customer is selected, automatically add credit payment method
-    let finalPaymentMethods = [...paymentMethods]
-    if (returnItemsTotal > 0 && customerId) {
-      // Check if credit payment method already exists for returns
-      const existingCreditForReturns = creditPayments.find(p => p.amount === returnItemsTotal)
-      if (!existingCreditForReturns) {
-        // Remove any existing credit payments (we'll add the correct one)
-        finalPaymentMethods = finalPaymentMethods.filter(p => p.method !== 'credit')
-        // Add credit payment method for return amount
-        finalPaymentMethods.push({ method: 'credit', amount: returnItemsTotal })
-      }
-    }
-    
     const returnAmount = Math.max(0, paymentTotal - grandTotal)
     
     // Validate: payment + credit applied + credit payment should be at least equal to grand total
     const totalCoverage = paymentTotal + creditApplied + creditPaymentTotal
     if (totalCoverage < grandTotal - 0.01) {
+      setIsSubmitting(false)
       setErrors({ payment: `Payment total (₹${paymentTotal.toFixed(2)}) + Credit Applied (₹${creditApplied.toFixed(2)}) + Credit Payment (₹${creditPaymentTotal.toFixed(2)}) is less than grand total (₹${grandTotal.toFixed(2)})` })
       return
     }
@@ -2103,6 +2093,7 @@ const SaleForm = () => {
       if (item.sale_type === 'sale') {
         const product = availableProducts.find(p => p.id === item.product_id)
         if (!product || product.stock_quantity < item.quantity) {
+          setIsSubmitting(false)
           alert(`Insufficient stock for ${item.product_name}`)
           return
         }
@@ -2166,6 +2157,7 @@ const SaleForm = () => {
         toast.success('Sale created!')
         navigate(`/invoice/${createdSale.id}`)
       } catch (error) {
+        setIsSubmitting(false)
         toast.error('Error creating sale: ' + (error as Error).message)
       }
     }
@@ -3224,43 +3216,26 @@ const SaleForm = () => {
                 
                 <button
                   type="submit"
-                  disabled={(() => {
+                  disabled={isSubmitting || (() => {
                     if (saleItems.length === 0) return true
-                    
-                    // Check if this is a return-only transaction
                     const hasReturnItems = saleItems.some(item => item.sale_type === 'return')
                     const hasSaleItems = saleItems.some(item => item.sale_type === 'sale')
-                    const isReturnOnly = hasReturnItems && !hasSaleItems
-                    
                     const nonCreditPayments = paymentMethods.filter(p => p.method !== 'credit')
                     const creditPayments = paymentMethods.filter(p => p.method === 'credit')
                     const paymentTotal = nonCreditPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
                     const creditPaymentTotal = creditPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
                     const grandTotal = getGrandTotal()
-                    
-                    // For return-only transactions: credit payment should cover the return amount
-                    // Since returns create credit, credit payment should be >= grand total
-                    if (isReturnOnly) {
-                      // For returns, credit payment should cover the return amount
-                      // Allow small rounding differences (up to 0.05 for rounding adjustments)
-                      // If credit payment is very close to grand total (within 0.05), allow it
-                      const difference = Math.abs(grandTotal - creditPaymentTotal)
-                      return difference > 0.05 // Allow up to 0.05 difference for rounding
-                    }
-                    
-                    // For regular sales or mixed transactions: payment + credit applied + credit payment should cover grand total
-                    // Allow overpayment (for returns), but require minimum coverage equal to grand total
                     const totalCoverage = paymentTotal + creditApplied + creditPaymentTotal
-                    // For mixed transactions with returns, be more lenient with rounding
-                    if (hasReturnItems) {
+                    // For return-only or any transaction: total payment (all methods) must cover grand total (allow 0.05 rounding)
+                    if (hasReturnItems || !hasSaleItems) {
                       const difference = Math.abs(grandTotal - totalCoverage)
-                      return difference > 0.05 // Allow up to 0.05 difference for rounding
+                      return difference > 0.05
                     }
                     return totalCoverage < grandTotal - 0.01
                   })()}
                   className="w-full mt-6 py-3 bg-white text-blue-600 font-bold rounded-xl hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Complete Sale
+                  {isSubmitting ? 'Processing…' : 'Complete Sale'}
                 </button>
               </div>
             </div>

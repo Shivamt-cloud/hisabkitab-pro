@@ -3,6 +3,8 @@ export type ExpenseType =
   | 'closing' // Closing cash balance (evening)
   | 'salary' // Employee salary
   | 'sales_person_payment' // Money given to sales person
+  | 'employee_commission' // Commission paid to employee – tracked in Employee Salary
+  | 'employee_goods_purchase' // Goods/advance taken by employee – deducted in Employee Salary
   | 'purchase' // Purchase expense
   | 'transport' // Transport/vehicle expense
   | 'office' // Office expense

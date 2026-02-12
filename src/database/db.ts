@@ -2,7 +2,7 @@
 // Provides a simple interface to interact with IndexedDB
 
 const DB_NAME = 'hisabkitab_db'
-const DB_VERSION = 18 // Add RENTALS for rent/booking feature
+const DB_VERSION = 20 // Add EMPLOYEE_GOODS_PURCHASES for employee deductions
 
 // Object store names (tables)
 export const STORES = {
@@ -37,6 +37,8 @@ export const STORES = {
   PRICE_SEGMENTS: 'price_segments',
   PRODUCT_SEGMENT_PRICES: 'product_segment_prices',
   RENTALS: 'rentals',
+  SALARY_PAYMENTS: 'salary_payments',
+  EMPLOYEE_GOODS_PURCHASES: 'employee_goods_purchases',
 } as const
 
 let dbInstance: IDBDatabase | null = null
@@ -497,6 +499,20 @@ export function initDB(config: DBConfig = {}): Promise<IDBDatabase> {
         rentalsStore.createIndex('booking_date', 'booking_date', { unique: false })
         rentalsStore.createIndex('status', 'status', { unique: false })
         rentalsStore.createIndex('rental_number', 'rental_number', { unique: false })
+      }
+
+      if (!db.objectStoreNames.contains(STORES.SALARY_PAYMENTS)) {
+        const salaryPaymentsStore = db.createObjectStore(STORES.SALARY_PAYMENTS, { keyPath: 'id' })
+        salaryPaymentsStore.createIndex('sales_person_id', 'sales_person_id', { unique: false })
+        salaryPaymentsStore.createIndex('company_id', 'company_id', { unique: false })
+        salaryPaymentsStore.createIndex('payment_date', 'payment_date', { unique: false })
+      }
+
+      if (!db.objectStoreNames.contains(STORES.EMPLOYEE_GOODS_PURCHASES)) {
+        const goodsStore = db.createObjectStore(STORES.EMPLOYEE_GOODS_PURCHASES, { keyPath: 'id' })
+        goodsStore.createIndex('sales_person_id', 'sales_person_id', { unique: false })
+        goodsStore.createIndex('period', 'period', { unique: false })
+        goodsStore.createIndex('company_id', 'company_id', { unique: false })
       }
       }) // Close upgradePromise Promise
     }

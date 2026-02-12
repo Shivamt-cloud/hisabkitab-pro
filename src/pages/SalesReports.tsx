@@ -662,6 +662,7 @@ const SalesReports = () => {
               <tr>
                 {isColumnVisible('sales', 'sale_date') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Time</th>}
                 {isColumnVisible('sales', 'invoice_number') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Invoice</th>}
+                {isColumnVisible('sales', 'sale_type') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Type</th>}
                 {isColumnVisible('sales', 'customer_name') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Customer</th>}
                 {isColumnVisible('sales', 'sales_person_name') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Sales Person</th>}
                 {isColumnVisible('sales', 'items_count') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Items</th>}
@@ -669,6 +670,7 @@ const SalesReports = () => {
                 {isColumnVisible('sales', 'discount') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Discount</th>}
                 {isColumnVisible('sales', 'tax_amount') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Tax</th>}
                 {isColumnVisible('sales', 'grand_total') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Amount</th>}
+                {isColumnVisible('sales', 'return_amount') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Return</th>}
                 {isColumnVisible('sales', 'payment_status') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Payment</th>}
                 {isColumnVisible('sales', 'payment_method') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Method</th>}
                 {isColumnVisible('sales', 'internal_remarks') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Remark</th>}
@@ -681,6 +683,17 @@ const SalesReports = () => {
                 <tr key={sale.id} className="hover:bg-gray-50 transition-colors">
                   {isColumnVisible('sales', 'sale_date') && <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-600">{formatRecordTime(sale.sale_date, sale.created_at)}</td>}
                   {isColumnVisible('sales', 'invoice_number') && <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{sale.invoice_number}</td>}
+                  {isColumnVisible('sales', 'sale_type') && (
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {(() => {
+                        const hasReturn = sale.items?.some((i: { sale_type?: string }) => i.sale_type === 'return')
+                        const hasSale = sale.items?.some((i: { sale_type?: string }) => i.sale_type === 'sale')
+                        if (hasReturn && hasSale) return <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">Mixed</span>
+                        if (hasReturn) return <span className="px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">Return</span>
+                        return <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">Sale</span>
+                      })()}
+                    </td>
+                  )}
                   {isColumnVisible('sales', 'customer_name') && <td className="px-4 py-3 text-sm text-gray-900">{sale.customer_name || 'Walk-in'}</td>}
                   {isColumnVisible('sales', 'sales_person_name') && <td className="px-4 py-3 text-sm text-gray-600">{sale.sales_person_name || '—'}</td>}
                   {isColumnVisible('sales', 'items_count') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-900">{sale.items.length} item{sale.items.length !== 1 ? 's' : ''}</td>}
@@ -688,6 +701,7 @@ const SalesReports = () => {
                   {isColumnVisible('sales', 'discount') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">{(sale.discount ?? 0) > 0 ? `₹${(sale.discount ?? 0).toFixed(2)}` : '—'}</td>}
                   {isColumnVisible('sales', 'tax_amount') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">₹{sale.tax_amount.toFixed(2)}</td>}
                   {isColumnVisible('sales', 'grand_total') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-bold text-gray-900">₹{sale.grand_total.toFixed(2)}</td>}
+                  {isColumnVisible('sales', 'return_amount') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-red-600">{(sale.return_amount ?? 0) > 0 ? `₹${(sale.return_amount ?? 0).toFixed(2)}` : '—'}</td>}
                   {isColumnVisible('sales', 'payment_status') && <td className="px-4 py-3 whitespace-nowrap">
                     <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sale.payment_status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{sale.payment_status.charAt(0).toUpperCase() + sale.payment_status.slice(1)}</span>
                   </td>}

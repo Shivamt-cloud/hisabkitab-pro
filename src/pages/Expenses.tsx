@@ -47,6 +47,8 @@ const Expenses = () => {
     closing: 'Closing Balance',
     salary: 'Employee Salary',
     sales_person_payment: 'Sales Person Payment',
+    employee_commission: 'Employee Commission',
+    employee_goods_purchase: 'Employee Goods Purchase',
     purchase: 'Purchase',
     transport: 'Transport',
     office: 'Office',

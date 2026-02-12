@@ -331,6 +331,17 @@ Please review and process this registration request.
                 <p className="text-blue-200/80 text-sm mt-2 font-medium">
                   Streamline Your Business Operations
                 </p>
+                <div className="flex flex-wrap items-center justify-center gap-3 mt-4 text-sm">
+                  <a href="https://hisabkitabpro.com" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-white/90 hover:text-white font-medium">
+                    <Globe className="w-4 h-4" />
+                    hisabkitabpro.com
+                  </a>
+                  <span className="text-white/50">|</span>
+                  <a href="https://wa.me/917304877938" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-emerald-200 hover:text-white font-medium">
+                    <MessageCircle className="w-4 h-4" />
+                    WhatsApp: 7304877938
+                  </a>
+                </div>
               </div>
               
               {/* Enhanced Country Selection */}
@@ -682,7 +693,18 @@ Please review and process this registration request.
               <span className="text-white font-bold">{SATISFIED_CUSTOMERS_COUNT.toLocaleString()}+ Satisfied Customers</span>
             </div>
             <h1 className="text-4xl font-extrabold text-white mb-2">HisabKitab-Pro</h1>
-            <p className="text-blue-100 text-lg mb-4">Inventory Management System</p>
+            <p className="text-blue-100 text-lg mb-2">Inventory Management System</p>
+            <div className="flex flex-wrap items-center justify-center gap-2 mb-4 text-xs">
+              <a href="https://hisabkitabpro.com" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-white/90 hover:text-white">
+                <Globe className="w-3.5 h-3.5" />
+                hisabkitabpro.com
+              </a>
+              <span className="text-white/50">|</span>
+              <a href="https://wa.me/917304877938" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-emerald-200 hover:text-white">
+                <MessageCircle className="w-3.5 h-3.5" />
+                WhatsApp: 7304877938
+              </a>
+            </div>
             <div className="max-w-sm mx-auto mb-4 text-left">
               <label className="block text-white text-sm font-bold mb-2 flex items-center justify-center gap-2 uppercase tracking-wider">
                 <Globe className="w-4 h-4 text-blue-200" />

@@ -107,8 +107,10 @@ const ExpenseForm = () => {
       newErrors.description = 'Description is required'
     }
 
-    if (formData.expense_type === 'sales_person_payment' && !formData.sales_person_id) {
-      newErrors.sales_person_id = 'Sales person is required for this expense type'
+    const employeeRelatedTypes = ['sales_person_payment', 'salary', 'employee_commission', 'employee_goods_purchase']
+    const salaryTypesRequireSalesPerson = employeeRelatedTypes.includes(formData.expense_type)
+    if (salaryTypesRequireSalesPerson && !formData.sales_person_id) {
+      newErrors.sales_person_id = 'Sales person is required (payment will appear in Employee Salary)'
     }
 
     setErrors(newErrors)
@@ -176,6 +178,8 @@ const ExpenseForm = () => {
     { value: 'closing', label: 'Closing Balance (Evening)' },
     { value: 'salary', label: 'Employee Salary' },
     { value: 'sales_person_payment', label: 'Sales Person Payment' },
+    { value: 'employee_commission', label: 'Employee Commission' },
+    { value: 'employee_goods_purchase', label: 'Employee Goods Purchase' },
     { value: 'purchase', label: 'Purchase' },
     { value: 'transport', label: 'Transport' },
     { value: 'office', label: 'Office' },
@@ -484,10 +488,10 @@ const ExpenseForm = () => {
                 </div>
               )}
 
-              {/* Sales Person - Always visible, required only for sales_person_payment */}
+              {/* Sales Person - Required for Employee Salary, Sales Person Payment, Employee Commission (syncs to Employee Salary tab) */}
               <div className="md:col-span-2">
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Sales Person {formData.expense_type === 'sales_person_payment' && <span className="text-red-500">*</span>}
+                  Sales Person {(formData.expense_type === 'sales_person_payment' || formData.expense_type === 'salary' || formData.expense_type === 'employee_commission' || formData.expense_type === 'employee_goods_purchase') && <span className="text-red-500">*</span>}
                 </label>
                 <select
                   value={formData.sales_person_id}
@@ -495,9 +499,9 @@ const ExpenseForm = () => {
                   className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none ${
                     errors.sales_person_id ? 'border-red-300' : 'border-gray-300'
                   }`}
-                  required={formData.expense_type === 'sales_person_payment'}
+                  required={formData.expense_type === 'sales_person_payment' || formData.expense_type === 'salary' || formData.expense_type === 'employee_commission'}
                 >
-                  <option value="">{formData.expense_type === 'sales_person_payment' ? 'Select Sales Person' : 'Select Sales Person (Optional)'}</option>
+                  <option value="">{(formData.expense_type === 'sales_person_payment' || formData.expense_type === 'salary' || formData.expense_type === 'employee_commission' || formData.expense_type === 'employee_goods_purchase') ? 'Select Employee (required – appears in Employee Salary)' : 'Select Sales Person (Optional)'}</option>
                   {salesPersons.length === 0 ? (
                     <option value="" disabled>No sales persons available</option>
                   ) : (
@@ -509,7 +513,13 @@ const ExpenseForm = () => {
                   )}
                 </select>
                 {errors.sales_person_id && <p className="text-sm text-red-600 mt-1">{errors.sales_person_id}</p>}
-                {formData.expense_type !== 'sales_person_payment' && (
+                {(formData.expense_type === 'sales_person_payment' || formData.expense_type === 'salary' || formData.expense_type === 'employee_commission') && (
+                  <p className="text-xs text-gray-500 mt-1">This payment will be recorded in Sales &amp; Category Management → Employee Salary (salary vs commission)</p>
+                )}
+                {formData.expense_type === 'employee_goods_purchase' && (
+                  <p className="text-xs text-gray-500 mt-1">This amount will be recorded in Employee Salary as goods/advance to deduct from pay</p>
+                )}
+                {formData.expense_type !== 'sales_person_payment' && formData.expense_type !== 'salary' && formData.expense_type !== 'employee_commission' && formData.expense_type !== 'employee_goods_purchase' && (
                   <p className="text-xs text-gray-500 mt-1">Optional: Link this expense to a sales person</p>
                 )}
               </div>

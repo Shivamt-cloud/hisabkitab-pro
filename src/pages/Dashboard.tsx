@@ -59,6 +59,8 @@ import {
   Tag,
   X,
   Lock,
+  Globe,
+  MessageCircle,
 } from 'lucide-react'
 import SubscriptionRechargeModal from '../components/SubscriptionRechargeModal'
 
@@ -1011,6 +1013,17 @@ const Dashboard = () => {
                 {companyName && companyName.trim() ? `${companyName} - HisabKitab-Pro` : 'HisabKitab-Pro'}
               </h1>
               <p className="text-sm text-gray-600 mt-1 font-medium">Inventory Management System</p>
+              <div className="flex flex-wrap items-center gap-3 mt-2 text-sm">
+                <a href="https://hisabkitabpro.com" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-indigo-600 hover:text-indigo-800 font-medium">
+                  <Globe className="w-4 h-4" />
+                  hisabkitabpro.com
+                </a>
+                <span className="text-gray-300">|</span>
+                <a href="https://wa.me/917304877938" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-green-600 hover:text-green-800 font-medium">
+                  <MessageCircle className="w-4 h-4" />
+                  WhatsApp: 7304877938
+                </a>
+              </div>
             </div>
             <div className="flex items-center gap-4">
               {hasPermission('products:read') && (
