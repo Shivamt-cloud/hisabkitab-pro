@@ -13,8 +13,9 @@ import { companyService } from '../services/companyService'
 import { supplierPaymentService } from '../services/supplierPaymentService'
 import { paymentService } from '../services/paymentService'
 import { expenseService } from '../services/expenseService'
+import { serviceRecordService } from '../services/serviceRecordService'
 import { getTierPricing } from '../utils/tierPricing'
-import { SATISFIED_CUSTOMERS_COUNT } from '../constants'
+import { CONTACT_EMAIL, CONTACT_WEBSITE_URL, CONTACT_WEBSITE_DISPLAY, CONTACT_WHATSAPP_NUMBER, CONTACT_WHATSAPP_URL } from '../constants'
 import type { Expense } from '../types/expense'
 import { 
   ShoppingCart, 
@@ -41,6 +42,7 @@ import {
   Calendar,
   AlertCircle,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Barcode,
   BarChart3,
@@ -58,10 +60,21 @@ import {
   ClipboardList,
   Tag,
   X,
-  Lock,
   Globe,
   MessageCircle,
+  Mail,
+  Phone,
+  Bike,
+  Car,
+  Zap,
+  BatteryCharging,
+  CalendarClock,
+  Download,
 } from 'lucide-react'
+import { onPwaUpdateAvailable, applyPwaUpdate } from '../utils/pwa'
+import { MaintenanceBanner } from '../components/MaintenanceBanner'
+import type { MaintenanceSettings } from '../types/settings'
+import { LockIcon } from '../components/icons/LockIcon'
 import SubscriptionRechargeModal from '../components/SubscriptionRechargeModal'
 
 interface ReportSummary {
@@ -148,9 +161,14 @@ const Dashboard = () => {
   } | null>(null)
   const [summaryLoading, setSummaryLoading] = useState(true)
   const [fullDataLoading, setFullDataLoading] = useState(true)
+  const [bookAppointmentOpen, setBookAppointmentOpen] = useState(false)
   const [showSetGoalModal, setShowSetGoalModal] = useState(false)
   const [setGoalForm, setSetGoalForm] = useState({ daily: '' as string | number, monthly: '' as string | number })
   const [setGoalSaving, setSetGoalSaving] = useState(false)
+  const [upcomingServicesCount, setUpcomingServicesCount] = useState(0)
+  const [upcomingServicesCount30, setUpcomingServicesCount30] = useState(0)
+  const [pwaUpdateAvailable, setPwaUpdateAvailable] = useState(false)
+  const [maintenanceBanner, setMaintenanceBanner] = useState<MaintenanceSettings | null>(null)
 
   const loadCompanyName = async () => {
     try {
@@ -279,6 +297,20 @@ const Dashboard = () => {
     return () => clearInterval(timer)
   }, [])
 
+  // Show "New update available" when PWA service worker finds a new version (production only)
+  useEffect(() => {
+    const unsubscribe = onPwaUpdateAvailable(() => setPwaUpdateAvailable(true))
+    return unsubscribe
+  }, [])
+
+  // Load maintenance/alert for banner (shown just above shortcuts on Dashboard)
+  useEffect(() => {
+    settingsService.getMaintenance().then((m) => {
+      if (m.enabled && m.show_as === 'banner') setMaintenanceBanner(m)
+      else setMaintenanceBanner(null)
+    })
+  }, [])
+
   // Load notifications and generate alerts (scoped to current company)
   useEffect(() => {
     const loadNotifications = async () => {
@@ -301,34 +333,90 @@ const Dashboard = () => {
     return () => clearInterval(interval)
   }, [user?.id, currentCompanyId])
 
+  // Load upcoming services count (next 7 days & 30 days) for Premium Plus widget
+  useEffect(() => {
+    if (!hasPermission('services:read')) return
+    const companyId = getCurrentCompanyId?.() ?? null
+    if (companyId == null) return
+
+    const vehicleTypes: Array<'bike' | 'car' | 'ebike' | 'ecar'> = ['bike', 'car']
+    if (hasPlanFeature('services_ebike_ecar')) vehicleTypes.push('ebike', 'ecar')
+
+    let cancelled = false
+    const run = async () => {
+      try {
+        const all = await Promise.all(vehicleTypes.map((vt) => serviceRecordService.getAll(companyId, vt)))
+        const flat = all.flat()
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const end7 = new Date(today)
+        end7.setDate(end7.getDate() + 7)
+        const end30 = new Date(today)
+        end30.setDate(end30.getDate() + 30)
+
+        let count7 = 0
+        let count30 = 0
+        flat.forEach((r) => {
+          const next = r.next_service_date ? new Date(r.next_service_date) : null
+          if (!next) return
+          next.setHours(0, 0, 0, 0)
+          if (next >= today && next <= end30) {
+            count30++
+            if (next <= end7) count7++
+          }
+        })
+        if (!cancelled) {
+          setUpcomingServicesCount(count7)
+          setUpcomingServicesCount30(count30)
+        }
+      } catch (e) {
+        console.error('Failed to load upcoming services count:', e)
+      }
+    }
+    run()
+    return () => { cancelled = true }
+  }, [hasPermission, hasPlanFeature, getCurrentCompanyId, currentCompanyId])
+
+  /** Format a Date as YYYY-MM-DD in local time (so "Today" is correct in user's timezone) */
+  const toLocalDateString = (d: Date): string => {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+
   const getDateRange = (): { startDate?: string; endDate?: string } => {
     const now = new Date()
     let startDate: string | undefined
     let endDate: string | undefined
 
     switch (timePeriod) {
-      case 'today':
+      case 'today': {
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-        startDate = today.toISOString().split('T')[0]
-        endDate = today.toISOString().split('T')[0]
+        startDate = toLocalDateString(today)
+        endDate = toLocalDateString(today)
         break
-      case 'thisWeek':
+      }
+      case 'thisWeek': {
         const weekStart = new Date(now)
-        weekStart.setDate(now.getDate() - now.getDay()) // Start of week (Sunday)
+        weekStart.setDate(now.getDate() - now.getDay())
         weekStart.setHours(0, 0, 0, 0)
-        startDate = weekStart.toISOString().split('T')[0]
-        endDate = now.toISOString().split('T')[0]
+        startDate = toLocalDateString(weekStart)
+        endDate = toLocalDateString(now)
         break
-      case 'thisMonth':
+      }
+      case 'thisMonth': {
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-        startDate = monthStart.toISOString().split('T')[0]
-        endDate = now.toISOString().split('T')[0]
+        startDate = toLocalDateString(monthStart)
+        endDate = toLocalDateString(now)
         break
-      case 'thisYear':
+      }
+      case 'thisYear': {
         const yearStart = new Date(now.getFullYear(), 0, 1)
-        startDate = yearStart.toISOString().split('T')[0]
-        endDate = now.toISOString().split('T')[0]
+        startDate = toLocalDateString(yearStart)
+        endDate = toLocalDateString(now)
         break
+      }
       case 'custom':
         startDate = customStartDate || undefined
         endDate = customEndDate || undefined
@@ -1002,28 +1090,32 @@ const Dashboard = () => {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       {/* Header */}
       <header className="bg-white/80 backdrop-blur-lg shadow-lg border-b border-gray-200/50 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          {/* Contact us - single line at top */}
+          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 py-2.5 border-b border-gray-200/60 text-sm">
+            <span className="text-gray-500 font-semibold uppercase tracking-wider">Contact us</span>
+            <a href={CONTACT_WEBSITE_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium">
+              <Globe className="w-3.5 h-3.5" />
+              {CONTACT_WEBSITE_DISPLAY}
+            </a>
+            <span className="text-gray-300">|</span>
+            <a href={CONTACT_WHATSAPP_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-green-600 hover:text-green-800 font-medium">
+              <MessageCircle className="w-3.5 h-3.5" />
+              WhatsApp: {CONTACT_WHATSAPP_NUMBER}
+            </a>
+            <span className="text-gray-300">|</span>
+            <a href={`mailto:${CONTACT_EMAIL}`} className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium">
+              <Mail className="w-3.5 h-3.5" />
+              {CONTACT_EMAIL}
+            </a>
+          </div>
+          <div className="flex items-center justify-between py-6">
             <div>
-              <div className="flex items-center gap-2 mb-2 text-emerald-600 font-semibold">
-                <Users className="w-4 h-4" />
-                <span>{SATISFIED_CUSTOMERS_COUNT.toLocaleString()}+ Satisfied Customers</span>
-              </div>
               <h1 className="text-4xl font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
                 {companyName && companyName.trim() ? `${companyName} - HisabKitab-Pro` : 'HisabKitab-Pro'}
               </h1>
-              <p className="text-sm text-gray-600 mt-1 font-medium">Inventory Management System</p>
-              <div className="flex flex-wrap items-center gap-3 mt-2 text-sm">
-                <a href="https://hisabkitabpro.com" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-indigo-600 hover:text-indigo-800 font-medium">
-                  <Globe className="w-4 h-4" />
-                  hisabkitabpro.com
-                </a>
-                <span className="text-gray-300">|</span>
-                <a href="https://wa.me/917304877938" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-green-600 hover:text-green-800 font-medium">
-                  <MessageCircle className="w-4 h-4" />
-                  WhatsApp: 7304877938
-                </a>
-              </div>
+              <p className="text-sm text-gray-600 mt-1 font-medium">Complete Inventory Management System</p>
+              <p className="text-xs text-gray-500 mt-0.5">Streamline Your Business Operations</p>
             </div>
             <div className="flex items-center gap-4">
               {hasPermission('products:read') && (
@@ -1085,7 +1177,7 @@ const Dashboard = () => {
                       <div className="flex items-center gap-2">
                         <Calendar className="w-4 h-4" />
                         <span className="text-sm font-semibold">
-                          {subscriptionInfo.tier ? (subscriptionInfo.tier === 'premium' ? 'Premium Plan' : subscriptionInfo.tier === 'standard' ? 'Standard Plan' : 'Basic Plan') : 'Subscription'}
+                          {subscriptionInfo.tier ? (subscriptionInfo.tier === 'premium_plus' ? 'Premium Plus Plan' : subscriptionInfo.tier === 'premium' ? 'Premium Plan' : subscriptionInfo.tier === 'standard' ? 'Standard Plan' : 'Basic Plan') : 'Subscription'}
                         </span>
                       </div>
                       {showSubscriptionDetails ? (
@@ -1126,8 +1218,8 @@ const Dashboard = () => {
                             <p className="text-gray-900 font-semibold">
                               {subscriptionInfo.tier
                                 ? (() => {
-                                    const tierInfo = getTierPricing(subscriptionInfo.tier as 'basic' | 'standard' | 'premium')
-                                    const icon = subscriptionInfo.tier === 'premium' ? '♾️' : subscriptionInfo.tier === 'standard' ? '📱📱📱' : '📱'
+                                    const tierInfo = getTierPricing(subscriptionInfo.tier as 'basic' | 'standard' | 'premium' | 'premium_plus')
+                                    const icon = subscriptionInfo.tier === 'premium_plus' ? '🚗' : subscriptionInfo.tier === 'premium' ? '♾️' : subscriptionInfo.tier === 'standard' ? '📱📱📱' : '📱'
                                     return `${icon} ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}`
                                   })()
                                 : 'N/A'}
@@ -1184,10 +1276,12 @@ const Dashboard = () => {
                               )}
                             </div>
                           )}
-                          {subscriptionInfo.tier === 'premium' && !subscriptionInfo.endDate && (
+                          {(subscriptionInfo.tier === 'premium' || subscriptionInfo.tier === 'premium_plus' || subscriptionInfo.tier === 'premium_plus_plus') && !subscriptionInfo.endDate && (
                             <div>
                               <p className="text-gray-500 text-xs mb-1">Access</p>
-                              <p className="text-gray-900 font-semibold text-green-600">Unlimited</p>
+                              <p className="text-gray-900 font-semibold text-green-600">
+                                {subscriptionInfo.tier === 'premium_plus' ? 'Unlimited + Services (Bike, Car, E-bike, E-car)' : subscriptionInfo.tier === 'premium_plus_plus' ? 'Unlimited + All Services' : 'Unlimited'}
+                              </p>
                             </div>
                           )}
                         </div>
@@ -1196,10 +1290,36 @@ const Dashboard = () => {
                   </div>
                 )}
               </div>
+              {/* New version available – show below plan so existing users can update */}
+              {pwaUpdateAvailable && (
+                <div className="mt-2 w-full max-w-xs rounded-lg border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
+                  <p className="text-sm font-semibold text-emerald-800 flex items-center gap-2">
+                    <Download className="w-4 h-4 shrink-0" />
+                    New update available
+                  </p>
+                  <p className="text-xs text-emerald-700 mt-1">
+                    Install the latest version to get new features and fixes.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => applyPwaUpdate()}
+                    className="mt-2 w-full inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                  >
+                    Install now
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
       </header>
+
+      {/* Maintenance / alert banner – just above search & shortcuts */}
+      {maintenanceBanner && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-2">
+          <MaintenanceBanner maintenance={maintenanceBanner} />
+        </div>
+      )}
 
       {/* Global search + keyboard shortcuts – Quick Win #1 & #2 */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 space-y-1">
@@ -1319,7 +1439,7 @@ const Dashboard = () => {
                     <TrendingUp className="w-4 h-4 text-emerald-600" />
                     Sales target
                   </h3>
-                  <Lock className="w-5 h-5 text-emerald-600" />
+                  <LockIcon className="w-5 h-5 text-emerald-600" />
                 </button>
               )
             )}
@@ -1350,7 +1470,7 @@ const Dashboard = () => {
                     >
                       {!canAccess && (
                         <div className="absolute top-3 right-3 z-20 rounded-full bg-white/90 p-1.5 shadow-md" title="Upgrade to unlock">
-                          <Lock className="w-4 h-4 text-emerald-600" />
+                          <LockIcon className="w-4 h-4 text-emerald-600" />
                         </div>
                       )}
                       <div className={`absolute inset-0 bg-gradient-to-br ${option.hoverGradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300`}></div>
@@ -1395,7 +1515,7 @@ const Dashboard = () => {
                       >
                         {!canAccess && planFeature && (
                           <div className="absolute top-3 right-3 z-20 rounded-full bg-white/90 p-1.5 shadow-md" title="Upgrade to unlock">
-                            <Lock className="w-4 h-4 text-cyan-600" />
+                            <LockIcon className="w-4 h-4 text-cyan-600" />
                           </div>
                         )}
                         <div className={`absolute inset-0 bg-gradient-to-br ${option.hoverGradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300`}></div>
@@ -1434,7 +1554,7 @@ const Dashboard = () => {
                     >
                       {!canAccess && (
                         <div className="absolute top-3 right-3 z-20 rounded-full bg-white/90 p-1.5 shadow-md" title="Upgrade to unlock">
-                          <Lock className="w-4 h-4 text-pink-600" />
+                          <LockIcon className="w-4 h-4 text-pink-600" />
                         </div>
                       )}
                       <div className={`absolute inset-0 bg-gradient-to-br ${option.hoverGradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300`}></div>
@@ -1453,6 +1573,155 @@ const Dashboard = () => {
                 })}
               </div>
             </div>
+
+            {/* Services – shown to all with services:read; Basic/Standard see all 4 cards locked, click = upgrade prompt */}
+            {hasPermission('services:read') && (
+              <div className="mt-8 pt-8 border-t border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                  <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-indigo-600 rounded-full"></div>
+                  Services
+                </h3>
+                {/* Book appointment – horizontal bar above service cards */}
+                <div className="relative mb-5">
+                  <button
+                    type="button"
+                    onClick={() => setBookAppointmentOpen((prev) => !prev)}
+                    className="group w-full flex items-center justify-between gap-4 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-2xl px-6 py-4 transform transition-all duration-300 hover:from-emerald-600 hover:to-teal-700 hover:shadow-xl text-left"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="p-2.5 rounded-xl bg-white/20 group-hover:bg-white/30 transition-colors">
+                        <CalendarClock className="w-7 h-7" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-bold">Book appointment</h3>
+                        <p className="text-white/90 text-sm">Schedule service – select vehicle type (Bike, Car, E-bike, E-car)</p>
+                      </div>
+                    </div>
+                    <ChevronDown className={`w-5 h-5 text-white/90 transition-transform ${bookAppointmentOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {bookAppointmentOpen && (
+                    <>
+                      <div className="fixed inset-0 z-20" aria-hidden onClick={() => setBookAppointmentOpen(false)} />
+                      <div className="absolute top-full left-0 right-0 mt-2 z-30 bg-white rounded-xl shadow-xl border border-gray-200 py-2 overflow-hidden">
+                        <p className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100">Select vehicle type</p>
+                        {[
+                          { id: 'bike' as const, label: 'Bike', icon: <Bike className="w-4 h-4" />, planFeature: 'services_bike_car_ebike' as const },
+                          { id: 'car' as const, label: 'Car', icon: <Car className="w-4 h-4" />, planFeature: 'services_bike_car_ebike' as const },
+                          { id: 'ebike' as const, label: 'E-bike', icon: <Zap className="w-4 h-4" />, planFeature: 'services_ebike_ecar' as const },
+                          { id: 'ecar' as const, label: 'E-car', icon: <BatteryCharging className="w-4 h-4" />, planFeature: 'services_ebike_ecar' as const },
+                        ].map((opt) => {
+                          const canAccess = hasPlanFeature(opt.planFeature)
+                          return (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => {
+                                if (canAccess) {
+                                  navigate(`/services/${opt.id}/new?book=1`)
+                                  setBookAppointmentOpen(false)
+                                } else {
+                                  showPlanUpgrade(opt.planFeature)
+                                  setBookAppointmentOpen(false)
+                                }
+                              }}
+                              className={`w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm font-medium transition-colors ${canAccess ? 'text-gray-800 hover:bg-emerald-50 hover:text-emerald-700' : 'text-gray-400 cursor-not-allowed'}`}
+                            >
+                              {opt.icon}
+                              <span>{opt.label}</span>
+                              {!canAccess && <LockIcon className="w-3.5 h-3.5 ml-auto text-amber-500" />}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                  {[
+                    { id: 'bike' as const, label: 'Bike Services', desc: 'Manage bike service records', icon: <Bike className="w-10 h-10" />, gradient: 'from-blue-500 to-indigo-600', hover: 'from-indigo-600 to-blue-700', path: '/services/bike', planFeature: 'services_bike_car_ebike' as const },
+                    { id: 'car' as const, label: 'Car Services', desc: 'Manage car service records', icon: <Car className="w-10 h-10" />, gradient: 'from-slate-600 to-slate-700', hover: 'from-slate-700 to-slate-800', path: '/services/car', planFeature: 'services_bike_car_ebike' as const },
+                    { id: 'ebike' as const, label: 'E-bike Services', desc: 'Manage e-bike service records', icon: <Zap className="w-10 h-10" />, gradient: 'from-emerald-500 to-teal-600', hover: 'from-teal-600 to-emerald-700', path: '/services/ebike', planFeature: 'services_ebike_ecar' as const },
+                    { id: 'ecar' as const, label: 'E-car Services', desc: 'Manage e-car service records', icon: <BatteryCharging className="w-10 h-10" />, gradient: 'from-violet-500 to-purple-600', hover: 'from-purple-600 to-violet-700', path: '/services/ecar', planFeature: 'services_ebike_ecar' as const },
+                  ].map((card) => {
+                    const canAccess = hasPlanFeature(card.planFeature)
+                    const handleClick = canAccess ? () => navigate(card.path) : () => showPlanUpgrade(card.planFeature)
+                    const lockTitle = 'Upgrade to Premium or above to access all Services (Bike, Car, E-bike, E-car)'
+                    return (
+                      <button
+                        key={card.id}
+                        onClick={handleClick}
+                        className={`group relative bg-gradient-to-br ${card.gradient} text-white rounded-2xl p-6 transform transition-all duration-300 hover:scale-105 hover:shadow-2xl text-left overflow-hidden`}
+                      >
+                        {!canAccess && (
+                          <div className="absolute top-3 right-3 z-20 rounded-full bg-white/90 p-1.5 shadow-md" title={lockTitle}>
+                            <LockIcon className="w-4 h-4 text-gray-600" />
+                          </div>
+                        )}
+                        <div className={`absolute inset-0 bg-gradient-to-br ${card.hover} opacity-0 group-hover:opacity-100 transition-opacity duration-300`}></div>
+                        <div className="relative z-10">
+                          <div className="mb-4 transform group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300">
+                            {card.icon}
+                          </div>
+                          <h3 className="text-xl font-bold mb-2">{card.label}</h3>
+                          <p className="text-white/90 text-sm leading-relaxed">{card.desc}</p>
+                        </div>
+                        <div className="absolute top-4 right-4 opacity-20 group-hover:opacity-30 transition-opacity">
+                          <div className="w-20 h-20 bg-white rounded-full blur-2xl"></div>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+                {/* Upcoming services widget – visible to all with services; Premium Plus gets counts + link */}
+                {hasPermission('services:read') && (
+                  <div className="mt-4">
+                    <button
+                      type="button"
+                      onClick={() => hasPlanFeature('services_upcoming_widget') ? navigate('/services/bike', { state: { upcomingOnly: true } }) : showPlanUpgrade('services_upcoming_widget')}
+                      className="w-full flex items-center justify-between gap-4 p-4 rounded-xl border-2 border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 hover:from-amber-100 hover:to-orange-100 transition-colors text-left relative"
+                    >
+                      {!hasPlanFeature('services_upcoming_widget') && (
+                        <div className="absolute top-3 right-3 z-10 rounded-full bg-white/90 p-1.5 shadow-md" title="Upgrade to Premium Plus">
+                          <LockIcon className="w-4 h-4 text-amber-600" />
+                        </div>
+                      )}
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-amber-100">
+                          <Calendar className="w-6 h-6 text-amber-700" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-gray-900">Upcoming services</p>
+                          <p className="text-sm text-gray-600">
+                            {hasPlanFeature('services_upcoming_widget') ? 'Next 7 days & 30 days – tap to view list' : 'Premium Plus'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        {hasPlanFeature('services_upcoming_widget') ? (
+                          <>
+                            <div className="text-right">
+                              <p className="text-xs font-medium text-amber-600">7 days</p>
+                              <p className="text-xl font-bold text-amber-700">{upcomingServicesCount}</p>
+                            </div>
+                            <div className="w-px h-10 bg-amber-200" />
+                            <div className="text-right">
+                              <p className="text-xs font-medium text-amber-600">30 days</p>
+                              <p className="text-xl font-bold text-amber-700">{upcomingServicesCount30}</p>
+                            </div>
+                            <ChevronRight className="w-5 h-5 text-amber-600" />
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-sm font-medium text-amber-600">Upgrade to unlock</span>
+                            <ChevronRight className="w-5 h-5 text-amber-600" />
+                          </>
+                        )}
+                      </div>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Stock Management Options */}
             {hasPermission('products:read') && (
@@ -1484,7 +1753,7 @@ const Dashboard = () => {
                   >
                     {!hasPlanFeature('purchase_reorder') && (
                       <div className="absolute top-3 right-3 z-20 rounded-full bg-white/90 p-1.5 shadow-md" title="Upgrade to unlock">
-                        <Lock className="w-4 h-4 text-emerald-600" />
+                        <LockIcon className="w-4 h-4 text-emerald-600" />
                       </div>
                     )}
                     <div className="absolute inset-0 bg-gradient-to-br from-teal-600 to-cyan-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
@@ -1511,7 +1780,7 @@ const Dashboard = () => {
                     >
                       {!hasPlanFeature('purchase_reorder') && (
                         <div className="absolute top-3 right-3 z-20 rounded-full bg-white/90 p-1.5 shadow-md" title="Upgrade to unlock">
-                          <Lock className="w-4 h-4 text-violet-600" />
+                          <LockIcon className="w-4 h-4 text-violet-600" />
                         </div>
                       )}
                       <div className="absolute inset-0 bg-gradient-to-br from-purple-600 to-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
@@ -1656,7 +1925,7 @@ const Dashboard = () => {
                         type="date"
                         value={customEndDate}
                         onChange={(e) => setCustomEndDate(e.target.value)}
-                        max={new Date().toISOString().split('T')[0]}
+                        max={toLocalDateString(new Date())}
                         className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                       />
                     </div>
@@ -1754,7 +2023,7 @@ const Dashboard = () => {
                   <Wallet className="w-4 h-4 text-indigo-600" />
                   Cash flow overview
                 </h3>
-                <Lock className="w-5 h-5 text-indigo-600" />
+                <LockIcon className="w-5 h-5 text-indigo-600" />
               </button>
             )
             )}
@@ -1807,7 +2076,7 @@ const Dashboard = () => {
                       <Package className="w-4 h-4" />
                       Top 5 products (period)
                     </h3>
-                    <Lock className="w-5 h-5 text-gray-500" />
+                    <LockIcon className="w-5 h-5 text-gray-500" />
                   </button>
                 )}
                 {hasPlanFeature('dashboard_top_5_customers') && topCustomers.length > 0 ? (
@@ -1835,7 +2104,7 @@ const Dashboard = () => {
                       <Users className="w-4 h-4" />
                       Top 5 customers (period)
                     </h3>
-                    <Lock className="w-5 h-5 text-gray-500" />
+                    <LockIcon className="w-5 h-5 text-gray-500" />
                   </button>
                 )}
               </div>
@@ -1889,7 +2158,7 @@ const Dashboard = () => {
                   <DollarSign className="w-4 h-4" />
                   Outstanding summary
                 </h3>
-                <Lock className="w-5 h-5 text-amber-600" />
+                <LockIcon className="w-5 h-5 text-amber-600" />
               </button>
             )
             )}
@@ -1923,7 +2192,7 @@ const Dashboard = () => {
                 >
                   {isLocked && (
                     <div className="absolute top-3 right-3 z-20 rounded-full bg-white/90 p-1.5 shadow-md" title="Upgrade to unlock">
-                      <Lock className="w-4 h-4 text-amber-600" />
+                      <LockIcon className="w-4 h-4 text-amber-600" />
                     </div>
                   )}
                   <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br opacity-0 group-hover:opacity-5 transition-opacity duration-300" style={{background: `linear-gradient(135deg, var(--tw-gradient-stops))`}}></div>
@@ -1965,7 +2234,7 @@ const Dashboard = () => {
                   onClick={() => hasPlanFeature('report_daily_activity') ? navigate('/reports/daily-activity') : showPlanUpgrade('report_daily_activity')}
                   className="group relative w-full bg-gradient-to-r from-green-600 via-emerald-600 to-teal-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-green-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
-                  {!hasPlanFeature('report_daily_activity') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!hasPlanFeature('report_daily_activity') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <Clock className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span>Daily Activity Report</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -1974,7 +2243,7 @@ const Dashboard = () => {
                   onClick={() => hasPlanFeature('report_sales') ? navigate('/reports/sales') : showPlanUpgrade('report_sales')}
                   className="group relative w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
-                  {!hasPlanFeature('report_sales') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!hasPlanFeature('report_sales') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <TrendingUp className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span>View Sales Reports</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -1983,7 +2252,7 @@ const Dashboard = () => {
                   onClick={() => hasPlanFeature('report_purchases') ? navigate('/reports/purchases') : showPlanUpgrade('report_purchases')}
                   className="group relative w-full bg-gradient-to-r from-amber-600 via-orange-600 to-red-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-amber-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
-                  {!hasPlanFeature('report_purchases') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!hasPlanFeature('report_purchases') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <ShoppingBag className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span>View Purchase Reports</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -1993,7 +2262,7 @@ const Dashboard = () => {
                     onClick={() => hasPlanFeature('sales_rent') ? navigate('/rentals/report') : showPlanUpgrade('sales_rent')}
                     className="group relative w-full bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-violet-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                   >
-                    {!hasPlanFeature('sales_rent') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                    {!hasPlanFeature('sales_rent') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                     <Calendar className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                     <span>Rent &amp; Bookings Report</span>
                     <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -2003,7 +2272,7 @@ const Dashboard = () => {
                   onClick={() => hasPlanFeature('report_profit_analysis') ? navigate('/reports/profit-analysis') : showPlanUpgrade('report_profit_analysis')}
                   className="group relative w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-emerald-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
-                  {!hasPlanFeature('report_profit_analysis') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!hasPlanFeature('report_profit_analysis') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <BarChart3 className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span>Profit Analysis</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -2012,7 +2281,7 @@ const Dashboard = () => {
                   onClick={() => hasPlanFeature('report_expenses') ? navigate('/reports/expenses') : showPlanUpgrade('report_expenses')}
                   className="group relative w-full bg-gradient-to-r from-rose-600 via-pink-600 to-orange-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-rose-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
-                  {!hasPlanFeature('report_expenses') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!hasPlanFeature('report_expenses') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <DollarSign className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span>Expense Reports</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -2021,7 +2290,7 @@ const Dashboard = () => {
                   onClick={() => hasPlanFeature('report_comparative') ? navigate('/reports/comparative') : showPlanUpgrade('report_comparative')}
                   className="group relative w-full bg-gradient-to-r from-cyan-600 via-teal-600 to-emerald-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-cyan-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
-                  {!hasPlanFeature('report_comparative') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!hasPlanFeature('report_comparative') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <BarChart3 className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span>Comparative Reports (Month vs Month, Year vs Year)</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -2031,7 +2300,7 @@ const Dashboard = () => {
                     onClick={() => hasPlanFeature('report_customer_insights') ? navigate('/customers/insights') : showPlanUpgrade('report_customer_insights')}
                     className="group relative w-full bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-amber-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                   >
-                    {!hasPlanFeature('report_customer_insights') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                    {!hasPlanFeature('report_customer_insights') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                     <Users className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                     <span>Customer Insights</span>
                     <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -2041,7 +2310,7 @@ const Dashboard = () => {
                   onClick={() => hasPlanFeature('report_commission') ? navigate('/reports/commissions') : showPlanUpgrade('report_commission')}
                   className="group relative w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
-                  {!hasPlanFeature('report_commission') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!hasPlanFeature('report_commission') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <TrendingUp className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span>View Commission Reports</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -2050,7 +2319,7 @@ const Dashboard = () => {
                   onClick={() => hasPlanFeature('report_ca') ? navigate('/reports/ca') : showPlanUpgrade('report_ca')}
                   className="group relative w-full bg-gradient-to-r from-slate-600 via-slate-700 to-slate-800 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-slate-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
-                  {!hasPlanFeature('report_ca') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!hasPlanFeature('report_ca') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <FileText className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span>CA Reports (GSTR-1, GSTR-2, GSTR-3B)</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -2063,7 +2332,7 @@ const Dashboard = () => {
                   onClick={() => hasPlanFeature('report_outstanding') ? navigate('/payments/outstanding') : showPlanUpgrade('report_outstanding')}
                   className="group relative w-full bg-gradient-to-r from-orange-600 via-red-600 to-pink-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-orange-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
-                  {!hasPlanFeature('report_outstanding') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!hasPlanFeature('report_outstanding') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <DollarSign className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span>Outstanding Payments</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -2087,7 +2356,7 @@ const Dashboard = () => {
                 onClick={() => (hasPermission('products:update') && hasPlanFeature('settings_backup_restore')) ? navigate('/backup-restore') : showPlanUpgrade('settings_backup_restore')}
                 className="group relative w-full bg-gradient-to-r from-teal-600 via-cyan-600 to-blue-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-teal-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
               >
-                {!(hasPermission('products:update') && hasPlanFeature('settings_backup_restore')) && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                {!(hasPermission('products:update') && hasPlanFeature('settings_backup_restore')) && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                 <Database className="w-5 h-5 group-hover:scale-110 transition-transform" />
                 <span>Backup & Restore</span>
                 <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -2118,7 +2387,7 @@ const Dashboard = () => {
                   onClick={() => (hasPermission('barcode_label_settings:read') || hasPermission('barcode_label_settings:update')) ? navigate('/settings/barcode-label') : showPlanUpgrade('settings_barcode_label')}
                   className="group relative w-full bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
-                  {!(hasPermission('barcode_label_settings:read') || hasPermission('barcode_label_settings:update')) && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!(hasPermission('barcode_label_settings:read') || hasPermission('barcode_label_settings:update')) && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <Barcode className="w-5 h-5 group-hover:scale-110 transition-transform" />
                   <span>Barcode Label Settings</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -2127,7 +2396,7 @@ const Dashboard = () => {
                   onClick={() => (hasPermission('receipt_printer_settings:read') || hasPermission('receipt_printer_settings:update')) ? navigate('/settings/receipt-printer') : showPlanUpgrade('settings_receipt_printer')}
                   className="group relative w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
-                  {!(hasPermission('receipt_printer_settings:read') || hasPermission('receipt_printer_settings:update')) && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!(hasPermission('receipt_printer_settings:read') || hasPermission('receipt_printer_settings:update')) && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />
                   <span>Receipt Printer Settings</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -2146,7 +2415,7 @@ const Dashboard = () => {
                   onClick={() => hasPermission('settings:update') ? navigate('/settings/automated-exports') : showPlanUpgrade('settings_automated_exports')}
                   className="group relative w-full bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-violet-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
-                  {!hasPermission('settings:update') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!hasPermission('settings:update') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <Calendar className="w-5 h-5 group-hover:scale-110 transition-transform" />
                   <span>Automated Exports</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -2155,7 +2424,7 @@ const Dashboard = () => {
                   onClick={() => hasPermission('business_overview:read') ? navigate('/business-overview') : showPlanUpgrade('report_business_overview')}
                   className="group relative w-full overflow-hidden bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white font-bold py-5 px-6 rounded-2xl hover:shadow-2xl hover:shadow-amber-500/30 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-3 border-2 border-amber-400/30"
                 >
-                  {!hasPermission('business_overview:read') && <Lock className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!hasPermission('business_overview:read') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_50%,_rgba(255,255,255,0.15)_0%,_transparent_50%)]" />
                   <BarChart3 className="w-6 h-6 relative z-10 group-hover:rotate-6 transition-transform" />
                   <span className="relative z-10">Business Overview</span>
@@ -2202,6 +2471,26 @@ const Dashboard = () => {
             </a>
           ))}
           </div>
+        </div>
+
+        {/* Contact Us */}
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 py-4 px-4 bg-gray-50 rounded-xl border border-gray-200">
+          <span className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+            <MessageCircle className="w-4 h-4 text-blue-600" />
+            Contact us
+          </span>
+          <a href={`mailto:${CONTACT_EMAIL}`} className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1.5 transition-colors">
+            <Mail className="w-4 h-4" />
+            {CONTACT_EMAIL}
+          </a>
+          <a href={CONTACT_WEBSITE_URL} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1.5 transition-colors">
+            <Globe className="w-4 h-4" />
+            {CONTACT_WEBSITE_DISPLAY}
+          </a>
+          <a href={CONTACT_WHATSAPP_URL} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1.5 transition-colors">
+            <Phone className="w-4 h-4" />
+            WhatsApp: {CONTACT_WHATSAPP_NUMBER}
+          </a>
         </div>
 
         {/* Additional Info Bar - Welcome Section (footer) */}

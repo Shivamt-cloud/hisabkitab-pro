@@ -6,18 +6,19 @@ import { companyService } from '../services/companyService'
 import { userService, UserWithPassword } from '../services/userService'
 import { permissionService } from '../services/permissionService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
-import { CompanySettings, InvoiceSettings, TaxSettings, GeneralSettings } from '../types/settings'
+import { CompanySettings, InvoiceSettings, TaxSettings, GeneralSettings, MaintenanceSettings } from '../types/settings'
 import { Company } from '../types/company'
 import { UserRole } from '../types/auth'
 import { PermissionModule, PermissionAction, PERMISSION_MODULES, ModulePermission } from '../types/permissions'
-import { Home, Save, Building2, FileText, Percent, Settings, RotateCcw, Download, Upload, Plus, Edit, Trash2, Users, Eye, EyeOff, X, Shield, UserCog, UserCheck, Lock, Unlock, UserPlus, Mail, CheckCircle, Clock, AlertCircle, Smartphone } from 'lucide-react'
+import { Home, Save, Building2, FileText, Percent, Settings, RotateCcw, Download, Upload, Plus, Edit, Trash2, Users, Eye, EyeOff, X, Shield, UserCog, UserCheck, UserPlus, Mail, CheckCircle, Clock, AlertCircle, Smartphone, AlertTriangle } from 'lucide-react'
+import { LockIcon, UnlockIcon } from '../components/icons/LockIcon'
 import { registrationRequestService, RegistrationRequest } from '../services/registrationRequestService'
 import { generateMailtoLink, getEmailTemplateForStatus, registrationEmailTemplates, generateUserCreatedMailtoLink, UserCreatedEmailData } from '../utils/registrationEmailTemplates'
 import { cloudDeviceService } from '../services/cloudDeviceService'
 import { Device } from '../types/device'
 import { getMaxUsersForPlan, canCreateUser } from '../utils/planUserLimits'
 
-type SettingsTab = 'companies' | 'users' | 'registration-requests' | 'devices' | 'invoice' | 'tax' | 'general'
+type SettingsTab = 'companies' | 'users' | 'registration-requests' | 'devices' | 'maintenance' | 'invoice' | 'tax' | 'general'
 
 const SystemSettings = () => {
   const { user, getCurrentCompanyId, switchCompany } = useAuth()
@@ -112,6 +113,12 @@ const SystemSettings = () => {
     enable_barcode_generation: true,
     default_barcode_format: 'EAN13',
   })
+  const [maintenance, setMaintenance] = useState<MaintenanceSettings>({
+    enabled: false,
+    show_as: 'banner',
+    message: '',
+    end_time_ist: '',
+  })
 
   useEffect(() => {
     loadCompanies()
@@ -127,6 +134,9 @@ const SystemSettings = () => {
     // Reload registration requests when tab is active
     if (activeTab === 'registration-requests') {
       loadRegistrationRequests()
+    }
+    if (activeTab === 'maintenance') {
+      settingsService.getMaintenance().then(setMaintenance)
     }
   }, [activeTab])
 
@@ -745,6 +755,18 @@ const SystemSettings = () => {
     }
   }
 
+  const handleSaveMaintenance = async (e: FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    try {
+      await settingsService.updateMaintenance(maintenance, user?.id ? parseInt(user.id) : undefined)
+      setSaved(true)
+    } catch (error) {
+      alert('Failed to save maintenance / alert settings')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const handleReset = async () => {
     if (window.confirm('Are you sure you want to reset all settings to default values?')) {
@@ -910,6 +932,18 @@ const SystemSettings = () => {
                     <Smartphone className="w-4 h-4" />
                     Devices
                     {activeTab === 'devices' && (
+                      <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('maintenance')}
+                    className={`px-6 py-3 font-semibold text-sm transition-colors relative flex items-center gap-2 ${
+                      activeTab === 'maintenance' ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <AlertTriangle className="w-4 h-4" />
+                    Maintenance & Alerts
+                    {activeTab === 'maintenance' && (
                       <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
                     )}
                   </button>
@@ -1399,7 +1433,7 @@ const SystemSettings = () => {
                                 className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                                 title={autoGenerateEmail ? "Disable auto-generation" : "Enable auto-generation"}
                               >
-                                {autoGenerateEmail ? <Lock className="w-4 h-4 text-gray-600" /> : <Unlock className="w-4 h-4 text-gray-600" />}
+                                {autoGenerateEmail ? <LockIcon className="w-4 h-4 text-gray-600" /> : <UnlockIcon className="w-4 h-4 text-gray-600" />}
                               </button>
                             )}
                           </div>
@@ -1437,7 +1471,7 @@ const SystemSettings = () => {
                                 title={autoGenerateUserCode ? "Disable auto-generation" : "Enable auto-generation"}
                                 disabled={!userFormData.company_id}
                               >
-                                {autoGenerateUserCode ? <Lock className="w-4 h-4 text-gray-600" /> : <Unlock className="w-4 h-4 text-gray-600" />}
+                                {autoGenerateUserCode ? <LockIcon className="w-4 h-4 text-gray-600" /> : <UnlockIcon className="w-4 h-4 text-gray-600" />}
                               </button>
                             </div>
                             {autoGenerateUserCode && userFormData.company_id && userFormData.name?.trim() && (
@@ -1575,12 +1609,12 @@ const SystemSettings = () => {
                           >
                             {useCustomPermissions ? (
                               <>
-                                <Unlock className="w-4 h-4" />
+                                <UnlockIcon className="w-4 h-4" />
                                 <span>Custom Enabled</span>
                               </>
                             ) : (
                               <>
-                                <Lock className="w-4 h-4" />
+                                <LockIcon className="w-4 h-4" />
                                 <span>Use Role Defaults</span>
                               </>
                             )}
@@ -1924,7 +1958,7 @@ const SystemSettings = () => {
                                   </div>
                                 ) : req.subscription_tier ? (
                                   <div className="text-xs text-gray-600 mt-1">
-                                    Plan: {req.subscription_tier === 'basic' ? 'Basic' : req.subscription_tier === 'standard' ? 'Standard' : 'Premium'}
+                                    Plan: {req.subscription_tier === 'basic' ? 'Basic' : req.subscription_tier === 'standard' ? 'Standard' : req.subscription_tier === 'premium_plus' ? 'Premium Plus' : req.subscription_tier === 'premium_plus_plus' ? 'Premium Plus Plus' : 'Premium'}
                                   </div>
                                 ) : null}
                               </td>
@@ -2223,6 +2257,75 @@ const SystemSettings = () => {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Maintenance & Alerts (admin only) */}
+            {activeTab === 'maintenance' && user?.role === 'admin' && (
+              <div className="space-y-6">
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-800">Maintenance & alert banner</p>
+                    <p className="text-xs text-amber-700 mt-1">
+                      Show a message to all users: either as a banner at the top of the app or as a full maintenance page. Use IST time in the message so users in any timezone understand (e.g. &quot;Site will be down for 30 minutes at 12:00 AM IST on 15 Feb 2026&quot;). You can always access this page via Settings to turn it off.
+                    </p>
+                  </div>
+                </div>
+                <form onSubmit={handleSaveMaintenance} className="space-y-6">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="maintenance-enabled"
+                      checked={maintenance.enabled}
+                      onChange={(e) => setMaintenance((m) => ({ ...m, enabled: e.target.checked }))}
+                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <label htmlFor="maintenance-enabled" className="text-sm font-semibold text-gray-800">
+                      Enable maintenance / alert (show message to all users)
+                    </label>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">How to show</label>
+                    <select
+                      value={maintenance.show_as}
+                      onChange={(e) => setMaintenance((m) => ({ ...m, show_as: e.target.value as 'banner' | 'page' }))}
+                      className="w-full max-w-xs px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                    >
+                      <option value="banner">Banner at top (users can still use the app)</option>
+                      <option value="page">Full maintenance page (all routes show maintenance except Settings so you can turn it off)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Message to show (e.g. planned downtime in IST)</label>
+                    <textarea
+                      value={maintenance.message}
+                      onChange={(e) => setMaintenance((m) => ({ ...m, message: e.target.value }))}
+                      rows={3}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      placeholder="e.g. Planned maintenance: Site will be down for 30 minutes at 12:00 AM IST on 15 Feb 2026. We apologise for the inconvenience."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">End time (IST) – optional, for display only</label>
+                    <input
+                      type="text"
+                      value={maintenance.end_time_ist ?? ''}
+                      onChange={(e) => setMaintenance((m) => ({ ...m, end_time_ist: e.target.value || undefined }))}
+                      className="w-full max-w-md px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      placeholder="e.g. 15 Feb 2026, 12:00 AM IST"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Helps users in all timezones understand when service will resume.</p>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
+                  >
+                    <Save className="w-4 h-4" />
+                    {loading ? 'Saving...' : 'Save maintenance / alert'}
+                  </button>
+                </form>
               </div>
             )}
 

@@ -2,7 +2,7 @@
 // Provides a simple interface to interact with IndexedDB
 
 const DB_NAME = 'hisabkitab_db'
-const DB_VERSION = 20 // Add EMPLOYEE_GOODS_PURCHASES for employee deductions
+const DB_VERSION = 22 // Add TECHNICIANS store for service technician list
 
 // Object store names (tables)
 export const STORES = {
@@ -39,6 +39,8 @@ export const STORES = {
   RENTALS: 'rentals',
   SALARY_PAYMENTS: 'salary_payments',
   EMPLOYEE_GOODS_PURCHASES: 'employee_goods_purchases',
+  SERVICES: 'services',
+  TECHNICIANS: 'technicians',
 } as const
 
 let dbInstance: IDBDatabase | null = null
@@ -343,6 +345,36 @@ export function initDB(config: DBConfig = {}): Promise<IDBDatabase> {
         }
         if (!backupsStore.indexNames.contains('created_at')) {
           backupsStore.createIndex('created_at', 'created_at', { unique: false })
+        }
+      }
+
+      // Handle SERVICES store (bike, car, ebike, ecar service records)
+      if (!db.objectStoreNames.contains(STORES.SERVICES)) {
+        const servicesStore = db.createObjectStore(STORES.SERVICES, { keyPath: 'id' })
+        servicesStore.createIndex('company_id', 'company_id', { unique: false })
+        servicesStore.createIndex('vehicle_type', 'vehicle_type', { unique: false })
+        servicesStore.createIndex('service_date', 'service_date', { unique: false })
+      } else {
+        const servicesStore = transaction.objectStore(STORES.SERVICES)
+        if (!servicesStore.indexNames.contains('company_id')) {
+          servicesStore.createIndex('company_id', 'company_id', { unique: false })
+        }
+        if (!servicesStore.indexNames.contains('vehicle_type')) {
+          servicesStore.createIndex('vehicle_type', 'vehicle_type', { unique: false })
+        }
+        if (!servicesStore.indexNames.contains('service_date')) {
+          servicesStore.createIndex('service_date', 'service_date', { unique: false })
+        }
+      }
+
+      // Handle TECHNICIANS store (for service job assignment)
+      if (!db.objectStoreNames.contains(STORES.TECHNICIANS)) {
+        const techStore = db.createObjectStore(STORES.TECHNICIANS, { keyPath: 'id' })
+        techStore.createIndex('company_id', 'company_id', { unique: false })
+      } else {
+        const techStore = transaction.objectStore(STORES.TECHNICIANS)
+        if (!techStore.indexNames.contains('company_id')) {
+          techStore.createIndex('company_id', 'company_id', { unique: false })
         }
       }
 

@@ -31,11 +31,6 @@ const SalesHistory = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   useEffect(() => {
-    // Only admin can access this page
-    if (user?.role !== 'admin') {
-      navigate('/')
-      return
-    }
     loadSales()
   }, [user, timePeriod, customStartDate, customEndDate])
 
@@ -262,29 +257,6 @@ const SalesHistory = () => {
     toast.success('Sales history exported to PDF')
   }
 
-  // Block non-admin access
-  if (user?.role !== 'admin') {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50">
-        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md text-center">
-          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Archive className="w-8 h-8 text-red-600" />
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h2>
-          <p className="text-gray-600 mb-6">
-            Sales history is only available to administrators.
-          </p>
-          <button
-            onClick={() => navigate('/')}
-            className="inline-block bg-blue-600 text-white font-semibold px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Go to Dashboard
-          </button>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <ProtectedRoute requiredPermission="sales:read">
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
@@ -302,9 +274,6 @@ const SalesHistory = () => {
                 <div>
                   <div className="flex items-center gap-3">
                     <h1 className="text-3xl font-bold text-gray-900">Sales History</h1>
-                    <span className="px-3 py-1 bg-red-100 text-red-700 text-xs font-bold rounded-full border border-red-200">
-                      ADMIN ONLY
-                    </span>
                   </div>
                   <p className="text-sm text-gray-600 mt-1">View all sales including archived records</p>
                 </div>

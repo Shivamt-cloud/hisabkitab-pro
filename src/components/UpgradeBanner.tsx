@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { userService } from '../services/userService'
+import { CONTACT_EMAIL } from '../constants'
 import { X, Sparkles, ArrowUpRight } from 'lucide-react'
 
 /**
@@ -18,18 +18,16 @@ export function UpgradeBanner() {
   const subscriptionTier = (user as any)?.subscription_tier || 'basic'
 
   // Don't show banner for premium users or if dismissed
-  if (subscriptionTier === 'premium' || isDismissed || !user) {
+  if (subscriptionTier === 'premium' || subscriptionTier === 'premium_plus' || subscriptionTier === 'premium_plus_plus' || isDismissed || !user) {
     return null
   }
 
   const handleUpgrade = () => {
-    // Open email to contact for upgrade
-    const email = 'hisabkitabpro@gmail.com'
     const subject = encodeURIComponent('Upgrade Subscription Request')
     const body = encodeURIComponent(
       `Hello,\n\nI would like to upgrade my subscription from ${subscriptionTier.toUpperCase()} plan.\n\nUser: ${user.email}\nName: ${user.name}\n\nPlease let me know the next steps.\n\nThank you!`
     )
-    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`
+    window.location.href = `mailto:${CONTACT_EMAIL}?subject=${subject}&body=${body}`
   }
 
   if (subscriptionTier === 'basic') {

@@ -7,7 +7,8 @@ import { companyService } from '../services/companyService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { UserRole } from '../types/auth'
 import { PermissionModule, PermissionAction, PERMISSION_MODULES, ModulePermission } from '../types/permissions'
-import { Home, Save, X, Shield, UserCog, UserCheck, Eye, Lock, Unlock } from 'lucide-react'
+import { Home, Save, X, Shield, UserCog, UserCheck, Eye } from 'lucide-react'
+import { LockIcon, UnlockIcon } from '../components/icons/LockIcon'
 import { Company } from '../types/company'
 
 const UserForm = () => {
@@ -506,12 +507,12 @@ const UserForm = () => {
                   >
                     {useCustomPermissions ? (
                       <>
-                        <Unlock className="w-4 h-4" />
+                        <UnlockIcon className="w-4 h-4" />
                         <span>Custom Enabled</span>
                       </>
                     ) : (
                       <>
-                        <Lock className="w-4 h-4" />
+                        <LockIcon className="w-4 h-4" />
                         <span>Use Role Defaults</span>
                       </>
                     )}

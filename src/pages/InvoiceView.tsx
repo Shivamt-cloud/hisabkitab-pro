@@ -83,6 +83,7 @@ const InvoiceView = () => {
           hsn_code: product?.hsn_code ?? snap?.hsn_code,
           gst_rate: product?.gst_rate ?? snap?.gst_rate,
           unit: product?.unit ?? snap?.unit,
+          sales_person_name: item.sales_person_name || sale.sales_person_name || undefined,
         }
       })
       
@@ -148,7 +149,7 @@ const InvoiceView = () => {
         credit_applied: sale.credit_applied, // Include credit applied if any
         credit_balance: customerCreditBalance, // Include current credit balance
         payment_status: sale.payment_status,
-        sales_person: sale.sales_person_name,
+        sales_person: sale.sales_person_name || sale.items?.find(i => i.sales_person_name)?.sales_person_name || undefined,
         notes: sale.notes,
         company_info: companyInfo,
       }

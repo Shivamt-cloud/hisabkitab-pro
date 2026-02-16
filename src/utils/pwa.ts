@@ -135,9 +135,37 @@ export async function checkForUpdates(): Promise<boolean> {
   }
 }
 
+/** Called from main.tsx with the updateSW function from vite-plugin-pwa (when registerType is 'prompt') */
+let pwaUpdateHandler: ((reload?: boolean) => void) | null = null
+export function setPwaUpdateHandler(fn: (reload?: boolean) => void) {
+  pwaUpdateHandler = fn
+}
+
 /**
- * Register update listener
- * Calls callback when update is available
+ * Apply the pending PWA update (skip waiting + reload).
+ * Safe to call when user clicks "Install now" / "Update now".
+ */
+export function applyPwaUpdate(): void {
+  if (pwaUpdateHandler) {
+    pwaUpdateHandler(true)
+  } else {
+    forceUpdate()
+  }
+}
+
+/**
+ * Listen for "new version available" (fired when SW finds an update and we use prompt mode).
+ * Use this to show "New update available – Install now" in the UI.
+ */
+export function onPwaUpdateAvailable(callback: () => void): () => void {
+  const handler = () => callback()
+  window.addEventListener('pwa-update-available', handler)
+  return () => window.removeEventListener('pwa-update-available', handler)
+}
+
+/**
+ * Register update listener (legacy: direct SW updatefound).
+ * Prefer onPwaUpdateAvailable when using virtual:pwa-register with prompt.
  */
 export function onUpdateAvailable(callback: () => void) {
   if (!isServiceWorkerSupported()) {
@@ -154,7 +182,6 @@ export function onUpdateAvailable(callback: () => void) {
     registration.addEventListener('updatefound', handleUpdate)
   })
 
-  // Return cleanup function
   return () => {
     if (navigator.serviceWorker.controller) {
       navigator.serviceWorker.removeEventListener('controllerchange', callback as EventListener)

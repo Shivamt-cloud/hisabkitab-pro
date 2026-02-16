@@ -6,7 +6,8 @@ import { productService } from '../services/productService'
 import { reportService } from '../services/reportService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { StockAlert } from '../types/stock'
-import { AlertTriangle, Package, Home, TrendingDown, ShoppingCart, ListOrdered, AlertCircle, Lock } from 'lucide-react'
+import { AlertTriangle, Package, Home, TrendingDown, ShoppingCart, ListOrdered, AlertCircle } from 'lucide-react'
+import { LockIcon } from '../components/icons/LockIcon'
 
 const EXCESS_STOCK_MULTIPLIER = 2 // Stock > min * this = excess
 const SLOW_MOVING_VELOCITY_THRESHOLD = 1 // Units per week below this = slow-moving
@@ -321,7 +322,7 @@ const StockAlerts = () => {
                 className="flex items-center gap-2 px-4 py-2 rounded-lg border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-sm font-medium"
                 title={hasPlanFeature('purchase_reorder') ? 'Reorder list: products below min stock with last purchase qty/rate' : 'Upgrade to unlock'}
               >
-                {!hasPlanFeature('purchase_reorder') && <Lock className="w-4 h-4" />}
+                {!hasPlanFeature('purchase_reorder') && <LockIcon className="w-4 h-4" />}
                 <ListOrdered className="w-4 h-4" />
                 Reorder List
               </button>

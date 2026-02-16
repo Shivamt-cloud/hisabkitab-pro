@@ -66,6 +66,10 @@ import Expenses from './pages/Expenses'
 import ExpenseForm from './pages/ExpenseForm'
 import DailyReport from './pages/DailyReport'
 import UpcomingChecks from './pages/UpcomingChecks'
+import Services from './pages/Services'
+import ServiceForm from './pages/ServiceForm'
+import ServiceReceiptView from './pages/ServiceReceiptView'
+import ServiceReports from './pages/ServiceReports'
 import UserManual from './pages/UserManual'
 import { DatabaseProvider } from './components/DatabaseProvider'
 import { LicenseGuard } from './components/LicenseGuard'
@@ -73,6 +77,7 @@ import { LicenseExpiredBanner } from './components/LicenseExpiredBanner'
 import { UpdateBanner } from './components/UpdateBanner'
 import { UpgradeBanner } from './components/UpgradeBanner'
 import { OfflineBanner } from './components/OfflineBanner'
+import { MaintenanceGuard } from './components/MaintenanceGuard'
 import { GlobalSearch } from './components/GlobalSearch'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
 import { ToastProvider } from './context/ToastContext'
@@ -90,11 +95,12 @@ function App() {
         <PlanUpgradeProvider>
         <Router>
           <LicenseGuard>
-            <LicenseExpiredBanner />
-            <UpdateBanner />
-            <UpgradeBanner />
-            <OfflineBanner />
-            <Routes>
+            <MaintenanceGuard>
+              <LicenseExpiredBanner />
+              <UpdateBanner />
+              <UpgradeBanner />
+              <OfflineBanner />
+              <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/user-manual" element={<UserManual />} />
           <Route
@@ -636,7 +642,7 @@ function App() {
           <Route
             path="/settings/barcode-label"
             element={
-              <ProtectedRoute requiredPermission="barcode_label_settings:read" requiredRole="admin">
+              <ProtectedRoute requiredPermission="barcode_label_settings:read">
                 <BarcodeLabelSettings />
               </ProtectedRoute>
             }
@@ -644,7 +650,7 @@ function App() {
           <Route
             path="/settings/receipt-printer"
             element={
-              <ProtectedRoute requiredPermission="receipt_printer_settings:read" requiredRole="admin">
+              <ProtectedRoute requiredPermission="receipt_printer_settings:read">
                 <ReceiptPrinterSettings />
               </ProtectedRoute>
             }
@@ -713,6 +719,47 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route path="/services" element={<Navigate to="/services/bike" replace />} />
+          <Route
+            path="/services/:vehicleType/new"
+            element={
+              <ProtectedRoute requiredPermission="services:create" requiredPlanFeature="services_bike_car_ebike">
+                <ServiceForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/services/:vehicleType/:id/edit"
+            element={
+              <ProtectedRoute requiredPermission="services:update" requiredPlanFeature="services_bike_car_ebike">
+                <ServiceForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/services/:vehicleType/:id/receipt"
+            element={
+              <ProtectedRoute requiredPermission="services:read" requiredPlanFeature="services_bike_car_ebike">
+                <ServiceReceiptView />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/services/:vehicleType/report"
+            element={
+              <ProtectedRoute requiredPermission="services:read" requiredPlanFeature="services_bike_car_ebike">
+                <ServiceReports />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/services/:vehicleType"
+            element={
+              <ProtectedRoute requiredPermission="services:read" requiredPlanFeature="services_bike_car_ebike">
+                <Services />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/checks/upcoming"
             element={
@@ -726,6 +773,7 @@ function App() {
             <GlobalSearch />
             <KeyboardShortcuts />
             <Toast />
+            </MaintenanceGuard>
           </LicenseGuard>
         </Router>
         </PlanUpgradeProvider>

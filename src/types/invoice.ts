@@ -40,6 +40,8 @@ export interface InvoiceItem {
   hsn_code?: string
   gst_rate?: number
   unit?: string
+  /** Sales person for this line (when different per item) */
+  sales_person_name?: string
 }
 
 export interface CompanyInfo {

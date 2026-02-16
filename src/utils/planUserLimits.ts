@@ -22,6 +22,14 @@ export const PLAN_USER_LIMITS: Record<SubscriptionTier, PlanUserLimits> = {
     tier: 'premium',
     maxUsers: 'unlimited',
   },
+  premium_plus: {
+    tier: 'premium_plus',
+    maxUsers: 'unlimited',
+  },
+  premium_plus_plus: {
+    tier: 'premium_plus_plus',
+    maxUsers: 'unlimited',
+  },
 }
 
 /**

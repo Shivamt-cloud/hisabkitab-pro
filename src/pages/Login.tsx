@@ -1,14 +1,15 @@
 import { useState, FormEvent, useEffect } from 'react'
 import { useAuth, isAuthNotAvailableError } from '../context/AuthContext'
 import { useNavigate, Link } from 'react-router-dom'
-import { LogIn, Mail, Lock, AlertCircle, User, Package, ShoppingCart, TrendingUp, Users, BarChart3, Shield, CheckCircle, MessageCircle, Globe, X, Building2, Phone, MapPin, FileText, UserPlus, BookOpen, Search, Target, WifiOff, Download } from 'lucide-react'
+import { LogIn, Mail, AlertCircle, User, Package, ShoppingCart, TrendingUp, Users, BarChart3, Shield, CheckCircle, MessageCircle, Globe, X, Building2, Phone, MapPin, FileText, UserPlus, BookOpen, Search, Target, WifiOff, Download, Wrench } from 'lucide-react'
+import { LockIcon } from '../components/icons/LockIcon'
 import { COUNTRY_OPTIONS, detectCountry, formatPrice, getCountryPricing, getSavedCountry, isSupportedCountryCode, saveCountry, type CountryPricing } from '../utils/pricing'
 import { calculateTierPrice, getDisplayMonthlyPrice, getTierPricing } from '../utils/tierPricing'
 import { getMaxUsersForPlan } from '../utils/planUserLimits'
 import { SubscriptionTier } from '../types/device'
 import { userService } from '../services/userService'
 import { registrationRequestService } from '../services/registrationRequestService'
-import { SATISFIED_CUSTOMERS_COUNT } from '../constants'
+import { CONTACT_EMAIL, CONTACT_WEBSITE_URL, CONTACT_WEBSITE_DISPLAY, CONTACT_WHATSAPP_NUMBER, CONTACT_WHATSAPP_URL } from '../constants'
 
 const Login = () => {
   const [email, setEmail] = useState('')
@@ -254,7 +255,7 @@ Business Details:
 - Website: ${registrationFormData.website || 'Not provided'}
 
 Subscription Plan:
-- Selected Plan: ${registrationFormData.subscription_tier === 'basic' ? 'Basic Plan' : registrationFormData.subscription_tier === 'standard' ? 'Standard Plan' : 'Premium Plan'}
+- Selected Plan: ${registrationFormData.subscription_tier === 'basic' ? 'Basic Plan' : registrationFormData.subscription_tier === 'standard' ? 'Standard Plan' : registrationFormData.subscription_tier === 'premium_plus' ? 'Premium Plus Plan' : 'Premium Plan'}
 
 Additional Information:
 ${registrationFormData.description || 'None provided'}
@@ -312,13 +313,6 @@ Please review and process this registration request.
         <div className="flex-[2] hidden lg:block">
           <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20 shadow-2xl">
             <div className="mb-6">
-              {/* Satisfied Customers - Top */}
-              <div className="flex items-center justify-center gap-2 mb-6 py-3 px-4 bg-white/10 backdrop-blur-sm rounded-xl border border-white/20">
-                <Users className="w-6 h-6 text-emerald-400" />
-                <span className="text-white font-bold text-lg">
-                  {SATISFIED_CUSTOMERS_COUNT.toLocaleString()}+ Satisfied Customers
-                </span>
-              </div>
               {/* Enhanced Title Section */}
               <div className="text-center mb-6">
                 <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-blue-100 to-purple-100 mb-3 drop-shadow-2xl animate-fade-in">
@@ -331,16 +325,24 @@ Please review and process this registration request.
                 <p className="text-blue-200/80 text-sm mt-2 font-medium">
                   Streamline Your Business Operations
                 </p>
-                <div className="flex flex-wrap items-center justify-center gap-3 mt-4 text-sm">
-                  <a href="https://hisabkitabpro.com" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-white/90 hover:text-white font-medium">
-                    <Globe className="w-4 h-4" />
-                    hisabkitabpro.com
-                  </a>
-                  <span className="text-white/50">|</span>
-                  <a href="https://wa.me/917304877938" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-emerald-200 hover:text-white font-medium">
-                    <MessageCircle className="w-4 h-4" />
-                    WhatsApp: 7304877938
-                  </a>
+                <div className="mt-4">
+                  <p className="text-white/80 text-xs font-semibold uppercase tracking-wider mb-2">Contact us</p>
+                  <div className="flex flex-wrap items-center justify-center gap-3 text-sm">
+                    <a href={CONTACT_WEBSITE_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-white/90 hover:text-white font-medium">
+                      <Globe className="w-4 h-4" />
+                      {CONTACT_WEBSITE_DISPLAY}
+                    </a>
+                    <span className="text-white/50">|</span>
+                    <a href={CONTACT_WHATSAPP_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-emerald-200 hover:text-white font-medium">
+                      <MessageCircle className="w-4 h-4" />
+                      WhatsApp: {CONTACT_WHATSAPP_NUMBER}
+                    </a>
+                    <span className="text-white/50">|</span>
+                    <a href={`mailto:${CONTACT_EMAIL}`} className="inline-flex items-center gap-1.5 text-blue-200 hover:text-white font-medium">
+                      <Mail className="w-4 h-4" />
+                      {CONTACT_EMAIL}
+                    </a>
+                  </div>
                 </div>
               </div>
               
@@ -454,28 +456,40 @@ Please review and process this registration request.
                     
                     {/* Plan Details with Device Limits and Pricing */}
                                     <div className="mt-4 space-y-3">
-                      {(['basic', 'standard', 'premium'] as SubscriptionTier[]).map((tier) => {
+                      {(['basic', 'standard', 'premium', 'premium_plus', 'premium_plus_plus'] as SubscriptionTier[]).map((tier) => {
                         const tierInfo = getTierPricing(tier)
                         const tierPrice = calculateTierPrice(pricing.yearlyPrice, tier)
                         const tierOriginalPrice = calculateTierPrice(pricing.originalPrice || pricing.yearlyPrice * 2, tier)
                         const tierName = tier === 'basic' ? `📱 ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}` :
                                         tier === 'standard' ? `📱📱📱 ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}` :
+                                        tier === 'premium_plus' ? `🚗 ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}` :
+                                        tier === 'premium_plus_plus' ? `🚀 ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}` :
                                         `♾️ ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}`
-                        const tierDescription = tier === 'premium' ? 'Supports: Mobile, Laptop, Desktop, Tablet (All Types)' : 
+                        const tierDescription = tier === 'premium_plus' ? 'Unlimited devices + Services (Bike, Car, E-bike, E-car)' :
+                                               tier === 'premium_plus_plus' ? 'Unlimited + All Services (Bike, Car, E-bike, E-car & more)' :
+                                               tier === 'premium' ? 'Supports: Mobile, Laptop, Desktop, Tablet (All Types)' :
                                                'Supports: Mobile, Laptop, Desktop, Tablet'
-                        const isMostPopular = tier === 'standard'
+                        const isMostPopular = tier === 'premium'
+                        const isComingSoon = tier === 'premium_plus_plus'
                         return (
                           <div
                             key={tier}
                             className={`overflow-hidden rounded-xl border-2 backdrop-blur-sm ${
-                              isMostPopular
-                                ? 'border-emerald-400/80 bg-gradient-to-br from-emerald-500/30 via-teal-500/25 to-cyan-500/30 shadow-lg shadow-emerald-500/20'
-                                : tier === 'basic'
-                                  ? 'border-white/20 bg-white/15'
-                                  : 'border-white/15 bg-white/10'
+                              isComingSoon
+                                ? 'border-amber-400/60 bg-white/5 opacity-90'
+                                : isMostPopular
+                                  ? 'border-emerald-400/80 bg-gradient-to-br from-emerald-500/30 via-teal-500/25 to-cyan-500/30 shadow-lg shadow-emerald-500/20'
+                                  : tier === 'basic'
+                                    ? 'border-white/20 bg-white/15'
+                                    : 'border-white/15 bg-white/10'
                             }`}
                           >
-                            {isMostPopular && (
+                            {isComingSoon && (
+                              <div className="bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-1.5 text-center">
+                                <span className="text-xs font-black uppercase tracking-wider text-white drop-shadow-sm">Coming soon</span>
+                              </div>
+                            )}
+                            {isMostPopular && !isComingSoon && (
                               <div className="bg-gradient-to-r from-emerald-500 to-teal-500 px-3 py-1.5 text-center">
                                 <span className="text-xs font-black uppercase tracking-wider text-white drop-shadow-sm">★ Most Popular</span>
                               </div>
@@ -483,12 +497,14 @@ Please review and process this registration request.
                             <div className="p-3">
                               <div className={`text-xs font-bold ${tier === 'basic' ? 'text-white/90' : 'text-white/90'} mb-1 flex items-center justify-between gap-2`}>
                                 <span className="flex-1 min-w-0">{tierName}</span>
-                                <div className="text-right flex-shrink-0">
-                                  <div className="line-through opacity-70 text-xs mb-0.5">
-                                    {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
+                                {!isComingSoon && (
+                                  <div className="text-right flex-shrink-0">
+                                    <div className="line-through opacity-70 text-xs mb-0.5">
+                                      {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
+                                    </div>
+                                    <span className="font-extrabold">{formatPrice(tierPrice, pricing.currencySymbol)}/Year</span>
                                   </div>
-                                  <span className="font-extrabold">{formatPrice(tierPrice, pricing.currencySymbol)}/Year</span>
-                                </div>
+                                )}
                               </div>
                               <div className={`text-xs ${tier === 'basic' ? 'text-white/80' : 'text-white/80'}`}>{tierDescription}</div>
                             </div>
@@ -540,6 +556,12 @@ Please review and process this registration request.
                   <p className="text-blue-50 font-medium flex-1 pt-1">Multi-company support with role-based access control</p>
                 </div>
                 <div className="flex items-start gap-4 bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all group">
+                  <div className="p-2 bg-gradient-to-br from-teal-400 to-cyan-600 rounded-lg group-hover:scale-110 transition-transform">
+                    <Wrench className="w-5 h-5 text-white" />
+                  </div>
+                  <p className="text-blue-50 font-medium flex-1 pt-1"><strong className="text-white">Rent/booking</strong> & <strong className="text-white">service booking</strong> – bike, car, e-bike, e-car service records & rental management</p>
+                </div>
+                <div className="flex items-start gap-4 bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all group">
                   <div className="p-2 bg-gradient-to-br from-yellow-400 to-amber-600 rounded-lg group-hover:scale-110 transition-transform">
                     <BarChart3 className="w-5 h-5 text-white" />
                   </div>
@@ -586,27 +608,26 @@ Please review and process this registration request.
               </p>
             </div>
 
-            {/* Satisfied Customers Badge */}
-            <div className="flex items-center justify-center gap-2 mb-4 py-3 px-4 bg-white/10 backdrop-blur-sm rounded-xl border border-white/20">
-              <Users className="w-6 h-6 text-emerald-400" />
-              <span className="text-white font-bold text-lg">
-                {SATISFIED_CUSTOMERS_COUNT.toLocaleString()}+ Satisfied Customers
-              </span>
-            </div>
-
-            {/* Contact Information */}
+            {/* Contact Us */}
             <div className="bg-white/10 rounded-lg p-4 border border-white/20 animate-glow">
               <div className="flex items-center justify-center gap-2 text-white/90 mb-2">
                 <MessageCircle className="w-4 h-4" />
                 <span className="text-sm font-semibold">Contact Us</span>
               </div>
-              <a 
-                href="mailto:hisabkitabpro@gmail.com" 
-                className="text-blue-200 hover:text-blue-100 text-sm font-medium transition-colors flex items-center justify-center gap-1"
-              >
-                <Mail className="w-3 h-3" />
-                hisabkitabpro@gmail.com
-              </a>
+              <div className="flex flex-col gap-1.5 text-center">
+                <a href={`mailto:${CONTACT_EMAIL}`} className="text-blue-200 hover:text-blue-100 text-sm font-medium transition-colors flex items-center justify-center gap-1">
+                  <Mail className="w-3 h-3" />
+                  {CONTACT_EMAIL}
+                </a>
+                <a href={CONTACT_WEBSITE_URL} target="_blank" rel="noopener noreferrer" className="text-blue-200 hover:text-blue-100 text-sm font-medium transition-colors flex items-center justify-center gap-1">
+                  <Globe className="w-3 h-3" />
+                  {CONTACT_WEBSITE_DISPLAY}
+                </a>
+                <a href={CONTACT_WHATSAPP_URL} target="_blank" rel="noopener noreferrer" className="text-blue-200 hover:text-blue-100 text-sm font-medium transition-colors flex items-center justify-center gap-1">
+                  <Phone className="w-3 h-3" />
+                  WhatsApp: {CONTACT_WHATSAPP_NUMBER}
+                </a>
+              </div>
             </div>
             <style>{`
               @keyframes glow {
@@ -688,21 +709,18 @@ Please review and process this registration request.
         <div className="w-full max-w-2xl flex flex-col items-center justify-center">
           {/* Title for Mobile */}
           <div className="text-center mb-8 lg:hidden">
-            <div className="flex items-center justify-center gap-2 mb-4 py-2 px-4 bg-white/10 backdrop-blur-sm rounded-xl border border-white/20 inline-flex">
-              <Users className="w-5 h-5 text-emerald-400" />
-              <span className="text-white font-bold">{SATISFIED_CUSTOMERS_COUNT.toLocaleString()}+ Satisfied Customers</span>
-            </div>
             <h1 className="text-4xl font-extrabold text-white mb-2">HisabKitab-Pro</h1>
-            <p className="text-blue-100 text-lg mb-2">Inventory Management System</p>
+            <p className="text-blue-100 text-lg font-semibold mb-1">Complete Inventory Management System</p>
+            <p className="text-blue-200/90 text-sm mb-2">Streamline Your Business Operations</p>
             <div className="flex flex-wrap items-center justify-center gap-2 mb-4 text-xs">
-              <a href="https://hisabkitabpro.com" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-white/90 hover:text-white">
+              <a href={CONTACT_WEBSITE_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-white/90 hover:text-white">
                 <Globe className="w-3.5 h-3.5" />
-                hisabkitabpro.com
+                {CONTACT_WEBSITE_DISPLAY}
               </a>
               <span className="text-white/50">|</span>
-              <a href="https://wa.me/917304877938" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-emerald-200 hover:text-white">
+              <a href={CONTACT_WHATSAPP_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-emerald-200 hover:text-white">
                 <MessageCircle className="w-3.5 h-3.5" />
-                WhatsApp: 7304877938
+                WhatsApp: {CONTACT_WHATSAPP_NUMBER}
               </a>
             </div>
             <div className="max-w-sm mx-auto mb-4 text-left">
@@ -871,7 +889,7 @@ Please review and process this registration request.
                     Password
                   </label>
                   <div className="relative">
-                    <Lock className="absolute left-5 top-1/2 transform -translate-y-1/2 w-6 h-6 text-gray-400" />
+                    <LockIcon className="absolute left-5 top-1/2 transform -translate-y-1/2 w-6 h-6 text-gray-400" />
                     <input
                       id="password"
                       type="password"
@@ -987,20 +1005,27 @@ Please review and process this registration request.
                 <p className="text-xs text-gray-500 mt-1">Step-by-step guide for daily use</p>
               </div>
 
-              {/* Contact & Footer - Enhanced */}
+              {/* Contact Us & Footer */}
               <div className="text-center mt-10 w-full space-y-3">
                 <div className="bg-gradient-to-r from-blue-50 to-indigo-50 backdrop-blur-lg rounded-xl p-4 border-2 border-blue-200/50 shadow-lg">
-                  <div className="flex items-center justify-center gap-2 text-gray-700 mb-2">
+                  <div className="flex items-center justify-center gap-2 text-gray-700 mb-3">
                     <MessageCircle className="w-5 h-5" />
                     <span className="text-base font-bold">Contact Us</span>
                   </div>
-                  <a 
-                    href="mailto:hisabkitabpro@gmail.com" 
-                    className="text-blue-600 hover:text-blue-700 text-base font-semibold transition-colors flex items-center justify-center gap-2 hover:underline"
-                  >
-                    <Mail className="w-4 h-4" />
-                    hisabkitabpro@gmail.com
-                  </a>
+                  <div className="flex flex-col gap-2 text-sm">
+                    <a href={`mailto:${CONTACT_EMAIL}`} className="text-blue-600 hover:text-blue-700 font-semibold transition-colors flex items-center justify-center gap-2 hover:underline">
+                      <Mail className="w-4 h-4" />
+                      {CONTACT_EMAIL}
+                    </a>
+                    <a href={CONTACT_WEBSITE_URL} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700 font-semibold transition-colors flex items-center justify-center gap-2 hover:underline">
+                      <Globe className="w-4 h-4" />
+                      {CONTACT_WEBSITE_DISPLAY}
+                    </a>
+                    <a href={CONTACT_WHATSAPP_URL} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700 font-semibold transition-colors flex items-center justify-center gap-2 hover:underline">
+                      <Phone className="w-4 h-4" />
+                      WhatsApp: {CONTACT_WHATSAPP_NUMBER}
+                    </a>
+                  </div>
                 </div>
                 <p className="text-gray-500 text-sm font-medium">
                   © 2024 HisabKitab. All rights reserved.
@@ -1254,7 +1279,7 @@ Please review and process this registration request.
                       Password <span className="text-red-500">*</span>
                     </label>
                     <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                      <LockIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                       <input
                         type="password"
                         required
@@ -1462,14 +1487,14 @@ Please review and process this registration request.
                 <label className="block text-sm font-bold text-gray-700 mb-3">
                   Select Subscription Plan <span className="text-red-500">*</span>
                 </label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                  {(['basic', 'standard', 'premium'] as SubscriptionTier[]).map((tier) => {
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+                  {(['basic', 'standard', 'premium', 'premium_plus'] as SubscriptionTier[]).map((tier) => {
                     const tierInfo = getTierPricing(tier)
                     const tierPrice = calculateTierPrice(pricing.yearlyPrice, tier)
                     const tierOriginalPrice = calculateTierPrice(pricing.originalPrice || pricing.yearlyPrice * 2, tier)
                     const maxUsers = getMaxUsersForPlan(tier)
                     const isSelected = registrationFormData.subscription_tier === tier
-                    const isMostPopular = tier === 'standard'
+                    const isMostPopular = tier === 'premium'
                     return (
                       <div
                         key={tier}
@@ -1522,10 +1547,15 @@ Please review and process this registration request.
                           <div className={`text-xs ${isMostPopular ? 'text-emerald-800/90' : 'text-gray-600'}`}>
                             Devices: {tierInfo.deviceDisplayLabel}
                           </div>
+                          {tier === 'premium_plus' && (
+                            <div className="text-xs font-semibold text-violet-700 mt-1">
+                              + Services: Bike, Car, E-bike, E-car
+                            </div>
+                          )}
                           {isMostPopular && (
                             <div className="mt-3 pt-3 border-t border-emerald-300/70">
                               <p className="text-xs font-semibold text-emerald-800">
-                                Supports: Mobile, Laptop, Desktop, Tablet
+                                Supports: Mobile, Laptop, Desktop, Tablet (All Types)
                               </p>
                             </div>
                           )}
@@ -1614,65 +1644,73 @@ Please review and process this registration request.
               {/* Plan Selection */}
               <div>
                 <h4 className="text-lg font-bold text-gray-900 mb-4">Select a Plan to Renew</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {(['basic', 'standard', 'premium'] as SubscriptionTier[]).map((tier) => {
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                  {(['basic', 'standard', 'premium', 'premium_plus', 'premium_plus_plus'] as SubscriptionTier[]).map((tier) => {
                     const tierInfo = getTierPricing(tier)
                     const tierPrice = calculateTierPrice(pricing.yearlyPrice, tier)
                     const tierOriginalPrice = calculateTierPrice(pricing.originalPrice || pricing.yearlyPrice * 2, tier)
                     const maxUsers = getMaxUsersForPlan(tier)
                     const isCurrentTier = subscriptionExpired.currentTier === tier
-                    
+                    const isComingSoon = tier === 'premium_plus_plus'
                     return (
                       <div
                         key={tier}
-                        className={`border-2 rounded-xl p-5 cursor-pointer transition-all ${
-                          isCurrentTier
-                            ? 'border-blue-500 bg-blue-50 shadow-lg ring-2 ring-blue-200'
-                            : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'
+                        className={`border-2 rounded-xl p-5 transition-all ${
+                          isComingSoon
+                            ? 'border-amber-300 bg-amber-50/50 cursor-default'
+                            : isCurrentTier
+                              ? 'border-blue-500 bg-blue-50 shadow-lg ring-2 ring-blue-200 cursor-pointer'
+                              : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50 cursor-pointer'
                         }`}
                       >
                         <div className="flex items-center justify-between mb-3">
                           <h5 className="font-bold text-gray-900 text-lg">{tierInfo.name}</h5>
-                          {isCurrentTier && (
+                          {isComingSoon && (
+                            <span className="bg-amber-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+                              Coming soon
+                            </span>
+                          )}
+                          {!isComingSoon && isCurrentTier && (
                             <span className="bg-blue-600 text-white text-xs font-bold px-2 py-1 rounded-full">
                               Current
                             </span>
                           )}
                         </div>
-                        <div className="mb-2">
-                          <div className="text-sm text-gray-500 line-through mb-1">
-                            {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
-                          </div>
-                          <div className="flex items-baseline gap-3 flex-wrap">
-                            <span className="text-3xl font-extrabold text-gray-900">
-                              {formatPrice(tierPrice, pricing.currencySymbol)}
-                              <span className="text-base font-normal">/Year</span>
-                            </span>
-                            <span className="text-gray-400 font-bold">|</span>
-                            <span className="text-3xl font-extrabold text-gray-900">
-                              {formatPrice(getDisplayMonthlyPrice(tierPrice, tier), pricing.currencySymbol)}
-                              <span className="text-base font-normal">/mo</span>
-                            </span>
-                          </div>
-                          <div className="inline-block mt-1 bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                            50% OFF
-                          </div>
-                        </div>
-                        <div className="space-y-2 text-sm text-gray-600 mb-4">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-green-600" />
-                            <span>Devices: {tierInfo.deviceDisplayLabel}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-green-600" />
-                            <span>Users: {maxUsers === 'unlimited' ? 'Unlimited' : maxUsers}</span>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => {
-                            // Open email to contact for renewal
-                            const emailSubject = encodeURIComponent(`Subscription Renewal Request - ${tierInfo.name}`)
-                            const emailBody = encodeURIComponent(`
+                        {!isComingSoon && (
+                          <>
+                            <div className="mb-2">
+                              <div className="text-sm text-gray-500 line-through mb-1">
+                                {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
+                              </div>
+                              <div className="flex items-baseline gap-3 flex-wrap">
+                                <span className="text-3xl font-extrabold text-gray-900">
+                                  {formatPrice(tierPrice, pricing.currencySymbol)}
+                                  <span className="text-base font-normal">/Year</span>
+                                </span>
+                                <span className="text-gray-400 font-bold">|</span>
+                                <span className="text-3xl font-extrabold text-gray-900">
+                                  {formatPrice(getDisplayMonthlyPrice(tierPrice, tier), pricing.currencySymbol)}
+                                  <span className="text-base font-normal">/mo</span>
+                                </span>
+                              </div>
+                              <div className="inline-block mt-1 bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                                50% OFF
+                              </div>
+                            </div>
+                            <div className="space-y-2 text-sm text-gray-600 mb-4">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle className="w-4 h-4 text-green-600" />
+                                <span>Devices: {tierInfo.deviceDisplayLabel}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <CheckCircle className="w-4 h-4 text-green-600" />
+                                <span>Users: {maxUsers === 'unlimited' ? 'Unlimited' : maxUsers}</span>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => {
+                                const emailSubject = encodeURIComponent(`Subscription Renewal Request - ${tierInfo.name}`)
+                                const emailBody = encodeURIComponent(`
 Subscription Renewal Request
 
 Current Plan: ${subscriptionExpired.currentTier}
@@ -1682,39 +1720,56 @@ Price: ${formatPrice(tierPrice, pricing.currencySymbol)}/Year (${formatPrice(get
 Please process this renewal request to restore access to the system.
 
 Thank you!
-                            `)
-                            window.location.href = `mailto:hisabkitabpro@gmail.com?subject=${emailSubject}&body=${emailBody}`
-                          }}
-                          className={`w-full py-3 px-4 rounded-lg font-semibold transition-all ${
-                            isCurrentTier
-                              ? 'bg-blue-600 text-white hover:bg-blue-700'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                          }`}
-                        >
-                          {isCurrentTier ? 'Renew This Plan' : 'Select This Plan'}
-                        </button>
+                                `)
+                                window.location.href = `mailto:${CONTACT_EMAIL}?subject=${emailSubject}&body=${emailBody}`
+                              }}
+                              className={`w-full py-3 px-4 rounded-lg font-semibold transition-all ${
+                                isCurrentTier
+                                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              }`}
+                            >
+                              {isCurrentTier ? 'Renew This Plan' : 'Select This Plan'}
+                            </button>
+                          </>
+                        )}
+                        {isComingSoon && (
+                          <>
+                            <p className="text-sm text-gray-600 mb-4">Unlimited + All Services (Bike, Car, E-bike, E-car & more)</p>
+                            <div className="w-full py-3 px-4 rounded-lg font-semibold text-center bg-amber-200 text-amber-900 cursor-not-allowed">
+                              Coming soon
+                            </div>
+                          </>
+                        )}
                       </div>
                     )
                   })}
                 </div>
               </div>
 
-              {/* Contact Information */}
+              {/* Contact Us */}
               <div className="mt-6 bg-blue-50 rounded-xl p-4 border border-blue-200">
                 <div className="flex items-center gap-2 text-blue-900 mb-2">
                   <MessageCircle className="w-5 h-5" />
-                  <span className="font-bold">Need Help?</span>
+                  <span className="font-bold">Contact Us</span>
                 </div>
-                <p className="text-sm text-blue-800 mb-2">
-                  Contact us for assistance with renewal or to discuss custom plans:
+                <p className="text-sm text-blue-800 mb-3">
+                  Need help with renewal or custom plans? Reach us by email, website, or WhatsApp:
                 </p>
-                <a 
-                  href="mailto:hisabkitabpro@gmail.com" 
-                  className="text-blue-600 hover:text-blue-700 text-sm font-semibold transition-colors flex items-center gap-2 hover:underline"
-                >
-                  <Mail className="w-4 h-4" />
-                  hisabkitabpro@gmail.com
-                </a>
+                <div className="flex flex-col gap-2 text-sm">
+                  <a href={`mailto:${CONTACT_EMAIL}`} className="text-blue-600 hover:text-blue-700 font-semibold transition-colors flex items-center gap-2 hover:underline">
+                    <Mail className="w-4 h-4" />
+                    {CONTACT_EMAIL}
+                  </a>
+                  <a href={CONTACT_WEBSITE_URL} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700 font-semibold transition-colors flex items-center gap-2 hover:underline">
+                    <Globe className="w-4 h-4" />
+                    {CONTACT_WEBSITE_DISPLAY}
+                  </a>
+                  <a href={CONTACT_WHATSAPP_URL} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700 font-semibold transition-colors flex items-center gap-2 hover:underline">
+                    <Phone className="w-4 h-4" />
+                    WhatsApp: {CONTACT_WHATSAPP_NUMBER}
+                  </a>
+                </div>
               </div>
             </div>
           </div>

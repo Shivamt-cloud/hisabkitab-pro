@@ -69,7 +69,7 @@ export const DEFAULT_VISIBLE_COLUMNS: Record<SalesReportView, string[]> = {
   category: ['category_name', 'total_quantity', 'total_revenue', 'total_cost', 'total_profit', 'profit_margin', 'product_count', 'sale_count'],
   customer: ['customer_name', 'total_quantity', 'total_revenue', 'total_cost', 'total_profit', 'profit_margin', 'sale_count', 'average_order_value'],
   salesperson: ['sales_person_name', 'total_quantity', 'total_revenue', 'total_cost', 'total_profit', 'profit_margin', 'commission_amount', 'sale_count'],
-  sales: ['sale_date', 'invoice_number', 'sale_type', 'customer_name', 'items_count', 'grand_total', 'return_amount', 'payment_status', 'payment_method', 'internal_remarks'],
+  sales: ['sale_date', 'invoice_number', 'sale_type', 'customer_name', 'sales_person_name', 'items_count', 'grand_total', 'return_amount', 'payment_status', 'payment_method', 'internal_remarks'],
 }
 
 const STORAGE_PREFIX = 'salesReport_visibleColumns_'

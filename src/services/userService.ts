@@ -41,6 +41,7 @@ async function initializeUsers(): Promise<void> {
 
 export interface UserWithPassword extends User {
   password: string
+  phone?: string
 }
 
 export const userService = {

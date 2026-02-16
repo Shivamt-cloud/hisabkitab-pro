@@ -14,6 +14,7 @@ export type PermissionModule =
   | 'sales_persons'
   | 'categories'
   | 'expenses'
+  | 'services'
 
 export type PermissionAction = 
   | 'create'
@@ -115,6 +116,11 @@ export const PERMISSION_MODULES: Record<PermissionModule, {
     label: 'Daily Expenses',
     description: 'Manage daily expenses, track payments, and view expense reports',
     actions: ['create', 'read', 'update', 'delete'],
+  },
+  services: {
+    label: 'Services (Bike, Car, E-bike, E-car)',
+    description: 'Manage vehicle services for bike, car, e-bike, and e-car (Premium and above)',
+    actions: ['create', 'read', 'update', 'delete', 'export'],
   },
 }
 

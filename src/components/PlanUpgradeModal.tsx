@@ -1,4 +1,5 @@
-import { Lock, Sparkles, X } from 'lucide-react'
+import { Sparkles, X } from 'lucide-react'
+import { LockIcon } from './icons/LockIcon'
 import {
   PLAN_FEATURE_LABELS,
   PLAN_TIER_LABELS,
@@ -42,7 +43,7 @@ export function PlanUpgradeModal({
             <X className="w-5 h-5" />
           </button>
           <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-white/20 flex items-center justify-center">
-            <Lock className="w-7 h-7" />
+            <LockIcon className="w-7 h-7" />
           </div>
           <h2 id="plan-upgrade-title" className="text-xl font-bold mb-1">Unlock {label}</h2>
           <p className="text-white/90 text-sm">{subtitle}</p>

@@ -141,6 +141,18 @@ export interface ReceiptPrinterSettings {
   custom_footer_line?: string
 }
 
+/** Admin-only: maintenance / alert banner shown to all users (e.g. "Site down 30 min at midnight IST") */
+export interface MaintenanceSettings {
+  /** When true, show the message as banner or full page */
+  enabled: boolean
+  /** 'banner' = alert bar at top; 'page' = full maintenance page for all routes (except /settings so admin can turn off) */
+  show_as: 'banner' | 'page'
+  /** Message shown to users (e.g. "Planned maintenance: site will be down for 30 minutes at 12:00 AM IST on 15 Feb 2026") */
+  message: string
+  /** Optional: end time in IST for display (e.g. "15 Feb 2026, 12:00 AM IST") so all timezones understand */
+  end_time_ist?: string
+}
+
 export interface SystemSettings {
   company: CompanySettings
   invoice: InvoiceSettings
@@ -148,6 +160,7 @@ export interface SystemSettings {
   general: GeneralSettings
   barcode_label?: BarcodeLabelSettings
   receipt_printer?: ReceiptPrinterSettings
+  maintenance?: MaintenanceSettings
   updated_at?: string
   updated_by?: number
 }

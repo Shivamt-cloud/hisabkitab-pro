@@ -18,7 +18,7 @@ export interface AuthContextType {
   logout: () => void
   hasPermission: (permission: string) => boolean
   hasPlanFeature: (feature: PlanFeature) => boolean
-  subscriptionTier: 'basic' | 'standard' | 'premium' | null
+  subscriptionTier: 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus' | null
   isLoading: boolean
   currentCompanyId: number | null
   switchCompany: (companyId: number | null) => void
@@ -43,6 +43,7 @@ export const RolePermissions: Record<UserRole, Permission[]> = {
     { resource: 'receipt_printer_settings', actions: ['read', 'update'] },
     { resource: 'business_overview', actions: ['read', 'export'] }, // Admin: employees, expenses, sales, cost, P&L
     { resource: 'expenses', actions: ['create', 'read', 'update', 'delete'] },
+    { resource: 'services', actions: ['create', 'read', 'update', 'delete', 'export'] },
   ],
   manager: [
     { resource: 'sales', actions: ['create', 'read', 'update'] },
@@ -51,14 +52,19 @@ export const RolePermissions: Record<UserRole, Permission[]> = {
     { resource: 'reports', actions: ['read', 'export'] },
     { resource: 'users', actions: ['create', 'read', 'update', 'delete'] },
     // settings removed – admin only
+    { resource: 'barcode_label_settings', actions: ['read', 'update'] },
+    { resource: 'receipt_printer_settings', actions: ['read', 'update'] },
     { resource: 'business_overview', actions: ['read', 'export'] },
     { resource: 'expenses', actions: ['create', 'read', 'update', 'delete'] },
+    { resource: 'services', actions: ['create', 'read', 'update', 'delete', 'export'] },
   ],
   staff: [
     { resource: 'sales', actions: ['create', 'read'] },
     { resource: 'purchases', actions: ['create', 'read'] },
     { resource: 'products', actions: ['read', 'update'] },
     { resource: 'reports', actions: ['read'] },
+    { resource: 'barcode_label_settings', actions: ['read', 'update'] },
+    { resource: 'receipt_printer_settings', actions: ['read', 'update'] },
     { resource: 'expenses', actions: ['create', 'read'] }, // Staff can create and read expenses
   ],
   viewer: [
@@ -67,6 +73,9 @@ export const RolePermissions: Record<UserRole, Permission[]> = {
     { resource: 'products', actions: ['read'] },
     { resource: 'reports', actions: ['read'] },
     { resource: 'expenses', actions: ['read'] }, // Viewers can read expenses
+    { resource: 'services', actions: ['read'] },
+    { resource: 'barcode_label_settings', actions: ['read'] },
+    { resource: 'receipt_printer_settings', actions: ['read'] },
   ],
 }
 

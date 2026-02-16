@@ -6,14 +6,17 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.toString().trim() || ''
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.toString().trim() || ''
 
-// Validate URL format
+// Validate URL format (avoid new URL() in environments where it throws "Illegal constructor")
 const isValidUrl = (url: string): boolean => {
-  if (!url) return false
+  if (!url || typeof url !== 'string') return false
   try {
-    const urlObj = new URL(url)
-    return urlObj.protocol === 'http:' || urlObj.protocol === 'https:'
+    if (typeof URL !== 'undefined' && URL.prototype) {
+      const urlObj = new URL(url)
+      return urlObj.protocol === 'http:' || urlObj.protocol === 'https:'
+    }
+    return /^https?:\/\/[^\s/]+/.test(url.trim())
   } catch {
-    return false
+    return /^https?:\/\/[^\s/]+/.test(url.trim())
   }
 }
 

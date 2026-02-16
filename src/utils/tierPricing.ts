@@ -3,7 +3,7 @@
  * Multiplies base price by tier multiplier
  */
 
-export type SubscriptionTier = 'basic' | 'standard' | 'premium'
+export type SubscriptionTier = 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus'
 
 export interface TierPricing {
   tier: SubscriptionTier
@@ -35,6 +35,20 @@ export const TIER_PRICING: Record<SubscriptionTier, TierPricing> = {
     deviceLimit: 'unlimited',
     deviceDisplayLabel: 'Unlimited',
     multiplier: 2.0, // 100% more than basic
+  },
+  premium_plus: {
+    tier: 'premium_plus',
+    name: 'Premium Plus Plan',
+    deviceLimit: 'unlimited',
+    deviceDisplayLabel: 'Unlimited + Services',
+    multiplier: 2.5, // Includes bike, car, e-bike, e-car services
+  },
+  premium_plus_plus: {
+    tier: 'premium_plus_plus',
+    name: 'Premium Plus Plus Plan',
+    deviceLimit: 'unlimited',
+    deviceDisplayLabel: 'Unlimited + All Services',
+    multiplier: 3.0, // Top tier – all services
   },
 }
 

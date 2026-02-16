@@ -6,7 +6,8 @@ import { useNavigate } from 'react-router-dom'
 import { purchaseService } from '../services/purchaseService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Purchase, PurchaseType } from '../types/purchase'
-import { Plus, Eye, Edit, Filter, FileText, TrendingUp, Home, FileSpreadsheet, Search, X, Trash2, AlertCircle, CalendarClock, Package, Columns3, Lock } from 'lucide-react'
+import { Plus, Eye, Edit, Filter, FileText, TrendingUp, Home, FileSpreadsheet, Search, X, Trash2, AlertCircle, CalendarClock, Package, Columns3 } from 'lucide-react'
+import { LockIcon } from '../components/icons/LockIcon'
 import { exportToExcel as exportExcel } from '../utils/exportUtils'
 
 type TimePeriod = 'all' | 'today' | 'yesterday' | 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom'
@@ -737,7 +738,7 @@ const PurchaseHistory = () => {
                       onClick={() => hasPlanFeature('purchase_reorder') ? navigate('/purchases/reorders') : showPlanUpgrade('purchase_reorder')}
                       className="bg-gradient-to-r from-violet-600 to-purple-600 text-white font-semibold py-2.5 px-4 rounded-xl hover:shadow-lg transition-all flex items-center gap-2"
                     >
-                      {!hasPlanFeature('purchase_reorder') && <Lock className="w-5 h-5" />}
+                      {!hasPlanFeature('purchase_reorder') && <LockIcon className="w-5 h-5" />}
                       <Package className="w-5 h-5" />
                       Reorders
                     </button>

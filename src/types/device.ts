@@ -13,7 +13,7 @@ export interface Device {
   is_active: boolean
 }
 
-export type SubscriptionTier = 'basic' | 'standard' | 'premium'
+export type SubscriptionTier = 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus'
 
 export interface SubscriptionInfo {
   tier: SubscriptionTier

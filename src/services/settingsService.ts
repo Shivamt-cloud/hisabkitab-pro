@@ -1,5 +1,6 @@
-import { SystemSettings, CompanySettings, InvoiceSettings, TaxSettings, GeneralSettings, ReceiptPrinterSettings, BarcodeLabelSettings } from '../types/settings'
+import { SystemSettings, CompanySettings, InvoiceSettings, TaxSettings, GeneralSettings, ReceiptPrinterSettings, BarcodeLabelSettings, MaintenanceSettings } from '../types/settings'
 import { getById, put, STORES } from '../database/db'
+import { cloudMaintenanceService } from './cloudMaintenanceService'
 
 const SETTINGS_KEY = 'main'
 
@@ -110,6 +111,12 @@ const defaultSettings: SystemSettings = {
     facebook_page: '',
     custom_footer_line: '',
   },
+  maintenance: {
+    enabled: false,
+    show_as: 'banner',
+    message: '',
+    end_time_ist: '',
+  },
 }
 
 interface SettingsRecord {
@@ -148,6 +155,9 @@ async function getSettingsRecord(): Promise<SettingsRecord> {
                 receipt_printer: raw.receipt_printer
                   ? { ...defaultSettings.receipt_printer!, ...(raw.receipt_printer as object) }
                   : defaultSettings.receipt_printer,
+                maintenance: raw.maintenance
+                  ? { ...defaultSettings.maintenance!, ...(raw.maintenance as object) }
+                  : defaultSettings.maintenance,
                 updated_at: raw.updated_at as string | undefined,
                 updated_by: raw.updated_by as number | undefined,
               },
@@ -184,6 +194,9 @@ export const settingsService = {
           receipt_printer: stored.receipt_printer
             ? { ...defaultSettings.receipt_printer!, ...stored.receipt_printer }
             : defaultSettings.receipt_printer,
+          maintenance: stored.maintenance
+            ? { ...defaultSettings.maintenance!, ...stored.maintenance }
+            : defaultSettings.maintenance,
           updated_at: stored.updated_at,
           updated_by: stored.updated_by,
         }
@@ -228,6 +241,36 @@ export const settingsService = {
     // Fall back to main settings
     const settings = await settingsService.getAll()
     return settings.tax
+  },
+
+  // Get maintenance/alert settings (from Supabase if available so all users see same message; else local)
+  getMaintenance: async (): Promise<MaintenanceSettings> => {
+    const fromCloud = await cloudMaintenanceService.get()
+    if (fromCloud != null) {
+      return { ...defaultSettings.maintenance!, ...fromCloud }
+    }
+    const settings = await settingsService.getAll()
+    return settings.maintenance ?? defaultSettings.maintenance!
+  },
+
+  // Update maintenance settings (admin only); saves to local and to Supabase when available
+  updateMaintenance: async (maintenance: Partial<MaintenanceSettings>, userId?: number): Promise<MaintenanceSettings> => {
+    invalidateSettingsCache()
+    const settings = await settingsService.getAll()
+    const updated: MaintenanceSettings = {
+      ...(settings.maintenance ?? defaultSettings.maintenance!),
+      ...maintenance,
+    }
+    const full: SystemSettings = {
+      ...settings,
+      maintenance: updated,
+      updated_at: new Date().toISOString(),
+      updated_by: userId,
+    }
+    await put(STORES.SETTINGS, { key: SETTINGS_KEY, settings: full })
+    settingsRecordCache = { key: SETTINGS_KEY, settings: full }
+    await cloudMaintenanceService.update(updated)
+    return updated
   },
 
   // Get general settings (optionally for a specific company)
@@ -358,6 +401,9 @@ export const settingsService = {
       receipt_printer: newSettings.receipt_printer
         ? { ...(current.receipt_printer || defaultSettings.receipt_printer!), ...newSettings.receipt_printer }
         : current.receipt_printer,
+      maintenance: newSettings.maintenance
+        ? { ...(current.maintenance || defaultSettings.maintenance!), ...newSettings.maintenance }
+        : current.maintenance,
       updated_at: new Date().toISOString(),
       updated_by: userId,
     }
@@ -421,6 +467,9 @@ export const settingsService = {
         receipt_printer: imported.receipt_printer
           ? { ...defaultSettings.receipt_printer!, ...imported.receipt_printer as ReceiptPrinterSettings }
           : defaultSettings.receipt_printer,
+        maintenance: imported.maintenance
+          ? { ...defaultSettings.maintenance!, ...imported.maintenance }
+          : defaultSettings.maintenance,
         updated_at: new Date().toISOString(),
         updated_by: userId,
       }

@@ -268,7 +268,7 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
         </div>
 
         {/* Billing Information */}
-        <div className={`billing-section grid grid-cols-2 ${template === 'compact' ? 'gap-4 mb-4' : 'gap-8 mb-8'}`}>
+        <div className={`billing-section ${template === 'compact' ? 'mb-4' : 'mb-8'}`}>
           <div>
             <h3 className="text-xs font-semibold text-gray-500 uppercase mb-3">Bill To</h3>
             <div className={`space-y-1 ${template === 'compact' ? 'text-sm' : ''}`}>
@@ -294,21 +294,19 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
               )}
             </div>
           </div>
-          <div>
-            {invoiceData.sales_person && (
-              <>
-                <h3 className="text-xs font-semibold text-gray-500 uppercase mb-3">Sales Person</h3>
-                <p className="text-gray-900 font-medium">{invoiceData.sales_person}</p>
-              </>
-            )}
-          </div>
         </div>
 
         {/* Items Table */}
+        {(() => {
+          const showSalesPersonColumn = !!(invoiceData.sales_person || invoiceData.items.some(i => i.sales_person_name))
+          return (
         <table className={`w-full border-collapse ${template === 'compact' ? 'mb-4 text-sm' : 'mb-8'}`}>
           <thead>
             <tr className="bg-gray-50">
               <th className="text-left py-2 px-3 text-xs font-semibold text-gray-600 uppercase">Item</th>
+              {showSalesPersonColumn && (
+                <th className="text-left py-2 px-3 text-xs font-semibold text-gray-600 uppercase">Sales Person</th>
+              )}
               <th className="text-right py-2 px-3 text-xs font-semibold text-gray-600 uppercase">Qty</th>
               {template !== 'compact' && (
                 <th className="text-right py-2 px-3 text-xs font-semibold text-gray-600 uppercase">MRP</th>
@@ -335,6 +333,9 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
                       )}
                     </div>
                   </td>
+                  {showSalesPersonColumn && (
+                    <td className="py-2 px-3 text-sm text-gray-700">{item.sales_person_name || (invoiceData.sales_person ?? '—')}</td>
+                  )}
                   <td className="py-2 px-3 text-right text-gray-900">
                     {item.quantity} {item.unit || 'pcs'}
                   </td>
@@ -372,6 +373,8 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
             })}
           </tbody>
         </table>
+          );
+        })()}
 
         {/* Totals */}
         <div className="flex justify-end mb-8">

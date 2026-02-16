@@ -1362,7 +1362,9 @@ const SaleForm = () => {
         purchase_item_id: purchaseItemId,
         purchase_item_article: purchaseItemArticle,
         purchase_item_barcode: purchaseItemBarcode,
-        purchase_item_unique_key: uniqueKey // Unique identifier for this purchase item
+        purchase_item_unique_key: uniqueKey, // Unique identifier for this purchase item
+        sales_person_id: salesPersonId ? (salesPersonId as number) : undefined,
+        sales_person_name: salesPersonId ? salesPersons.find(sp => sp.id === salesPersonId)?.name : undefined
         }
         
         // Debug logging
@@ -2134,7 +2136,10 @@ const SaleForm = () => {
         purchase_id: item.purchase_id,
         purchase_item_id: item.purchase_item_id,
         purchase_item_article: item.purchase_item_article,
-        purchase_item_barcode: item.purchase_item_barcode
+        purchase_item_barcode: item.purchase_item_barcode,
+        // Per-item sales person (fallback to sale-level if not set)
+        sales_person_id: item.sales_person_id ?? (salesPersonId ? (salesPersonId as number) : undefined),
+        sales_person_name: item.sales_person_name ?? selectedSalesPerson?.name
       })),
       subtotal: subtotal, // Rounded subtotal
       discount: discountAmount > 0 ? discountAmount : undefined, // Save discount amount
@@ -2449,7 +2454,7 @@ const SaleForm = () => {
                 ) : (
                   <div className="max-h-[60vh] overflow-y-auto overflow-x-hidden pr-1 border border-gray-200 rounded-lg">
                     <div className="space-y-3 p-1">
-                    {saleItems.map(item => {
+                    {saleItems.map((item, itemIndex) => {
                       const product = availableProducts.find(p => p.id === item.product_id)
                       // Calculate per-unit values
                       const mrpPerUnit = item.mrp || item.unit_price || 0
@@ -2553,6 +2558,28 @@ const SaleForm = () => {
                               <button type="button" onClick={() => { const qtyKey = item.purchase_item_unique_key || `qty-${item.product_id}-${item.purchase_item_id ?? item.purchase_item_article ?? 'main'}`; setEditingQty(prev => { const next = { ...prev }; delete next[qtyKey]; return next }); updateItemQuantity(item, item.quantity + 1); }} className="w-6 h-6 flex items-center justify-center bg-gray-200 hover:bg-gray-300 rounded text-sm">+</button>
                               <button type="button" onClick={() => removeItem(item)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Remove"><Trash2 className="w-4 h-4" /></button>
                             </div>
+                          </div>
+                          {/* Sales Person (per line) */}
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="text-xs font-medium text-gray-500 shrink-0">Sales Person:</span>
+                            <select
+                              value={item.sales_person_id ?? salesPersonId ?? ''}
+                              onChange={(e) => {
+                                const val = e.target.value
+                                const id = val === '' ? undefined : parseInt(val, 10)
+                                const name = id ? salesPersons.find(sp => sp.id === id)?.name : undefined
+                                setSaleItems(prev => prev.map((i, idx) => idx === itemIndex ? { ...i, sales_person_id: id, sales_person_name: name } : i))
+                              }}
+                              className="text-xs px-2 py-1 border border-gray-300 rounded bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 min-w-0 max-w-[180px]"
+                              title="Assign sales person for this line"
+                            >
+                              <option value="">Same as sale</option>
+                              {salesPersons.map(person => (
+                                <option key={person.id} value={person.id}>
+                                  {person.name}{person.commission_rate != null ? ` (${person.commission_rate}%)` : ''}
+                                </option>
+                              ))}
+                            </select>
                           </div>
                           {/* Line 2: MRP, sale price, total — when qty > 1 show "per unit × qty = total" */}
                           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 mt-2 text-sm">

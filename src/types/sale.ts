@@ -20,6 +20,9 @@ export interface SaleItem {
   purchase_item_article?: string // Article from the purchase item
   purchase_item_barcode?: string // Barcode from the purchase item
   purchase_item_unique_key?: string // Unique key: "P{purchase_id}-I{purchase_item_id}" - ensures each purchase item is treated separately
+  // Per-item sales person (optional; if not set, sale-level sales_person is used)
+  sales_person_id?: number
+  sales_person_name?: string
 }
 
 export interface Sale {
@@ -44,6 +47,8 @@ export interface Sale {
   credit_added?: number // Amount of credit added to customer from returns
   notes?: string // Customer-facing notes (shown on invoice)
   internal_remarks?: string // Internal remarks (NOT shown to customers, only in reports)
+  /** When set, this sale is for parts/products sold during this service */
+  service_id?: number
   company_id?: number
   created_by: number
   archived: boolean

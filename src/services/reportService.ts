@@ -273,26 +273,29 @@ export const reportService = {
   getSalesBySalesPerson: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<SalesBySalesPersonReport[]> => {
     const allSales = await saleService.getAll(true, companyId)
     const filteredSales = reportService.filterSalesByDate(allSales, startDate, endDate)
+    // Key by id (or 'na') + name so we aggregate by person; use per-item salesperson when available
     const salesPersonMap = new Map<string, SalesBySalesPersonReport>()
+    const saleIdsByPerson = new Map<string, Set<number>>()
 
     filteredSales.forEach(sale => {
-      const salesPersonName = sale.sales_person_name || 'Not Assigned'
-      const salesPersonId = sale.sales_person_id
-
-      const existing = salesPersonMap.get(salesPersonName) || {
-        sales_person_id: salesPersonId,
-        sales_person_name: salesPersonName,
-        total_quantity: 0,
-        total_revenue: 0,
-        total_cost: 0,
-        total_profit: 0,
-        profit_margin: 0,
-        commission_amount: 0,
-        sale_count: 0,
-      }
-
       sale.items.forEach(item => {
         if (item.sale_type === 'sale') {
+          const salesPersonId = item.sales_person_id ?? sale.sales_person_id
+          const salesPersonName = (item.sales_person_name || sale.sales_person_name) || 'Not Assigned'
+          const key = `${salesPersonId ?? 'na'}-${salesPersonName}`
+
+          const existing = salesPersonMap.get(key) || {
+            sales_person_id: salesPersonId,
+            sales_person_name: salesPersonName,
+            total_quantity: 0,
+            total_revenue: 0,
+            total_cost: 0,
+            total_profit: 0,
+            profit_margin: 0,
+            commission_amount: 0,
+            sale_count: 0,
+          }
+
           const quantity = item.quantity
           const revenue = item.total
           const cost = (item.purchase_price || 0) * quantity
@@ -303,11 +306,17 @@ export const reportService = {
           existing.total_cost += cost
           existing.total_profit += profit
           existing.commission_amount += (item as any).commission_amount || 0
+
+          if (!saleIdsByPerson.has(key)) saleIdsByPerson.set(key, new Set())
+          saleIdsByPerson.get(key)!.add(sale.id)
+          salesPersonMap.set(key, existing)
         }
       })
+    })
 
-      existing.sale_count += 1
-      salesPersonMap.set(salesPersonName, existing)
+    // Set sale_count = distinct sale ids per person
+    salesPersonMap.forEach((report, key) => {
+      report.sale_count = saleIdsByPerson.get(key)?.size ?? 0
     })
 
     const reports = Array.from(salesPersonMap.values()).map(report => ({

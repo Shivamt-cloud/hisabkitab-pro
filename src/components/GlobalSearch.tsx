@@ -11,17 +11,19 @@ import { productService } from '../services/productService'
 import { customerService } from '../services/customerService'
 import { saleService } from '../services/saleService'
 import { purchaseService } from '../services/purchaseService'
+import { serviceRecordService } from '../services/serviceRecordService'
 import type { Product } from '../services/productService'
 import type { Customer } from '../types/customer'
 import type { Sale } from '../types/sale'
 import type { Purchase } from '../types/purchase'
-import { Search, Package, Users, FileText, ShoppingCart, ShoppingBag, X } from 'lucide-react'
+import type { ServiceRecord } from '../types/serviceRecord'
+import { Search, Package, Users, FileText, ShoppingCart, ShoppingBag, X, Wrench } from 'lucide-react'
 
 const SEARCH_KEYS = ['ctrl+k', 'meta+k']
 
 export function GlobalSearch() {
   const navigate = useNavigate()
-  const { user, getCurrentCompanyId } = useAuth()
+  const { user, getCurrentCompanyId, hasPermission } = useAuth()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -29,6 +31,7 @@ export function GlobalSearch() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [sales, setSales] = useState<Sale[]>([])
   const [purchases, setPurchases] = useState<Purchase[]>([])
+  const [services, setServices] = useState<ServiceRecord[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
@@ -48,6 +51,7 @@ export function GlobalSearch() {
   // Keyboard: Ctrl+K / Cmd+K to open; also listen for custom event (e.g. from Dashboard button)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key == null) return
       const key = `${e.ctrlKey ? 'ctrl+' : ''}${e.metaKey ? 'meta+' : ''}${e.key.toLowerCase()}`
       if (SEARCH_KEYS.includes(key)) {
         e.preventDefault()
@@ -71,21 +75,26 @@ export function GlobalSearch() {
     if (!open || !user) return
     setLoading(true)
     const companyId = getCurrentCompanyId()
+    const loadServices = hasPermission('services:read')
+      ? serviceRecordService.getAll(companyId ?? undefined)
+      : Promise.resolve([] as ServiceRecord[])
     Promise.all([
       productService.getAll(true, companyId ?? undefined),
       customerService.getAllFast(true, companyId ?? undefined),
       saleService.getAll(true, companyId ?? undefined),
       purchaseService.getAll(undefined, companyId ?? undefined),
+      loadServices,
     ])
-      .then(([p, c, s, purchasesData]) => {
+      .then(([p, c, s, purchasesData, servicesData]) => {
         setProducts(p)
         setCustomers(c)
         setSales(s)
         setPurchases(purchasesData)
+        setServices(servicesData)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [open, user, getCurrentCompanyId])
+  }, [open, user, getCurrentCompanyId, hasPermission])
 
   const q = (query || '').trim().toLowerCase()
   const filteredProducts = q
@@ -116,17 +125,29 @@ export function GlobalSearch() {
       )
     : []
 
-  const totalResults = filteredProducts.length + filteredCustomers.length + filteredSales.length + filteredPurchases.length
+  const filteredServices = q
+    ? services.filter(
+        (r: ServiceRecord) =>
+          (r.customer_name || '').toLowerCase().includes(q) ||
+          (r.vehicle_number || '').toLowerCase().includes(q) ||
+          (r.service_type || '').toLowerCase().includes(q) ||
+          String(r.id).includes(q)
+      )
+    : []
+
+  const totalResults = filteredProducts.length + filteredCustomers.length + filteredSales.length + filteredPurchases.length + filteredServices.length
   const productLimit = 5
   const customerLimit = 5
   const salesLimit = 5
   const purchaseLimit = 5
+  const serviceLimit = 5
   const sliceProducts = filteredProducts.slice(0, productLimit)
   const sliceCustomers = filteredCustomers.slice(0, customerLimit)
   const sliceSales = filteredSales.slice(0, salesLimit)
   const slicePurchases = filteredPurchases.slice(0, purchaseLimit)
+  const sliceServices = filteredServices.slice(0, serviceLimit)
 
-  const flatItems: { type: 'product' | 'customer' | 'sale' | 'purchase'; id: number; label: string; path: string }[] = []
+  const flatItems: { type: 'product' | 'customer' | 'sale' | 'purchase' | 'service'; id: number; label: string; path: string }[] = []
   sliceProducts.forEach(p => flatItems.push({ type: 'product', id: p.id, label: `${p.name}${p.sku ? ` (${p.sku})` : ''}`, path: `/products/${p.id}/edit` }))
   sliceCustomers.forEach(c => flatItems.push({ type: 'customer', id: c.id, label: c.name || '', path: '/customers' }))
   sliceSales.forEach(s => flatItems.push({ type: 'sale', id: s.id, label: `Sale ${s.invoice_number} – ${(s.customer_name || 'Walk-in')}`, path: `/invoice/${s.id}` }))
@@ -134,6 +155,10 @@ export function GlobalSearch() {
     const billNo = p.type === 'gst' ? (p as any).invoice_number : (p as any).invoice_number || `#${p.id}`
     const supplier = (p as any).supplier_name || 'N/A'
     flatItems.push({ type: 'purchase', id: p.id, label: `Purchase ${billNo} – ${supplier}`, path: p.type === 'gst' ? `/purchases/${p.id}/edit-gst` : `/purchases/${p.id}/edit-simple` })
+  })
+  sliceServices.forEach((r: ServiceRecord) => {
+    const vLabel = r.vehicle_type === 'ebike' ? 'E-bike' : r.vehicle_type === 'ecar' ? 'E-car' : r.vehicle_type
+    flatItems.push({ type: 'service', id: r.id, label: `${vLabel} – ${r.customer_name || r.vehicle_number || 'Service'}`, path: `/services/${r.vehicle_type}/${r.id}/edit` })
   })
 
   const handleSelect = (path: string) => {
@@ -187,7 +212,7 @@ export function GlobalSearch() {
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Search products, customers, sales, purchases…"
+            placeholder="Search products, customers, sales, purchases, services…"
             className="flex-1 outline-none text-base"
             autoComplete="off"
           />
@@ -205,7 +230,7 @@ export function GlobalSearch() {
             <div className="px-4 py-8 text-center text-gray-500 text-sm">Loading…</div>
           ) : !q ? (
             <div className="px-4 py-6 text-center text-gray-500 text-sm">
-              Type to search products (name, SKU, barcode), customers, sales (invoice no.), or purchases (bill no., supplier).
+              Type to search products (name, SKU, barcode), customers, sales (invoice no.), purchases (bill no., supplier), or services (customer, vehicle, type).
               <div className="mt-2 text-xs text-gray-400">Press Ctrl+K or ⌘K anytime to open.</div>
             </div>
           ) : totalResults === 0 ? (
@@ -311,6 +336,32 @@ export function GlobalSearch() {
                   })}
                   {filteredPurchases.length > purchaseLimit && (
                     <div className="px-3 py-1 text-xs text-gray-400">+{filteredPurchases.length - purchaseLimit} more</div>
+                  )}
+                </div>
+              )}
+              {sliceServices.length > 0 && (
+                <div className="px-2 pb-1">
+                  <div className="px-2 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+                    <Wrench className="w-3.5 h-3.5" /> Services
+                  </div>
+                  {sliceServices.map((r: ServiceRecord) => {
+                    const idx = flatItems.findIndex(x => x.type === 'service' && x.id === r.id)
+                    const selected = idx === selectedIndex
+                    const vLabel = r.vehicle_type === 'ebike' ? 'E-bike' : r.vehicle_type === 'ecar' ? 'E-car' : r.vehicle_type
+                    return (
+                      <button
+                        key={`service-${r.id}`}
+                        type="button"
+                        onClick={() => handleSelect(`/services/${r.vehicle_type}/${r.id}/edit`)}
+                        className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-left text-sm ${selected ? 'bg-indigo-50 text-indigo-900' : 'hover:bg-gray-50'}`}
+                      >
+                        <span className="truncate">{vLabel} – {r.customer_name || r.vehicle_number || 'Service'}{r.service_type ? ` · ${r.service_type}` : ''}</span>
+                        <span className="text-gray-500 text-xs shrink-0">₹{r.amount.toFixed(0)}</span>
+                      </button>
+                    )
+                  })}
+                  {filteredServices.length > serviceLimit && (
+                    <div className="px-3 py-1 text-xs text-gray-400">+{filteredServices.length - serviceLimit} more</div>
                   )}
                 </div>
               )}

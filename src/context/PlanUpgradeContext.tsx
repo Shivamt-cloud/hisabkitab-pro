@@ -1,5 +1,4 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
 import { PlanUpgradeModal } from '../components/PlanUpgradeModal'
 import type { PlanFeature } from '../utils/planFeatures'
 
@@ -26,19 +25,16 @@ export function PlanUpgradeProvider({ children }: { children: ReactNode }) {
     setFeatureLabel(undefined)
   }, [])
 
-  const modalEl = open && feature && typeof document !== 'undefined' ? createPortal(
-    <PlanUpgradeModal
-      feature={feature}
-      featureLabel={featureLabel}
-      onClose={close}
-    />,
-    document.body
-  ) : null
-
   return (
     <PlanUpgradeContext.Provider value={{ showPlanUpgrade }}>
       {children}
-      {modalEl}
+      {open && feature && (
+        <PlanUpgradeModal
+          feature={feature}
+          featureLabel={featureLabel}
+          onClose={close}
+        />
+      )}
     </PlanUpgradeContext.Provider>
   )
 }

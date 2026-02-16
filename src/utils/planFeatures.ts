@@ -4,7 +4,7 @@
  * Free trial: Premium features for 1 month, then switch to selected plan
  */
 
-export type PlanTier = 'basic' | 'standard' | 'premium'
+export type PlanTier = 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus'
 
 /** Feature keys for plan-based gating */
 export type PlanFeature =
@@ -58,6 +58,13 @@ export type PlanFeature =
   | 'settings_automated_exports'
   | 'settings_backup_restore'
   | 'report_business_overview'
+  // Services: all 4 (Bike, Car, E-bike, E-car) = premium (Premium, Premium Plus, Premium Plus Plus)
+  | 'services_bike_car_ebike'
+  | 'services_ebike_ecar'
+  // Premium Plus only: Services export & upcoming widget
+  | 'services_export'
+  | 'services_upcoming_widget'
+  | 'services_customer_notify'
 
 /** Minimum plan required for each feature. Used by PlanUpgradeModal and ProtectedRoute to show "Standard" or "Premium" correctly. */
 export const PLAN_FEATURE_MAP: Record<PlanFeature, PlanTier | 'admin'> = {
@@ -104,11 +111,16 @@ export const PLAN_FEATURE_MAP: Record<PlanFeature, PlanTier | 'admin'> = {
   report_customer_insights: 'premium',
   report_outstanding: 'premium',
   purchase_reorder: 'standard',
-  settings_barcode_label: 'admin',
-  settings_receipt_printer: 'admin',
+  settings_barcode_label: 'basic',
+  settings_receipt_printer: 'basic',
   settings_automated_exports: 'admin',
   settings_backup_restore: 'basic',
   report_business_overview: 'standard',
+  services_bike_car_ebike: 'premium', // Premium, Premium Plus, Premium Plus Plus – Bike & Car
+  services_ebike_ecar: 'premium', // Premium, Premium Plus, Premium Plus Plus – E-bike & E-car (all 4 options)
+  services_export: 'premium_plus', // Premium Plus & above – Export service report to Excel
+  services_upcoming_widget: 'premium_plus', // Premium Plus & above – Upcoming services on Dashboard
+  services_customer_notify: 'premium_plus', // Premium Plus & above – Notify customer via WhatsApp & Email
 }
 
 /** Human-readable labels for upgrade modal (only for plan-gated features we show in UI) */
@@ -150,12 +162,19 @@ export const PLAN_FEATURE_LABELS: Partial<Record<PlanFeature, string>> = {
   sales_rent: 'Rent / Bookings',
   expense_daily_expenses: 'Daily Expenses',
   expense_daily_report: 'Daily Report',
+  services_bike_car_ebike: 'Services (Bike, Car, E-bike, E-car)',
+  services_ebike_ecar: 'E-bike & E-car Services',
+  services_export: 'Export service report to Excel',
+  services_upcoming_widget: 'Upcoming services on Dashboard',
+  services_customer_notify: 'Notify customer via WhatsApp & Email',
 }
 
 export const PLAN_TIER_LABELS: Record<PlanTier, string> = {
   basic: 'Basic',
   standard: 'Standard',
   premium: 'Premium',
+  premium_plus: 'Premium Plus',
+  premium_plus_plus: 'Premium Plus Plus',
 }
 
 export function getRequiredPlanTierForFeature(feature: PlanFeature): PlanTier | null {
@@ -163,7 +182,7 @@ export function getRequiredPlanTierForFeature(feature: PlanFeature): PlanTier | 
   return t === 'admin' ? null : (t as PlanTier)
 }
 
-const PLAN_ORDER: Record<PlanTier, number> = { basic: 1, standard: 2, premium: 3 }
+const PLAN_ORDER: Record<PlanTier, number> = { basic: 1, standard: 2, premium: 3, premium_plus: 4, premium_plus_plus: 5 }
 
 export function hasPlanFeature(
   tier: PlanTier | null | undefined,
@@ -177,7 +196,7 @@ export function hasPlanFeature(
   return PLAN_ORDER[tier] >= PLAN_ORDER[required]
 }
 
-/** During free trial, effective tier is premium */
+/** During free trial, effective tier is premium (not premium_plus) */
 export function getEffectiveTier(
   tier: PlanTier | null | undefined,
   isFreeTrial: boolean,

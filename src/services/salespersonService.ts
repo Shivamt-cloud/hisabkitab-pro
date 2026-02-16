@@ -1,56 +1,31 @@
-// Sales Person and Commission Management Service using IndexedDB
+// Sales Person and Commission Management Service – cloud (Supabase) with IndexedDB fallback
 
 import { SalesPerson, CategoryCommission, SalesPersonCommission, SalesPersonCategoryAssignment } from '../types/salesperson'
 import { productService, categoryService } from './productService'
 import { saleService } from './saleService'
 import { getAll, getById, put, deleteById, STORES } from '../database/db'
+import { cloudSalesPersonService } from './cloudSalesPersonService'
 
-// Sales Persons
+// Sales Persons – delegate to cloud when available for global sync
 export const salesPersonService = {
-  getAll: async (includeInactive: boolean = false): Promise<SalesPerson[]> => {
-    let persons = await getAll<SalesPerson>(STORES.SALES_PERSONS)
-    if (!includeInactive) {
-      persons = persons.filter(p => p.is_active)
-    }
-    return persons
+  getAll: (includeInactive: boolean = false): Promise<SalesPerson[]> => {
+    return cloudSalesPersonService.getAll(includeInactive)
   },
 
-  getById: async (id: number): Promise<SalesPerson | undefined> => {
-    return await getById<SalesPerson>(STORES.SALES_PERSONS, id)
+  getById: (id: number): Promise<SalesPerson | undefined> => {
+    return cloudSalesPersonService.getById(id)
   },
 
-  create: async (person: Omit<SalesPerson, 'id' | 'created_at' | 'updated_at'>): Promise<SalesPerson> => {
-    const newPerson: SalesPerson = {
-      ...person,
-      id: Date.now(),
-      is_active: person.is_active !== undefined ? person.is_active : true,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
-    await put(STORES.SALES_PERSONS, newPerson)
-    return newPerson
+  create: (person: Omit<SalesPerson, 'id' | 'created_at' | 'updated_at'>): Promise<SalesPerson> => {
+    return cloudSalesPersonService.create(person)
   },
 
-  update: async (id: number, person: Partial<SalesPerson>): Promise<SalesPerson | null> => {
-    const existing = await getById<SalesPerson>(STORES.SALES_PERSONS, id)
-    if (!existing) return null
-
-    const updated: SalesPerson = {
-      ...existing,
-      ...person,
-      updated_at: new Date().toISOString(),
-    }
-    await put(STORES.SALES_PERSONS, updated)
-    return updated
+  update: (id: number, person: Partial<SalesPerson>): Promise<SalesPerson | null> => {
+    return cloudSalesPersonService.update(id, person)
   },
 
-  delete: async (id: number): Promise<boolean> => {
-    try {
-      await deleteById(STORES.SALES_PERSONS, id)
-      return true
-    } catch (error) {
-      return false
-    }
+  delete: (id: number): Promise<boolean> => {
+    return cloudSalesPersonService.delete(id)
   },
 }
 

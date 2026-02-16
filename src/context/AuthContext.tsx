@@ -16,7 +16,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [currentCompanyId, setCurrentCompanyId] = useState<number | null>(null)
-  const [subscriptionTier, setSubscriptionTier] = useState<'basic' | 'standard' | 'premium' | null>(null)
+  const [subscriptionTier, setSubscriptionTier] = useState<'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus' | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [userPermissions, setUserPermissions] = useState<{ useCustomPermissions: boolean; customPermissions: any[] } | null>(null)
 
@@ -36,7 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     try {
       const company = await companyService.getById(cid)
-      const tier = (company?.subscription_tier || 'basic') as 'basic' | 'standard' | 'premium'
+      const tier = (company?.subscription_tier || 'basic') as 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus'
       const trialEnd = company?.subscription_end_date || company?.valid_to || null
       const effective = getEffectiveTier(tier, !!company?.is_free_trial, trialEnd)
       setSubscriptionTier(effective)

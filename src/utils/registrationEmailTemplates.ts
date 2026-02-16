@@ -103,7 +103,7 @@ function getGlobalPlatformSection(request: RegistrationRequest): string {
 **Total:** Unlimited primary devices + 1 personal mobile = **Unlimited access** for your entire business!
 `
 
-  const planName = tier === 'basic' ? '📱 Basic Plan - 1 device + 1 mobile' : tier === 'standard' ? '📱📱📱 Standard Plan - 3 devices + 1 mobile' : '♾️ Premium Plan - Unlimited'
+  const planName = tier === 'basic' ? '📱 Basic Plan - 1 device + 1 mobile' : tier === 'standard' ? '📱📱📱 Standard Plan - 3 devices + 1 mobile' : tier === 'premium_plus' ? '🚗 Premium Plus Plan - Unlimited + Services (Bike, Car, E-bike)' : '♾️ Premium Plan - Unlimited'
 
   return `
 **🌍 GLOBAL PLATFORM - ACCESS FROM ANYWHERE:**
@@ -423,7 +423,7 @@ ${getGlobalPlatformSection(request)}
 Business Name: ${request.business_name}
 Login Email: ${request.email}
 Account Status: ✅ Active
-Subscription Plan: ${request.subscription_tier === 'basic' ? 'Basic Plan' : request.subscription_tier === 'standard' ? 'Standard Plan' : 'Premium Plan'}
+Subscription Plan: ${request.subscription_tier === 'basic' ? 'Basic Plan' : request.subscription_tier === 'standard' ? 'Standard Plan' : request.subscription_tier === 'premium_plus' ? 'Premium Plus Plan' : request.subscription_tier === 'premium_plus_plus' ? 'Premium Plus Plus Plan' : 'Premium Plan'}
 
 **IMMEDIATE NEXT STEPS:**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1022,7 +1022,9 @@ HisabKitab-Pro Team`
       const tierNames = {
         basic: 'Basic Plan - 1 device + 1 mobile',
         standard: 'Standard Plan - 3 devices + 1 mobile',
-        premium: 'Premium Plan - Unlimited'
+        premium: 'Premium Plan - Unlimited',
+        premium_plus: 'Premium Plus Plan - Unlimited + Services (Bike, Car, E-bike, E-car)',
+        premium_plus_plus: 'Premium Plus Plus Plan - Unlimited + All Services'
       }
       
       // Estimate pricing (you may want to adjust based on country)
@@ -1030,7 +1032,9 @@ HisabKitab-Pro Team`
       const tierMultipliers = {
         basic: 1.0,
         standard: 1.33,
-        premium: 2.0
+        premium: 2.0,
+        premium_plus: 2.5,
+        premium_plus_plus: 3.0
       }
       const estimatedPrice = Math.round(basePrice * tierMultipliers[tier as keyof typeof tierMultipliers])
       
@@ -1395,7 +1399,7 @@ ${data.companyCode ? `• Company Code: ${data.companyCode}` : ''}
 ${data.companyAddress ? `• Address: ${data.companyAddress}` : ''}
 ${data.companyPhone ? `• Phone: ${data.companyPhone}` : ''}
 ${data.companyEmail ? `• Company Email: ${data.companyEmail}` : ''}
-${data.subscriptionTier ? `• Subscription Plan: ${data.subscriptionTier === 'basic' ? 'Basic Plan' : data.subscriptionTier === 'standard' ? 'Standard Plan' : 'Premium Plan'}` : ''}
+${data.subscriptionTier ? `• Subscription Plan: ${data.subscriptionTier === 'basic' ? 'Basic Plan' : data.subscriptionTier === 'standard' ? 'Standard Plan' : data.subscriptionTier === 'premium_plus' ? 'Premium Plus Plan' : data.subscriptionTier === 'premium_plus_plus' ? 'Premium Plus Plus Plan' : 'Premium Plan'}` : ''}
 
 **📋 YOUR ROLE PERMISSIONS:**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
