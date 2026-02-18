@@ -188,13 +188,97 @@ export function detectCountry(): string {
   return 'IN'
 }
 
+/** Locale for number/date formatting by country (affects grouping: 1,000 vs 1,00,000) */
+const COUNTRY_LOCALE: Record<string, string> = {
+  IN: 'en-IN',
+  US: 'en-US',
+  GB: 'en-GB',
+  AU: 'en-AU',
+  CA: 'en-CA',
+  EU: 'en-US', // eurozone-style grouping
+  AE: 'en-AE',
+  SG: 'en-SG',
+}
+
+export function getLocaleForCountry(countryCode: string): string {
+  return COUNTRY_LOCALE[countryCode] || 'en-IN'
+}
+
+/** Browser/local locale for date & number formatting (e.g. daily expense, daily report). Uses local timezone. */
+export function getLocalLocale(): string {
+  try {
+    return typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en-IN'
+  } catch {
+    return 'en-IN'
+  }
+}
+
 /**
- * Format price with currency symbol
+ * Format price with currency symbol; optional locale for number grouping (by country).
  */
-export function formatPrice(amount: number, currencySymbol: string): string {
-  // Format number with commas
-  const formatted = amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })
+export function formatPrice(amount: number, currencySymbol: string, locale?: string): string {
+  const loc = locale || 'en-IN'
+  const formatted = Math.round(amount).toLocaleString(loc, { maximumFractionDigits: 0 })
   return `${currencySymbol}${formatted}`
+}
+
+/** Plan key for display (Starter + subscription tiers) */
+export type PlanKeyForDisplay = 'starter' | 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus'
+
+/** INR base: Combo display prices (monthly, yearly, 3yr) – from PLAN_PRICING_COMBINED */
+const PLAN_DISPLAY_PRICES_INR: Record<PlanKeyForDisplay, { name: string; monthly: number; yearly: number; threeYear: number }> = {
+  starter: { name: 'Starter', monthly: 299, yearly: 3588, threeYear: 7999 },
+  basic: { name: 'Basic', monthly: 499, yearly: 5988, threeYear: 12999 },
+  standard: { name: 'Standard', monthly: 649, yearly: 7788, threeYear: 16999 },
+  premium: { name: 'Premium', monthly: 999, yearly: 11988, threeYear: 26999 },
+  premium_plus: { name: 'Premium Plus', monthly: 1249, yearly: 14988, threeYear: 32999 },
+  premium_plus_plus: { name: 'Premium Plus Plus', monthly: 1499, yearly: 17988, threeYear: 39999 },
+}
+
+/** INR base: Full prices by Mobile / Desktop / Combo */
+const PLAN_FULL_PRICES_INR: Record<PlanKeyForDisplay, { mobile: { mo: number; yr: number; threeYr: number }; desktop: { mo: number; yr: number; threeYr: number }; combo: { mo: number; yr: number; threeYr: number } }> = {
+  starter:  { mobile: { mo: 55,   yr: 649,   threeYr: 1499 },  desktop: { mo: 249,  yr: 2988,  threeYr: 6499 },  combo: { mo: 299,  yr: 3588,  threeYr: 7999 } },
+  basic:    { mobile: { mo: 99,   yr: 1188,  threeYr: 2499 },  desktop: { mo: 399,  yr: 4788,  threeYr: 9999 },  combo: { mo: 499,  yr: 5988,  threeYr: 12999 } },
+  standard: { mobile: { mo: 149,  yr: 1788,  threeYr: 3999 },  desktop: { mo: 499,  yr: 5988,  threeYr: 12999 }, combo: { mo: 649,  yr: 7788,  threeYr: 16999 } },
+  premium:  { mobile: { mo: 249,  yr: 2988,  threeYr: 6499 },  desktop: { mo: 749,  yr: 8988,  threeYr: 19999 }, combo: { mo: 999,  yr: 11988, threeYr: 26999 } },
+  premium_plus: { mobile: { mo: 349, yr: 4188, threeYr: 9249 }, desktop: { mo: 949, yr: 11388, threeYr: 24999 }, combo: { mo: 1249, yr: 14988, threeYr: 32999 } },
+  premium_plus_plus: { mobile: { mo: 449, yr: 5388, threeYr: 11999 }, desktop: { mo: 1099, yr: 13188, threeYr: 29999 }, combo: { mo: 1499, yr: 17988, threeYr: 39999 } },
+}
+
+const INR_BASE_YEARLY = 6000 // India Basic combo yearly (reference)
+
+function roundPrice(n: number): number {
+  if (n >= 1000) return Math.round(n / 100) * 100
+  if (n >= 100) return Math.round(n / 10) * 10
+  return Math.round(n)
+}
+
+function scalePrices<T>(obj: T, factor: number): T {
+  if (typeof obj === 'number') return roundPrice(obj * factor) as T
+  if (Array.isArray(obj)) return obj.map((item) => scalePrices(item, factor)) as T
+  if (obj !== null && typeof obj === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(obj)) {
+      out[k] = scalePrices(v, factor)
+    }
+    return out as T
+  }
+  return obj
+}
+
+/**
+ * Get plan display and full prices for a country (scaled from INR by country yearly price ratio).
+ */
+export function getPlanPricesForCountry(countryCode: string): {
+  displayPrices: Record<PlanKeyForDisplay, { name: string; monthly: number; yearly: number; threeYear: number }>
+  fullPrices: Record<PlanKeyForDisplay, { mobile: { mo: number; yr: number; threeYr: number }; desktop: { mo: number; yr: number; threeYr: number }; combo: { mo: number; yr: number; threeYr: number } }>
+} {
+  const cp = getCountryPricing(countryCode)
+  const factor = cp.yearlyPrice / INR_BASE_YEARLY
+  return {
+    displayPrices: scalePrices(PLAN_DISPLAY_PRICES_INR, factor) as typeof PLAN_DISPLAY_PRICES_INR,
+    fullPrices: scalePrices(PLAN_FULL_PRICES_INR, factor) as typeof PLAN_FULL_PRICES_INR,
+  }
 }
 
 

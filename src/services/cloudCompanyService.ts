@@ -158,7 +158,8 @@ export const cloudCompanyService = {
             valid_from: companyData.valid_from || null,
             valid_to: companyData.valid_to || null,
             is_active: companyData.is_active !== undefined ? companyData.is_active : true,
-            subscription_tier: companyData.subscription_tier || 'basic',
+            subscription_tier: companyData.subscription_tier || 'starter',
+            access_type: companyData.access_type || 'combo',
             max_users: companyData.max_users || 3,
             subscription_start_date: companyData.subscription_start_date || null,
             subscription_end_date: companyData.subscription_end_date || null,
@@ -232,6 +233,10 @@ export const cloudCompanyService = {
             valid_from: updated.valid_from || null,
             valid_to: updated.valid_to || null,
             is_active: updated.is_active !== undefined ? updated.is_active : true,
+            subscription_tier: updated.subscription_tier || null,
+            access_type: updated.access_type || null,
+            max_users: updated.max_users ?? null,
+            subscription_status: updated.subscription_status || null,
             updated_at: updated.updated_at,
           })
           .eq('id', id)

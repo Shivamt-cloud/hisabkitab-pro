@@ -10,13 +10,14 @@ import { getTierPricing } from '../utils/tierPricing'
 import { getDeviceId, getDeviceType, getDeviceName } from '../utils/deviceId'
 import { hasPlanFeature as checkPlanFeature, getEffectiveTier } from '../utils/planFeatures'
 import type { PlanFeature } from '../utils/planFeatures'
+import type { SubscriptionTier, AccessType } from '../types/device'
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [currentCompanyId, setCurrentCompanyId] = useState<number | null>(null)
-  const [subscriptionTier, setSubscriptionTier] = useState<'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus' | null>(null)
+  const [subscriptionTier, setSubscriptionTier] = useState<SubscriptionTier | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [userPermissions, setUserPermissions] = useState<{ useCustomPermissions: boolean; customPermissions: any[] } | null>(null)
 
@@ -31,17 +32,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const cid = companyId ?? u.company_id ?? null
     if (!cid) {
-      setSubscriptionTier('basic')
+      setSubscriptionTier('starter')
       return
     }
     try {
       const company = await companyService.getById(cid)
-      const tier = (company?.subscription_tier || 'basic') as 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus'
+      const tier = (company?.subscription_tier || 'starter') as SubscriptionTier
       const trialEnd = company?.subscription_end_date || company?.valid_to || null
       const effective = getEffectiveTier(tier, !!company?.is_free_trial, trialEnd)
       setSubscriptionTier(effective)
     } catch {
-      setSubscriptionTier('basic')
+      setSubscriptionTier('starter')
     }
   }
 
@@ -164,7 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setIsLoading(false)
                 return { 
                   success: false, 
-                  error: `SUBSCRIPTION_EXPIRED:${daysExpired}:${company.subscription_tier || 'basic'}` 
+                  error: `SUBSCRIPTION_EXPIRED:${daysExpired}:${company.subscription_tier || 'starter'}` 
                 }
               }
             }
@@ -178,55 +179,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Device registration and limit checking (only for non-admin users with company)
       if (foundUser.role !== 'admin' && foundUser.company_id) {
         try {
-          // Get company to check subscription tier
+          // Get company to check subscription tier and access type
           const company = await companyService.getById(foundUser.company_id)
           if (company && company.subscription_tier) {
             // Get device limit for the subscription tier
             const tierPricing = getTierPricing(company.subscription_tier)
             const deviceLimit = tierPricing.deviceLimit
             
-            // Get current device ID
+            // Get current device ID and type
             const deviceId = getDeviceId()
+            const deviceType = getDeviceType()
             
             // Check if device is already registered
             const isDeviceRegistered = await cloudDeviceService.isDeviceRegistered(foundUser.id, deviceId)
             
             if (!isDeviceRegistered) {
-              // Device is not registered, check if we can register it
+              // Enforce access_type (Mobile only / Desktop only / Combo): block new registration if device type doesn't match
+              const accessType = (company.access_type || 'combo') as AccessType
+              const isMobileOrTablet = deviceType === 'mobile' || deviceType === 'tablet'
+              const isDesktop = deviceType === 'desktop'
+              if (accessType === 'mobile' && !isMobileOrTablet) {
+                setIsLoading(false)
+                return {
+                  success: false,
+                  error: 'Your plan is Mobile only. Please sign in from a phone or tablet. To use this device (desktop/laptop), upgrade to Desktop or Combo plan from System Settings or contact support.',
+                }
+              }
+              if (accessType === 'desktop' && !isDesktop) {
+                setIsLoading(false)
+                return {
+                  success: false,
+                  error: 'Your plan is Desktop only. Please sign in from a desktop or laptop. To use this device (phone/tablet), upgrade to Mobile or Combo plan from System Settings or contact support.',
+                }
+              }
+
+              // Device is not registered, check if we can register it (count limit)
               if (deviceLimit !== 'unlimited') {
-                // Count current active devices for the company
-                const currentDeviceCount = await cloudDeviceService.getActiveDeviceCountForCompany(foundUser.company_id)
+                // Count current active devices for the company (by access type: mobile/desktop/combo)
+                const currentDeviceCount = await cloudDeviceService.getActiveDeviceCountForCompany(foundUser.company_id, accessType)
                 
                 // Check if device limit is reached
                 if (currentDeviceCount >= deviceLimit) {
                   console.error(`Device limit reached for company ${foundUser.company_id}. Current: ${currentDeviceCount}, Limit: ${deviceLimit}`)
-                  
-                  // Get list of registered devices to show in error message
-                  try {
-                    const companyDevices = await cloudDeviceService.getCompanyDevices(foundUser.company_id)
-                    const deviceList = companyDevices
-                      .slice(0, 3) // Show up to 3 devices
-                      .map(d => d.device_name || d.device_type || 'Unknown Device')
-                      .join(', ')
-                    
-                    setIsLoading(false)
-                    return { 
-                      success: false, 
-                      error: `Device limit reached. Your plan allows ${tierPricing.deviceDisplayLabel}, but ${currentDeviceCount} device(s) are already registered.${deviceList ? ` Registered devices: ${deviceList}${companyDevices.length > 3 ? '...' : ''}` : ''} Please remove an old device from System Settings or upgrade your plan.` 
-                    }
-                  } catch (error) {
-                    console.error('Error fetching device list:', error)
-                    setIsLoading(false)
-                    return { 
-                      success: false, 
-                      error: `Device limit reached. Your plan allows ${tierPricing.deviceDisplayLabel}, but ${currentDeviceCount} device(s) are already registered. Please remove a device from System Settings or upgrade your plan.` 
-                    }
+                  const deviceLabel = accessType === 'mobile' ? 'mobile/tablet' : accessType === 'desktop' ? 'desktop' : 'device'
+                  setIsLoading(false)
+                  return {
+                    success: false,
+                    error: `You have an active session on another ${deviceLabel}. Please log out from that device first, then try signing in here.`,
                   }
                 }
               }
               
               // Register the device
-              const deviceType = getDeviceType()
               const deviceName = getDeviceName()
               await cloudDeviceService.registerDevice(foundUser.id, deviceId, {
                 device_name: deviceName,
@@ -298,6 +302,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     if (user) {
+      // Deactivate this device so the slot is freed (one active session per device slot)
+      if (user.role !== 'admin' && user.company_id) {
+        try {
+          const deviceId = getDeviceId()
+          await cloudDeviceService.removeDevice(user.id, deviceId)
+        } catch (err) {
+          console.error('Error deactivating device on logout:', err)
+        }
+      }
       // Log logout (fire and forget)
       const companyId = user.company_id || (user.role !== 'admin' ? user.company_id : currentCompanyId || undefined)
       auditService.log(
@@ -317,6 +330,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
     setCurrentCompanyId(null)
     setUserPermissions(null)
+    setSubscriptionTier(null)
     localStorage.removeItem('hisabkitab_user')
     localStorage.removeItem('hisabkitab_company_id')
   }

@@ -20,7 +20,7 @@ const SubscriptionRechargeModal = ({
   isOpen,
   onClose,
   onSuccess,
-  currentTier = 'basic',
+  currentTier = 'starter',
   currentEndDate,
 }: SubscriptionRechargeModalProps) => {
   const { user, getCurrentCompanyId } = useAuth()
@@ -56,8 +56,8 @@ const SubscriptionRechargeModal = ({
     setError(null)
     try {
       // Harden tier and country inputs (avoid any runtime mismatch)
-      const tierSafe: any =
-        currentTier === 'basic' || currentTier === 'standard' || currentTier === 'premium' || currentTier === 'premium_plus' || currentTier === 'premium_plus_plus' ? currentTier : 'basic'
+      const tierSafe: SubscriptionTier =
+        (currentTier === 'starter' || currentTier === 'basic' || currentTier === 'standard' || currentTier === 'premium' || currentTier === 'premium_plus' || currentTier === 'premium_plus_plus' ? currentTier : 'starter') as SubscriptionTier
 
       // 1) Use saved country immediately (fast + avoids confusion)
       const saved = getSavedCountry()
@@ -122,8 +122,8 @@ const SubscriptionRechargeModal = ({
   }
 
   const applyManualCountry = (code: string) => {
-    const tierSafe: any =
-      currentTier === 'basic' || currentTier === 'standard' || currentTier === 'premium' || currentTier === 'premium_plus' || currentTier === 'premium_plus_plus' ? currentTier : 'basic'
+    const tierSafe: SubscriptionTier =
+      (currentTier === 'starter' || currentTier === 'basic' || currentTier === 'standard' || currentTier === 'premium' || currentTier === 'premium_plus' || currentTier === 'premium_plus_plus' ? currentTier : 'starter') as SubscriptionTier
     const normalized = code.trim().toUpperCase()
     if (!isSupportedCountryCode(normalized)) {
       setError('Unsupported country selection. Please select from the list.')

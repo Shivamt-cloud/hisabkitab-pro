@@ -146,7 +146,7 @@ function App() {
           <Route
             path="/settings/price-lists"
             element={
-              <ProtectedRoute requiredPermission="products:read">
+              <ProtectedRoute requiredPermission="products:read" requiredPlanFeature="settings_price_lists">
                 <PriceLists />
               </ProtectedRoute>
             }
@@ -154,7 +154,7 @@ function App() {
           <Route
             path="/settings/automated-exports"
             element={
-              <ProtectedRoute requiredPermission="settings:update" requiredRole="admin">
+              <ProtectedRoute requiredPermission="settings:update" requiredRole="admin" requiredPlanFeature="settings_automated_exports">
                 <AutomatedExports />
               </ProtectedRoute>
             }
@@ -634,7 +634,7 @@ function App() {
           <Route
             path="/audit-logs"
             element={
-              <ProtectedRoute requiredPermission="reports:read">
+              <ProtectedRoute requiredPermission="reports:read" requiredPlanFeature="audit_logs">
                 <AuditLogs />
               </ProtectedRoute>
             }
@@ -642,7 +642,7 @@ function App() {
           <Route
             path="/settings/barcode-label"
             element={
-              <ProtectedRoute requiredPermission="barcode_label_settings:read">
+              <ProtectedRoute requiredPermission="barcode_label_settings:read" requiredPlanFeature="settings_barcode_label">
                 <BarcodeLabelSettings />
               </ProtectedRoute>
             }
@@ -650,7 +650,7 @@ function App() {
           <Route
             path="/settings/receipt-printer"
             element={
-              <ProtectedRoute requiredPermission="receipt_printer_settings:read">
+              <ProtectedRoute requiredPermission="receipt_printer_settings:read" requiredPlanFeature="settings_receipt_printer">
                 <ReceiptPrinterSettings />
               </ProtectedRoute>
             }
@@ -658,7 +658,7 @@ function App() {
           <Route
             path="/business-overview"
             element={
-              <ProtectedRoute requiredPermission="business_overview:read">
+              <ProtectedRoute requiredPermission="business_overview:read" requiredPlanFeature="report_business_overview">
                 <BusinessOverview />
               </ProtectedRoute>
             }
@@ -666,7 +666,7 @@ function App() {
           <Route
             path="/analytics"
             element={
-              <ProtectedRoute requiredPermission="reports:read">
+              <ProtectedRoute requiredPermission="reports:read" requiredPlanFeature="dashboard_analytics">
                 <AnalyticsDashboard />
               </ProtectedRoute>
             }

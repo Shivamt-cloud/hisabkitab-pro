@@ -1,7 +1,7 @@
 export type PaymentGateway = 'razorpay' | 'stripe' | 'phonepe' | 'manual' | 'upi_direct'
 export type PaymentMethod = 'upi' | 'card' | 'netbanking' | 'wallet' | 'emi' | 'other'
 export type PaymentStatus = 'pending' | 'processing' | 'success' | 'failed' | 'refunded' | 'cancelled'
-export type SubscriptionTier = 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus'
+export type SubscriptionTier = 'starter' | 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus'
 export type DurationMonths = 1 | 3 | 6 | 12
 
 export interface SubscriptionPayment {

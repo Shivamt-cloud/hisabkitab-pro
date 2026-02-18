@@ -4,7 +4,7 @@
  * Free trial: Premium features for 1 month, then switch to selected plan
  */
 
-export type PlanTier = 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus'
+export type PlanTier = 'starter' | 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus'
 
 /** Feature keys for plan-based gating */
 export type PlanFeature =
@@ -57,7 +57,11 @@ export type PlanFeature =
   | 'settings_receipt_printer'
   | 'settings_automated_exports'
   | 'settings_backup_restore'
+  | 'settings_price_lists'
   | 'report_business_overview'
+  // Analytics & Audit – Basic+
+  | 'dashboard_analytics'
+  | 'audit_logs'
   // Services: all 4 (Bike, Car, E-bike, E-car) = premium (Premium, Premium Plus, Premium Plus Plus)
   | 'services_bike_car_ebike'
   | 'services_ebike_ecar'
@@ -73,13 +77,13 @@ export const PLAN_FEATURE_MAP: Record<PlanFeature, PlanTier | 'admin'> = {
   report_total_purchases: 'basic',
   report_total_profit: 'standard',
   report_total_products: 'basic',
-  report_low_stock: 'basic',
+  report_low_stock: 'starter',
   report_out_of_stock: 'standard',
   report_upcoming_checks: 'premium',
   // Sales options
   sales_quick_sale: 'standard',
-  sales_new_sale: 'basic',
-  sales_new_sale_tab: 'basic',
+  sales_new_sale: 'starter',
+  sales_new_sale_tab: 'starter',
   sales_history: 'standard',
   sales_rent: 'standard',
   // Purchase options
@@ -91,7 +95,7 @@ export const PLAN_FEATURE_MAP: Record<PlanFeature, PlanTier | 'admin'> = {
   purchase_upcoming_checks: 'premium',
   purchase_sales_category_mgmt: 'standard',
   // Expense options
-  expense_daily_expenses: 'basic',
+  expense_daily_expenses: 'starter',
   expense_daily_report: 'standard',
   // Dashboard sections – only Cash flow for Standard; rest Premium
   dashboard_cash_flow: 'standard',
@@ -101,8 +105,8 @@ export const PLAN_FEATURE_MAP: Record<PlanFeature, PlanTier | 'admin'> = {
   dashboard_sales_target: 'premium',
   // Reports
   report_daily_activity: 'standard',
-  report_sales: 'basic',
-  report_purchases: 'basic',
+  report_sales: 'starter',
+  report_purchases: 'starter',
   report_profit_analysis: 'standard',
   report_expenses: 'standard',
   report_comparative: 'premium',
@@ -113,9 +117,12 @@ export const PLAN_FEATURE_MAP: Record<PlanFeature, PlanTier | 'admin'> = {
   purchase_reorder: 'standard',
   settings_barcode_label: 'basic',
   settings_receipt_printer: 'basic',
-  settings_automated_exports: 'admin',
+  settings_automated_exports: 'basic',
   settings_backup_restore: 'basic',
+  settings_price_lists: 'basic',
   report_business_overview: 'standard',
+  dashboard_analytics: 'basic',
+  audit_logs: 'basic',
   services_bike_car_ebike: 'premium', // Premium, Premium Plus, Premium Plus Plus – Bike & Car
   services_ebike_ecar: 'premium', // Premium, Premium Plus, Premium Plus Plus – E-bike & E-car (all 4 options)
   services_export: 'premium_plus', // Premium Plus & above – Export service report to Excel
@@ -156,7 +163,10 @@ export const PLAN_FEATURE_LABELS: Partial<Record<PlanFeature, string>> = {
   settings_receipt_printer: 'Receipt Printer Settings',
   settings_automated_exports: 'Automated Exports',
   settings_backup_restore: 'Backup & Restore',
+  settings_price_lists: 'Price Lists',
   report_business_overview: 'Business Overview',
+  dashboard_analytics: 'Analytics Dashboard',
+  audit_logs: 'Audit Logs',
   sales_quick_sale: 'Quick Sale',
   sales_history: 'Sales History',
   sales_rent: 'Rent / Bookings',
@@ -170,6 +180,7 @@ export const PLAN_FEATURE_LABELS: Partial<Record<PlanFeature, string>> = {
 }
 
 export const PLAN_TIER_LABELS: Record<PlanTier, string> = {
+  starter: 'Starter',
   basic: 'Basic',
   standard: 'Standard',
   premium: 'Premium',
@@ -182,7 +193,7 @@ export function getRequiredPlanTierForFeature(feature: PlanFeature): PlanTier | 
   return t === 'admin' ? null : (t as PlanTier)
 }
 
-const PLAN_ORDER: Record<PlanTier, number> = { basic: 1, standard: 2, premium: 3, premium_plus: 4, premium_plus_plus: 5 }
+const PLAN_ORDER: Record<PlanTier, number> = { starter: 0, basic: 1, standard: 2, premium: 3, premium_plus: 4, premium_plus_plus: 5 }
 
 export function hasPlanFeature(
   tier: PlanTier | null | undefined,
@@ -202,7 +213,7 @@ export function getEffectiveTier(
   isFreeTrial: boolean,
   trialEndDate?: string | null
 ): PlanTier {
-  if (!tier) return 'basic'
+  if (!tier) return 'starter'
   if (isFreeTrial && trialEndDate && new Date(trialEndDate) >= new Date()) {
     return 'premium'
   }

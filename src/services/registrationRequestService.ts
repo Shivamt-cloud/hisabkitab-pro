@@ -4,7 +4,7 @@
 
 import { getAll, put, getById, STORES } from '../database/db'
 import { cloudRegistrationRequestService } from './cloudRegistrationRequestService'
-import { SubscriptionTier } from '../types/device'
+import { SubscriptionTier, AccessType } from '../types/device'
 
 export interface RegistrationRequest {
   id: number
@@ -24,6 +24,8 @@ export interface RegistrationRequest {
   website?: string
   description?: string
   subscription_tier?: SubscriptionTier
+  /** Which device access: mobile only, desktop only, or combo (both) */
+  access_type?: AccessType
   status: 'pending' | 'under_review' | 'query_initiated' | 'query_completed' | 'registration_accepted' | 'agreement_pending' | 'agreement_accepted' | 'payment_pending' | 'payment_completed' | 'activation_completed' | 'activation_rejected'
   communication_initiated?: boolean
   registration_done?: boolean

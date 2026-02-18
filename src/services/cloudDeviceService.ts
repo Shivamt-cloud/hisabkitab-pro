@@ -1,6 +1,6 @@
 // Cloud Device Service - Handles device operations with Supabase
 import { supabase, isSupabaseAvailable, isOnline } from './supabaseClient'
-import { Device } from '../types/device'
+import { Device, AccessType } from '../types/device'
 import { getAll, put, getById, deleteById, getByIndex, STORES } from '../database/db'
 
 /**
@@ -239,16 +239,24 @@ export const cloudDeviceService = {
   },
 
   /**
-   * Get active device count for a company (all users in the company)
-   * Device limits are company-based, so we need to count all devices for all users in the company
+   * Get active device count for a company (all users in the company).
+   * When accessType is set, counts only devices that match the plan (mobile: mobile+tablet, desktop: desktop, combo: all).
    */
-  getActiveDeviceCountForCompany: async (companyId: number): Promise<number> => {
+  getActiveDeviceCountForCompany: async (companyId: number, accessType?: AccessType): Promise<number> => {
+    const filterByAccessType = (devices: Device[]): number => {
+      if (!accessType || accessType === 'combo') return devices.length
+      if (accessType === 'mobile') return devices.filter(d => d.device_type === 'mobile' || d.device_type === 'tablet').length
+      if (accessType === 'desktop') return devices.filter(d => d.device_type === 'desktop').length
+      return devices.length
+    }
+
     // If Supabase not available or offline, use local storage
     if (!isSupabaseAvailable() || !isOnline()) {
       const allDevices = await getAll<Device>(STORES.USER_DEVICES)
       const allUsers = await getAll<{ id: string; company_id?: number }>(STORES.USERS)
       const companyUserIds = allUsers.filter(u => u.company_id === companyId).map(u => u.id)
-      return allDevices.filter(d => companyUserIds.includes(d.user_id) && d.is_active).length
+      const companyDevices = allDevices.filter(d => companyUserIds.includes(d.user_id) && d.is_active)
+      return filterByAccessType(companyDevices)
     }
 
     try {
@@ -260,42 +268,44 @@ export const cloudDeviceService = {
 
       if (usersError) {
         console.error('Error fetching users for company:', usersError)
-        // Fallback to local storage
         const allDevices = await getAll<Device>(STORES.USER_DEVICES)
         const allUsers = await getAll<{ id: string; company_id?: number }>(STORES.USERS)
         const companyUserIds = allUsers.filter(u => u.company_id === companyId).map(u => u.id)
-        return allDevices.filter(d => companyUserIds.includes(d.user_id) && d.is_active).length
+        const companyDevices = allDevices.filter(d => companyUserIds.includes(d.user_id) && d.is_active)
+        return filterByAccessType(companyDevices)
       }
 
-      if (!users || users.length === 0) {
-        return 0
-      }
+      if (!users || users.length === 0) return 0
 
       const userIds = users.map(u => u.id)
 
-      // Count all active devices for all users in the company
-      // Use regular select instead of count to avoid 406 errors
+      // When filtering by access_type we need device_type; otherwise id is enough
+      const selectFields = accessType && accessType !== 'combo' ? 'id, device_type' : 'id'
       const { data: devices, error: devicesError } = await supabase!
         .from('user_devices')
-        .select('id')
+        .select(selectFields)
         .in('user_id', userIds)
         .eq('is_active', true)
 
       if (devicesError) {
         console.error('Error counting devices for company:', devicesError)
-        // Fallback to local storage
         const allDevices = await getAll<Device>(STORES.USER_DEVICES)
-        return allDevices.filter(d => userIds.includes(d.user_id) && d.is_active).length
+        const companyDevices = allDevices.filter(d => userIds.includes(d.user_id) && d.is_active)
+        return filterByAccessType(companyDevices)
       }
 
-      return devices?.length || 0
+      const list = ((devices || []) as unknown) as { id: number; device_type?: string }[]
+      if (!accessType || accessType === 'combo') return list.length
+      if (accessType === 'mobile') return list.filter(d => d.device_type === 'mobile' || d.device_type === 'tablet').length
+      if (accessType === 'desktop') return list.filter(d => d.device_type === 'desktop').length
+      return list.length
     } catch (error) {
       console.error('Error in cloudDeviceService.getActiveDeviceCountForCompany:', error)
-      // Fallback to local storage
       const allDevices = await getAll<Device>(STORES.USER_DEVICES)
       const allUsers = await getAll<{ id: string; company_id?: number }>(STORES.USERS)
       const companyUserIds = allUsers.filter(u => u.company_id === companyId).map(u => u.id)
-      return allDevices.filter(d => companyUserIds.includes(d.user_id) && d.is_active).length
+      const companyDevices = allDevices.filter(d => companyUserIds.includes(d.user_id) && d.is_active)
+      return filterByAccessType(companyDevices)
     }
   },
 

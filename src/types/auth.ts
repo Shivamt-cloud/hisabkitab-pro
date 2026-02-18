@@ -18,7 +18,7 @@ export interface AuthContextType {
   logout: () => void
   hasPermission: (permission: string) => boolean
   hasPlanFeature: (feature: PlanFeature) => boolean
-  subscriptionTier: 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus' | null
+  subscriptionTier: 'starter' | 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus' | null
   isLoading: boolean
   currentCompanyId: number | null
   switchCompany: (companyId: number | null) => void

@@ -15,7 +15,7 @@ export function UpgradeBanner() {
   const [isDismissed, setIsDismissed] = useState(false)
 
   // Get user's subscription tier (default to 'basic' if not set)
-  const subscriptionTier = (user as any)?.subscription_tier || 'basic'
+  const subscriptionTier = (user as any)?.subscription_tier || 'starter'
 
   // Don't show banner for premium users or if dismissed
   if (subscriptionTier === 'premium' || subscriptionTier === 'premium_plus' || subscriptionTier === 'premium_plus_plus' || isDismissed || !user) {

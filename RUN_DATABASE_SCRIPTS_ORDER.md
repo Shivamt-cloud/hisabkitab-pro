@@ -20,6 +20,23 @@ Use this order so the app has all required tables and columns.
 - **Creates:** `price_segments`, `product_segment_prices`
 - Safe to re-run
 
+## 2.5. Starter tier and device limits (run after step 2)
+
+**`ADD_STARTER_TIER_AND_DEVICE_LIMITS.sql`**
+
+- **companies:** allow `subscription_tier = 'starter'`
+- **users:** allow `subscription_tier` in `('starter', 'basic', 'standard', 'premium', 'premium_plus', 'premium_plus_plus')`
+- **get_max_devices_for_tier:** starter=1, basic=1, standard=3, premium/premium_plus/premium_plus_plus=unlimited  
+- Safe to re-run
+
+## 2.6. Access type – device choice (Mobile / Desktop / Combo)
+
+**`ADD_ACCESS_TYPE_COLUMN.sql`**
+
+- **registration_requests:** `access_type` TEXT DEFAULT 'combo' (mobile | desktop | combo)
+- **companies:** `access_type` TEXT DEFAULT 'combo'
+- Safe to re-run
+
 ## 3. App-specific columns and constraints (run after 1 and 2)
 
 **`APPLY_REMAINING_SUPABASE_MIGRATIONS.sql`** (single script that applies everything below)
@@ -64,6 +81,8 @@ These are **not required** if you have run the three steps above (RUN_ALL → AP
 
 - [ ] Run **RUN_ALL_SUPABASE_TABLES_ONE_SCRIPT.sql**
 - [ ] Run **APPLY_MISSING_SUPABASE_COLUMNS_AND_TABLES.sql**
+- [ ] Run **ADD_STARTER_TIER_AND_DEVICE_LIMITS.sql** (Starter plan + device limits for all tiers)
+- [ ] Run **ADD_ACCESS_TYPE_COLUMN.sql** (Mobile / Desktop / Combo device choice)
 - [ ] Run **APPLY_REMAINING_SUPABASE_MIGRATIONS.sql**
 
-After these three, the database has everything the app expects for Supabase sync.
+After these, the database has everything the app expects for Supabase sync.

@@ -1,15 +1,67 @@
 import { useState, FormEvent, useEffect } from 'react'
 import { useAuth, isAuthNotAvailableError } from '../context/AuthContext'
 import { useNavigate, Link } from 'react-router-dom'
-import { LogIn, Mail, AlertCircle, User, Package, ShoppingCart, TrendingUp, Users, BarChart3, Shield, CheckCircle, MessageCircle, Globe, X, Building2, Phone, MapPin, FileText, UserPlus, BookOpen, Search, Target, WifiOff, Download, Wrench } from 'lucide-react'
+import { LogIn, Mail, AlertCircle, User, Package, ShoppingCart, TrendingUp, Users, BarChart3, Shield, CheckCircle, MessageCircle, Globe, X, Building2, Phone, MapPin, FileText, UserPlus, BookOpen, Search, Target, WifiOff, Download, Wrench, ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
 import { LockIcon } from '../components/icons/LockIcon'
-import { COUNTRY_OPTIONS, detectCountry, formatPrice, getCountryPricing, getSavedCountry, isSupportedCountryCode, saveCountry, type CountryPricing } from '../utils/pricing'
+import { COUNTRY_OPTIONS, detectCountry, formatPrice, getCountryPricing, getLocaleForCountry, getPlanPricesForCountry, getSavedCountry, isSupportedCountryCode, saveCountry, type CountryPricing } from '../utils/pricing'
 import { calculateTierPrice, getDisplayMonthlyPrice, getTierPricing } from '../utils/tierPricing'
 import { getMaxUsersForPlan } from '../utils/planUserLimits'
-import { SubscriptionTier } from '../types/device'
+import { SubscriptionTier, AccessType } from '../types/device'
 import { userService } from '../services/userService'
 import { registrationRequestService } from '../services/registrationRequestService'
 import { CONTACT_EMAIL, CONTACT_WEBSITE_URL, CONTACT_WEBSITE_DISPLAY, CONTACT_WHATSAPP_NUMBER, CONTACT_WHATSAPP_URL } from '../constants'
+
+/** Plan key for login display (includes Starter; app tiers unchanged) */
+type PlanKeyForDisplay = 'starter' | SubscriptionTier
+
+/** Plan-wise key features for login page – all functionality per tier */
+const PLAN_KEY_FEATURES: Record<PlanKeyForDisplay, string[]> = {
+  starter: [
+    'Report summary: Low Stock Alert',
+    'Sales report & Purchase report',
+    'New Sale & New Sale (new tab)',
+    'Simple purchase',
+    'Customers & Suppliers (view/add for transactions)',
+    'Daily expenses',
+    '1 user • 1 device',
+  ],
+  basic: [
+    'Everything in Starter, plus:',
+    'Report cards: Total Sales, Total Purchases, Total Products',
+    'New Sale, GST purchase & Simple purchase',
+    'Barcode Label, Receipt Printer & Backup & Restore settings',
+    'Price Lists, Automated Exports',
+    'Analytics Dashboard, Audit Logs',
+    '3 users • 1 device + 1 mobile',
+  ],
+  standard: [
+    'Everything in Basic, plus:',
+    'Quick Sale, Sales History, Rent / Bookings',
+    'Purchase History, Reorder list & form',
+    'Daily expense report, Cash flow (dashboard)',
+    'Report: Daily Activity, Profit analysis, Expense reports, Business overview',
+    'Report cards: Total Profit, Out of Stock',
+    '10 users • 3 devices + 1 mobile',
+  ],
+  premium: [
+    'Everything in Standard, plus:',
+    'Report cards: Upcoming checks, Top 5 products, Top 5 customers, Outstanding summary, Sales target',
+    'Reports: Comparative, Commission, CA (GSTR), Customer insights, Outstanding payments',
+    'Services: Bike, Car, E-bike, E-car',
+    'Unlimited users & devices',
+  ],
+  premium_plus: [
+    'Everything in Premium, plus:',
+    'Export service report to Excel',
+    'Upcoming services widget on Dashboard',
+    'Notify customer via WhatsApp & Email',
+  ],
+  premium_plus_plus: [
+    'Everything in Premium Plus',
+    'Unlimited + All Services',
+    'Top tier – full feature access',
+  ],
+}
 
 const Login = () => {
   const [email, setEmail] = useState('')
@@ -27,6 +79,8 @@ const Login = () => {
   const [isFreeTrialRegistration, setIsFreeTrialRegistration] = useState(false) // Track if registration is from free trial button
   const [googleUserEmail, setGoogleUserEmail] = useState('')
   const [googleUserName, setGoogleUserName] = useState('')
+  const [expandedPlanFeatures, setExpandedPlanFeatures] = useState<PlanKeyForDisplay | null>(null)
+  const [showAllPlansDetails, setShowAllPlansDetails] = useState(false)
   const [registrationFormData, setRegistrationFormData] = useState({
     email: '',
     name: '',
@@ -42,10 +96,15 @@ const Login = () => {
     gstin: '',
     website: '',
     description: '',
-    subscription_tier: 'basic' as SubscriptionTier,
+    subscription_tier: 'starter' as SubscriptionTier,
+    access_type: 'combo' as AccessType,
   })
   const [isSubmittingForm, setIsSubmittingForm] = useState(false)
   const [subscriptionExpired, setSubscriptionExpired] = useState<{ daysExpired: number; currentTier: SubscriptionTier } | null>(null)
+
+  // Plan prices and locale for selected country (all pricing/labels update with country)
+  const { displayPrices: planDisplayPrices, fullPrices: planFullPrices } = getPlanPricesForCountry(selectedCountry)
+  const priceLocale = getLocaleForCountry(selectedCountry)
   const [authNotAvailable, setAuthNotAvailable] = useState(false)
   const { login } = useAuth()
   const navigate = useNavigate()
@@ -187,7 +246,8 @@ const Login = () => {
       gstin: '',
       website: '',
       description: '',
-      subscription_tier: 'basic' as SubscriptionTier,
+      subscription_tier: 'starter' as SubscriptionTier,
+    access_type: 'combo' as AccessType,
     })
     setShowRegistrationForm(true)
   }
@@ -220,7 +280,8 @@ const Login = () => {
           gstin: registrationFormData.gstin || undefined,
           website: registrationFormData.website || undefined,
           description: registrationFormData.description || undefined,
-          subscription_tier: registrationFormData.subscription_tier || 'basic',
+          subscription_tier: registrationFormData.subscription_tier || 'starter',
+          access_type: registrationFormData.access_type || 'combo',
           is_free_trial: isFreeTrialRegistration, // Include free trial flag
         })
 
@@ -255,7 +316,8 @@ Business Details:
 - Website: ${registrationFormData.website || 'Not provided'}
 
 Subscription Plan:
-- Selected Plan: ${registrationFormData.subscription_tier === 'basic' ? 'Basic Plan' : registrationFormData.subscription_tier === 'standard' ? 'Standard Plan' : registrationFormData.subscription_tier === 'premium_plus' ? 'Premium Plus Plan' : 'Premium Plan'}
+- Selected Plan: ${registrationFormData.subscription_tier === 'starter' ? 'Starter Plan' : registrationFormData.subscription_tier === 'basic' ? 'Basic Plan' : registrationFormData.subscription_tier === 'standard' ? 'Standard Plan' : registrationFormData.subscription_tier === 'premium_plus' ? 'Premium Plus Plan' : 'Premium Plan'}
+- Device access: ${registrationFormData.access_type === 'mobile' ? 'Mobile only' : registrationFormData.access_type === 'desktop' ? 'Desktop only' : 'Combo (Mobile + Desktop)'}
 
 Additional Information:
 ${registrationFormData.description || 'None provided'}
@@ -291,7 +353,8 @@ Please review and process this registration request.
         gstin: '',
         website: '',
         description: '',
-        subscription_tier: 'basic' as SubscriptionTier,
+        subscription_tier: 'starter' as SubscriptionTier,
+        access_type: 'combo' as AccessType,
       })
       setGoogleUserEmail('')
       setGoogleUserName('')
@@ -305,10 +368,10 @@ Please review and process this registration request.
 
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-600 via-indigo-700 to-purple-800 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/20"></div>
+    <div className="min-h-screen bg-gradient-to-br from-blue-600 via-indigo-700 to-purple-800 flex flex-col items-center justify-start lg:justify-center p-4 overflow-y-auto">
+      <div className="absolute inset-0 bg-black/20 pointer-events-none" aria-hidden="true" />
       
-      <div className="relative w-full max-w-[1600px] flex gap-10 items-center">
+      <div className="relative w-full max-w-[1600px] flex flex-col lg:flex-row gap-6 lg:gap-10 items-stretch lg:items-center min-h-0 overflow-y-auto lg:overflow-visible">
         {/* Left Side - App Description & Features */}
         <div className="flex-[2] hidden lg:block">
           <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20 shadow-2xl">
@@ -400,117 +463,225 @@ Please review and process this registration request.
                 </div>
               </div>
 
-              {/* Special Pricing Display with Effects */}
+              {/* Special Pricing Display – Starter + all plans, 50% OFF, full details */}
               <div className="relative mb-4">
-                {/* Animated Background Glow */}
-                <div className="absolute inset-0 bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 rounded-xl blur-xl opacity-75 animate-pulse"></div>
-                
-                {/* Hurry Up Badge */}
+                <div className="absolute inset-0 bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 rounded-2xl blur-xl opacity-80 animate-pulse"></div>
                 <div className="absolute -top-3 -right-3 z-20 animate-bounce">
-                  <div className="bg-red-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow-lg flex items-center gap-1 animate-pulse">
+                  <div className="bg-red-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow-lg flex items-center gap-1">
                     <span>🔥</span>
                     <span>HURRY UP!</span>
                   </div>
                 </div>
-                
-                {/* New Year Sale Badge */}
-                <div className="absolute -top-3 -left-3 z-20 animate-pulse">
+                <div className="absolute -top-3 -left-3 z-20">
                   <div className="bg-gradient-to-r from-purple-600 to-pink-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow-lg">
-                    🎉 NEW YEAR SALE
+                    🎉 SALE
                   </div>
                 </div>
-                
-                {/* Main Pricing Card */}
-                <div className="bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 text-white px-6 py-4 rounded-xl font-bold text-xl text-center relative overflow-hidden border-2 border-white/30 shadow-2xl animate-shimmer">
-                  {/* Animated Shimmer Effect */}
-                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full animate-shimmer-slide"></div>
-                  
+
+                {/* Main card */}
+                <div className="relative bg-gradient-to-br from-yellow-400 via-orange-500 to-red-500 text-white px-6 py-5 rounded-2xl border-2 border-white/30 shadow-2xl overflow-hidden">
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full animate-shimmer-slide"></div>
                   <div className="relative z-10">
-                    <div className="text-sm font-bold mb-2 tracking-wider uppercase">
-                      Special {pricing.countryName} Pricing
+                    {/* Header – highlight monthly plans for mobile + Starter */}
+                    <div className="text-center mb-3">
+                      <h3 className="text-lg font-black uppercase tracking-widest text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                        Special {pricing.countryName} Pricing
+                      </h3>
+                      <p className="text-lg font-bold text-white mt-2 bg-slate-900/60 rounded-lg px-4 py-3 border border-white/40 text-shadow-sm overflow-visible">
+                        📱 Monthly plans for mobile – start with Starter from <span className="inline-block font-black animate-price-highlight text-yellow-300 drop-shadow-[0_0_6px_rgba(253,224,71,0.9)]">{formatPrice(planFullPrices.starter.mobile.mo, pricing.currencySymbol, priceLocale)}/mo</span> only
+                      </p>
+                      <p className="text-xs font-semibold text-white mt-2 bg-slate-900/50 rounded-lg px-3 py-2 border border-white/30 inline-block">
+                        For more details,{' '}
+                        <button
+                          type="button"
+                          onClick={() => setShowAllPlansDetails(!showAllPlansDetails)}
+                          className="underline font-black text-amber-200 hover:text-amber-100 transition-colors"
+                        >
+                          {showAllPlansDetails ? 'click to close' : 'click to open'}
+                        </button>
+                        {' '}ALL PLANS – FULL DETAILS (MOBILE / DESKTOP / COMBO)
+                      </p>
                     </div>
-                    <div className="flex items-center justify-center gap-8 mb-3 flex-wrap">
-                      <div className="text-4xl font-black drop-shadow-2xl animate-scale leading-tight">
-                        {formatPrice(pricing.yearlyPrice, pricing.currencySymbol)}<span className="text-2xl">/Year</span>
-                      </div>
-                      <span className="text-2xl text-white/60 font-bold">|</span>
-                      <div className="text-4xl font-black drop-shadow-2xl animate-scale leading-tight">
-                        {formatPrice(getDisplayMonthlyPrice(pricing.yearlyPrice, 'basic'), pricing.currencySymbol)}<span className="text-2xl">/mo</span>
-                      </div>
-                    </div>
-                    {pricing.originalPrice && (
-                      <div className="text-base font-semibold mt-2 flex items-center justify-center gap-3 mb-3">
-                        <span className="line-through opacity-60 text-xl">
-                          {formatPrice(pricing.originalPrice, pricing.currencySymbol)}
-                        </span>
-                        {pricing.discountText && (
-                          <span className="bg-green-500 px-4 py-1.5 rounded-full text-sm font-black shadow-xl animate-pulse border-2 border-green-300">
-                            {pricing.discountText}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    <div className="text-xs font-bold mt-3 bg-black/30 backdrop-blur-sm px-4 py-2 rounded-full inline-block border border-white/20">
-                      ⚡ First Year Discount Applied ⚡
-                    </div>
-                    
-                    {/* Plan Details with Device Limits and Pricing */}
-                                    <div className="mt-4 space-y-3">
-                      {(['basic', 'standard', 'premium', 'premium_plus', 'premium_plus_plus'] as SubscriptionTier[]).map((tier) => {
-                        const tierInfo = getTierPricing(tier)
-                        const tierPrice = calculateTierPrice(pricing.yearlyPrice, tier)
-                        const tierOriginalPrice = calculateTierPrice(pricing.originalPrice || pricing.yearlyPrice * 2, tier)
-                        const tierName = tier === 'basic' ? `📱 ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}` :
-                                        tier === 'standard' ? `📱📱📱 ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}` :
-                                        tier === 'premium_plus' ? `🚗 ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}` :
-                                        tier === 'premium_plus_plus' ? `🚀 ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}` :
-                                        `♾️ ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}`
-                        const tierDescription = tier === 'premium_plus' ? 'Unlimited devices + Services (Bike, Car, E-bike, E-car)' :
-                                               tier === 'premium_plus_plus' ? 'Unlimited + All Services (Bike, Car, E-bike, E-car & more)' :
-                                               tier === 'premium' ? 'Supports: Mobile, Laptop, Desktop, Tablet (All Types)' :
-                                               'Supports: Mobile, Laptop, Desktop, Tablet'
-                        const isMostPopular = tier === 'premium'
-                        const isComingSoon = tier === 'premium_plus_plus'
-                        return (
-                          <div
-                            key={tier}
-                            className={`overflow-hidden rounded-xl border-2 backdrop-blur-sm ${
-                              isComingSoon
-                                ? 'border-amber-400/60 bg-white/5 opacity-90'
-                                : isMostPopular
-                                  ? 'border-emerald-400/80 bg-gradient-to-br from-emerald-500/30 via-teal-500/25 to-cyan-500/30 shadow-lg shadow-emerald-500/20'
-                                  : tier === 'basic'
-                                    ? 'border-white/20 bg-white/15'
-                                    : 'border-white/15 bg-white/10'
-                            }`}
-                          >
-                            {isComingSoon && (
-                              <div className="bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-1.5 text-center">
-                                <span className="text-xs font-black uppercase tracking-wider text-white drop-shadow-sm">Coming soon</span>
+
+                    {/* Hero price: Starter plan – Mobile first, then Combo */}
+                    {(() => {
+                      const mobile = planFullPrices.starter.mobile
+                      const combo = planDisplayPrices.starter
+                      const mobileOriginalYear = mobile.yr * 2
+                      const comboOriginalYear = combo.yearly * 2
+                      return (
+                        <div className="space-y-3 mb-4">
+                          {/* 1. Mobile */}
+                          <div className="bg-slate-900/95 rounded-xl px-4 py-3 border-2 border-white/40 shadow-xl">
+                            <p className="text-[10px] font-black uppercase tracking-wider text-white mb-1">📱 Starter Plan (Mobile)</p>
+                            <div className="flex flex-wrap items-center justify-center gap-3 mb-2">
+                              <div className="text-2xl font-black text-white drop-shadow-md">
+                                {formatPrice(mobile.yr, pricing.currencySymbol, priceLocale)}<span className="text-base">/yr</span>
                               </div>
-                            )}
-                            {isMostPopular && !isComingSoon && (
-                              <div className="bg-gradient-to-r from-emerald-500 to-teal-500 px-3 py-1.5 text-center">
-                                <span className="text-xs font-black uppercase tracking-wider text-white drop-shadow-sm">★ Most Popular</span>
+                              <span className="text-lg text-white/80 font-bold">|</span>
+                              <div className="text-2xl font-black text-white drop-shadow-md">
+                                {formatPrice(mobile.mo, pricing.currencySymbol, priceLocale)}<span className="text-base">/mo</span>
                               </div>
-                            )}
-                            <div className="p-3">
-                              <div className={`text-xs font-bold ${tier === 'basic' ? 'text-white/90' : 'text-white/90'} mb-1 flex items-center justify-between gap-2`}>
-                                <span className="flex-1 min-w-0">{tierName}</span>
-                                {!isComingSoon && (
-                                  <div className="text-right flex-shrink-0">
-                                    <div className="line-through opacity-70 text-xs mb-0.5">
-                                      {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
-                                    </div>
-                                    <span className="font-extrabold">{formatPrice(tierPrice, pricing.currencySymbol)}/Year</span>
-                                  </div>
-                                )}
+                              <span className="text-lg text-white/80 font-bold">|</span>
+                              <div className="text-2xl font-black text-white drop-shadow-md">
+                                {formatPrice(mobile.threeYr, pricing.currencySymbol, priceLocale)}<span className="text-base">/3yr</span>
                               </div>
-                              <div className={`text-xs ${tier === 'basic' ? 'text-white/80' : 'text-white/80'}`}>{tierDescription}</div>
+                            </div>
+                            <div className="flex flex-wrap items-center justify-center gap-3">
+                              <span className="line-through text-white/90 text-lg font-bold">
+                                {formatPrice(mobileOriginalYear, pricing.currencySymbol, priceLocale)} <span className="text-sm font-semibold text-white/80">(for year)</span>
+                              </span>
+                              <span className="bg-green-500 text-white px-4 py-1.5 rounded-full text-sm font-black shadow-lg border-2 border-green-300 animate-pulse">
+                                50% OFF for year
+                              </span>
+                            </div>
+                            <div className="mt-2 text-xs font-black text-white bg-white/20 backdrop-blur-sm px-4 py-2 rounded-full inline-block border border-white/40">
+                              Start today • Save more • Grow your business
                             </div>
                           </div>
-                        )
-                      })}
+                          {/* 2. Combo */}
+                          <div className="bg-slate-900/95 rounded-xl px-4 py-3 border-2 border-white/40 shadow-xl">
+                            <p className="text-[10px] font-black uppercase tracking-wider text-white mb-1">📱+🖥️ Starter Plan (Combo)</p>
+                            <div className="flex flex-wrap items-center justify-center gap-3 mb-2">
+                              <div className="text-2xl font-black text-white drop-shadow-md">
+                                {formatPrice(combo.yearly, pricing.currencySymbol, priceLocale)}<span className="text-base">/yr</span>
+                              </div>
+                              <span className="text-lg text-white/80 font-bold">|</span>
+                              <div className="text-2xl font-black text-white drop-shadow-md">
+                                {formatPrice(combo.monthly, pricing.currencySymbol, priceLocale)}<span className="text-base">/mo</span>
+                              </div>
+                              <span className="text-lg text-white/80 font-bold">|</span>
+                              <div className="text-2xl font-black text-white drop-shadow-md">
+                                {formatPrice(combo.threeYear, pricing.currencySymbol, priceLocale)}<span className="text-base">/3yr</span>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center justify-center gap-3">
+                              <span className="line-through text-white/90 text-lg font-bold">
+                                {formatPrice(comboOriginalYear, pricing.currencySymbol, priceLocale)} <span className="text-sm font-semibold text-white/80">(for year)</span>
+                              </span>
+                              <span className="bg-green-500 text-white px-4 py-1.5 rounded-full text-sm font-black shadow-lg border-2 border-green-300 animate-pulse">
+                                50% OFF for year
+                              </span>
+                            </div>
+                            <div className="mt-2 text-xs font-black text-white bg-white/20 backdrop-blur-sm px-4 py-2 rounded-full inline-block border border-white/40">
+                              Start today • Save more • Grow your business
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })()}
+
+                    {/* All plan details – highlighted section below hero */}
+                    <div className="rounded-xl border-2 border-amber-400/90 bg-amber-500/15 shadow-xl overflow-hidden">
+                      <div className="bg-amber-500/40 px-3 py-2 border-b border-amber-400/60">
+                        <span className="text-sm font-black uppercase tracking-wider text-white drop-shadow">📋 All plan details (Mobile / Desktop / Combo)</span>
+                      </div>
+                      <div className="p-3">
+                    {!showAllPlansDetails ? (
+                      <div className="space-y-2">
+                        <div className="overflow-hidden rounded-xl border-2 border-amber-300 bg-amber-500/25 shadow-lg">
+                          <div className="flex items-center justify-between px-3 py-2 border-b border-white/20 bg-amber-500/30">
+                            <span className="text-sm font-black text-white">Starter</span>
+                            <span className="text-[10px] font-black bg-amber-500 text-white px-2 py-0.5 rounded-full">ENTRY</span>
+                          </div>
+                          <div className="p-3 grid grid-cols-3 gap-2">
+                            <div className="bg-black/25 rounded-lg px-2 py-2 border border-white/20 text-center">
+                              <div className="text-[10px] font-black text-white/90 uppercase tracking-wider mb-1">📱 Mobile</div>
+                              <div className="text-sm font-bold">{formatPrice(planFullPrices.starter.mobile.mo, pricing.currencySymbol, priceLocale)}/mo</div>
+                              <div className="text-[10px] text-white/85">{formatPrice(planFullPrices.starter.mobile.yr, pricing.currencySymbol, priceLocale)}/yr</div>
+                              <div className="text-[10px] text-white/75">{formatPrice(planFullPrices.starter.mobile.threeYr, pricing.currencySymbol, priceLocale)}/3yr</div>
+                            </div>
+                            <div className="bg-black/25 rounded-lg px-2 py-2 border border-white/20 text-center">
+                              <div className="text-[10px] font-black text-white/90 uppercase tracking-wider mb-1">🖥️ Desktop</div>
+                              <div className="text-sm font-bold">{formatPrice(planFullPrices.starter.desktop.mo, pricing.currencySymbol, priceLocale)}/mo</div>
+                              <div className="text-[10px] text-white/85">{formatPrice(planFullPrices.starter.desktop.yr, pricing.currencySymbol, priceLocale)}/yr</div>
+                              <div className="text-[10px] text-white/75">{formatPrice(planFullPrices.starter.desktop.threeYr, pricing.currencySymbol, priceLocale)}/3yr</div>
+                            </div>
+                            <div className="bg-black/35 rounded-lg px-2 py-2 border-2 border-white/40 text-center">
+                              <div className="text-[10px] font-black text-white uppercase tracking-wider mb-1">📱+🖥️ Combo</div>
+                              <div className="text-sm font-black">{formatPrice(planFullPrices.starter.combo.mo, pricing.currencySymbol, priceLocale)}/mo</div>
+                              <div className="text-[10px] text-white/90">{formatPrice(planFullPrices.starter.combo.yr, pricing.currencySymbol, priceLocale)}/yr</div>
+                              <div className="text-[10px] text-white/80">{formatPrice(planFullPrices.starter.combo.threeYr, pricing.currencySymbol, priceLocale)}/3yr</div>
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowAllPlansDetails(true)}
+                          className="w-full text-xs font-black uppercase tracking-wider py-2 rounded-lg bg-white/25 hover:bg-white/35 border-2 border-amber-400/60 transition-colors"
+                        >
+                          ▼ Click to open ALL PLANS – FULL DETAILS (MOBILE / DESKTOP / COMBO)
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 max-h-[340px] overflow-y-auto pr-1">
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span className="text-xs font-black text-white uppercase tracking-wider">ALL PLANS – FULL DETAILS (MOBILE / DESKTOP / COMBO)</span>
+                          <button
+                            type="button"
+                            onClick={() => setShowAllPlansDetails(false)}
+                            className="text-[10px] font-bold text-white/95 hover:text-amber-200 underline shrink-0"
+                          >
+                            ▲ Click to close
+                          </button>
+                        </div>
+                        {(['starter', 'basic', 'standard', 'premium', 'premium_plus', 'premium_plus_plus'] as PlanKeyForDisplay[]).map((planKey) => {
+                          const name = planDisplayPrices[planKey].name
+                          const full = planFullPrices[planKey]
+                          const isMostPopular = planKey === 'premium'
+                          const isStarter = planKey === 'starter'
+                          const isComingSoon = planKey === 'premium_plus_plus'
+                          return (
+                            <div
+                              key={planKey}
+                              className={`overflow-hidden rounded-xl border-2 shadow-lg ${
+                                isComingSoon ? 'border-amber-400/80 bg-black/10' :
+                                isMostPopular ? 'border-emerald-400 shadow-emerald-500/30 bg-gradient-to-br from-emerald-500/25 to-teal-500/20' :
+                                isStarter ? 'border-amber-300 bg-amber-500/25' :
+                                'border-white/30 bg-black/10'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/20">
+                                <span className="text-sm font-black text-white/95">{name}</span>
+                                <div className="flex items-center gap-1.5">
+                                  {isStarter && <span className="text-[10px] font-black bg-amber-500 text-white px-2 py-0.5 rounded-full">ENTRY</span>}
+                                  {isMostPopular && <span className="text-[10px] font-black bg-emerald-500 text-white px-2 py-0.5 rounded-full">★ POPULAR</span>}
+                                  {isComingSoon && <span className="text-[10px] font-black bg-amber-600 text-white px-2 py-0.5 rounded-full">COMING SOON</span>}
+                                </div>
+                              </div>
+                              {isComingSoon ? (
+                                <div className="p-4 text-center">
+                                  <p className="text-sm font-bold text-white/90">Coming soon</p>
+                                  <p className="text-xs text-white/75 mt-1">Pricing will be available soon.</p>
+                                </div>
+                              ) : (
+                                <div className="p-3 grid grid-cols-3 gap-2">
+                                  <div className="bg-black/25 rounded-lg px-2 py-2 border border-white/20 text-center">
+                                    <div className="text-[10px] font-black text-white/90 uppercase tracking-wider mb-1">📱 Mobile</div>
+                                    <div className="text-sm font-bold">{formatPrice(full.mobile.mo, pricing.currencySymbol, priceLocale)}/mo</div>
+                                    <div className="text-[10px] text-white/85">{formatPrice(full.mobile.yr, pricing.currencySymbol, priceLocale)}/yr</div>
+                                    <div className="text-[10px] text-white/75">{formatPrice(full.mobile.threeYr, pricing.currencySymbol, priceLocale)}/3yr</div>
+                                  </div>
+                                  <div className="bg-black/25 rounded-lg px-2 py-2 border border-white/20 text-center">
+                                    <div className="text-[10px] font-black text-white/90 uppercase tracking-wider mb-1">🖥️ Desktop</div>
+                                    <div className="text-sm font-bold">{formatPrice(full.desktop.mo, pricing.currencySymbol, priceLocale)}/mo</div>
+                                    <div className="text-[10px] text-white/85">{formatPrice(full.desktop.yr, pricing.currencySymbol, priceLocale)}/yr</div>
+                                    <div className="text-[10px] text-white/75">{formatPrice(full.desktop.threeYr, pricing.currencySymbol, priceLocale)}/3yr</div>
+                                  </div>
+                                  <div className="bg-black/35 rounded-lg px-2 py-2 border-2 border-white/40 text-center">
+                                    <div className="text-[10px] font-black text-white uppercase tracking-wider mb-1">📱+🖥️ Combo</div>
+                                    <div className="text-sm font-black">{formatPrice(full.combo.mo, pricing.currencySymbol, priceLocale)}/mo</div>
+                                    <div className="text-[10px] text-white/90">{formatPrice(full.combo.yr, pricing.currencySymbol, priceLocale)}/yr</div>
+                                    <div className="text-[10px] text-white/80">{formatPrice(full.combo.threeYr, pricing.currencySymbol, priceLocale)}/3yr</div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -720,7 +891,12 @@ Please review and process this registration request.
               <span className="text-white/50">|</span>
               <a href={CONTACT_WHATSAPP_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-emerald-200 hover:text-white">
                 <MessageCircle className="w-3.5 h-3.5" />
-                WhatsApp: {CONTACT_WHATSAPP_NUMBER}
+                WhatsApp
+              </a>
+              <span className="text-white/50">|</span>
+              <a href={`mailto:${CONTACT_EMAIL}`} className="inline-flex items-center gap-1 text-blue-200 hover:text-white">
+                <Mail className="w-3.5 h-3.5" />
+                Email
               </a>
             </div>
             <div className="max-w-sm mx-auto mb-4 text-left">
@@ -771,52 +947,49 @@ Please review and process this registration request.
                 </button>
               </div>
             </div>
-            <div className="relative inline-block mb-2">
-              {/* Mobile Badges */}
-              <div className="absolute -top-2 -right-2 z-20 animate-bounce">
-                <div className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg">
-                  🔥 HURRY!
+            <div className="w-full max-w-sm mx-auto mb-4">
+              {/* Mobile: Starter Plan hero (same info as desktop) */}
+              <div className="relative">
+                <div className="absolute -top-2 -right-2 z-20 animate-bounce">
+                  <div className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg">🔥 HURRY!</div>
                 </div>
-              </div>
-              <div className="absolute -top-2 -left-2 z-20 animate-pulse">
-                <div className="bg-gradient-to-r from-purple-600 to-pink-600 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg">
-                  🎉 SALE
+                <div className="absolute -top-2 -left-2 z-20 animate-pulse">
+                  <div className="bg-gradient-to-r from-purple-600 to-pink-600 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg">🎉 SALE</div>
                 </div>
-              </div>
-              
-              {/* Mobile Pricing Card */}
-              <div className="bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 text-white px-6 py-2 rounded-xl font-bold text-lg relative overflow-hidden border-2 border-white/30 shadow-2xl animate-shimmer">
-                {/* Shimmer Effect */}
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full animate-shimmer-slide"></div>
-                
-                <div className="relative z-10">
-                  <div className="text-sm font-semibold mb-0.5">Special {pricing.countryName} Pricing</div>
-                  <div className="flex items-center justify-center gap-4 flex-wrap">
-                    <span className="text-xl font-extrabold drop-shadow-lg animate-scale">
-                      {formatPrice(pricing.yearlyPrice, pricing.currencySymbol)}/Year
-                    </span>
-                    <span className="text-white/50 font-bold">|</span>
-                    <span className="text-xl font-extrabold drop-shadow-lg animate-scale">
-                      {formatPrice(getDisplayMonthlyPrice(pricing.yearlyPrice, 'basic'), pricing.currencySymbol)}/mo
-                    </span>
-                  </div>
-                  {pricing.originalPrice && (
-                    <div className="text-xs font-normal mt-0.5 flex items-center justify-center gap-1">
-                      <span className="line-through opacity-75">
-                        {formatPrice(pricing.originalPrice, pricing.currencySymbol)}
-                      </span>
-                      {pricing.discountText && (
-                        <span className="bg-green-600 px-1.5 py-0.5 rounded-full font-bold animate-pulse">
-                          {pricing.discountText}
-                        </span>
-                      )}
+                <div className="bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 text-white rounded-xl border-2 border-white/30 shadow-2xl overflow-hidden">
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full animate-shimmer-slide" />
+                  <div className="relative z-10 px-4 py-4">
+                    <h3 className="text-sm font-black uppercase tracking-wider mb-1">Special {pricing.countryName} Pricing</h3>
+                    <p className="text-sm font-bold bg-slate-900/60 rounded-lg px-3 py-2 border border-white/40 mb-3">
+                      📱 Start with <span className="text-amber-200 font-black">Starter</span> from {formatPrice(planFullPrices.starter.mobile.mo, pricing.currencySymbol, priceLocale)}/mo (mobile)
+                    </p>
+                    <div className="bg-slate-900/95 rounded-lg px-3 py-3 border-2 border-white/40">
+                      <p className="text-[10px] font-black uppercase tracking-wider text-white mb-1">Starter Plan (Combo)</p>
+                      <div className="flex flex-wrap items-center justify-center gap-2 mb-1">
+                        <span className="text-lg font-black text-white">{formatPrice(planDisplayPrices.starter.yearly, pricing.currencySymbol, priceLocale)}/yr</span>
+                        <span className="text-white/70 font-bold">|</span>
+                        <span className="text-lg font-black text-white">{formatPrice(planDisplayPrices.starter.monthly, pricing.currencySymbol, priceLocale)}/mo</span>
+                        <span className="text-white/70 font-bold">|</span>
+                        <span className="text-lg font-black text-white">{formatPrice(planDisplayPrices.starter.threeYear, pricing.currencySymbol, priceLocale)}/3yr</span>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        <span className="line-through text-white/90 text-sm font-bold">{formatPrice(planDisplayPrices.starter.yearly * 2, pricing.currencySymbol, priceLocale)} (for year)</span>
+                        <span className="bg-green-500 text-white px-2 py-1 rounded-full text-xs font-black">50% OFF for year</span>
+                      </div>
+                      <div className="mt-1.5 text-[10px] font-black text-white bg-white/20 px-2 py-1 rounded-full inline-block border border-white/40 w-full text-center">
+                        Start today • Save more • Grow your business
+                      </div>
                     </div>
-                  )}
-                  <div className="text-xs font-semibold mt-1 bg-black/20 px-2 py-0.5 rounded-full inline-block">
-                    ⚡ First Year Discount ⚡
-                  </div>
-                  <div className="text-xs font-semibold mt-1.5 text-white/90 bg-white/10 px-2 py-1 rounded-lg inline-block">
-                    📱 1 device + 1 mobile (Basic) - Mobile, Laptop, Desktop, Tablet
+                    <p className="text-xs font-semibold text-white/95 mt-3 text-center bg-slate-900/50 rounded-lg px-3 py-2 border border-white/30">
+                      For all plans (Mobile / Desktop / Combo) and features,{' '}
+                      <button
+                        type="button"
+                        onClick={() => document.getElementById('all-plans-features')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                        className="text-amber-200 font-black underline focus:outline-none focus:ring-2 focus:ring-amber-400 rounded"
+                      >
+                        scroll down ▼
+                      </button>
+                    </p>
                   </div>
                 </div>
               </div>
@@ -824,7 +997,7 @@ Please review and process this registration request.
           </div>
 
           {/* Login Card - Enhanced */}
-          <div className="bg-white/98 backdrop-blur-2xl rounded-3xl shadow-2xl p-12 w-full border-2 border-white/30 relative overflow-hidden">
+          <div className="bg-white/98 backdrop-blur-2xl rounded-3xl shadow-2xl p-6 sm:p-8 lg:p-12 w-full border-2 border-white/30 relative overflow-hidden">
             {/* Decorative Background Elements */}
             <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-blue-400/20 to-purple-400/20 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
             <div className="absolute bottom-0 left-0 w-48 h-48 bg-gradient-to-tr from-indigo-400/20 to-pink-400/20 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2"></div>
@@ -1030,6 +1203,103 @@ Please review and process this registration request.
                 <p className="text-gray-500 text-sm font-medium">
                   © 2024 HisabKitab. All rights reserved.
                 </p>
+              </div>
+
+              {/* Plan-wise key features + finalised prices – below login options (scroll here on mobile) */}
+              <div id="all-plans-features" className="mt-8 w-full scroll-mt-4 rounded-2xl bg-white/95 dark:bg-slate-900/95 p-5 shadow-lg border border-gray-200/80">
+                <div className="flex items-center gap-2 mb-3">
+                  <Sparkles className="w-5 h-5 text-indigo-500 shrink-0" />
+                  <h3 className="text-lg font-bold text-gray-900">Plan-wise key features & pricing</h3>
+                </div>
+                <p className="text-sm text-gray-800 font-medium mb-1">Combo (all devices). Expand to see features. Prices in {pricing.currency}.</p>
+                <p className="text-xs text-indigo-600 font-semibold mb-4 lg:hidden">Tap each plan to see Mobile / Desktop / Combo prices and features.</p>
+                <div className="space-y-2">
+                  {(['starter', 'basic', 'standard', 'premium', 'premium_plus', 'premium_plus_plus'] as PlanKeyForDisplay[]).map((planKey) => {
+                    const priceInfo = planDisplayPrices[planKey]
+                    const features = PLAN_KEY_FEATURES[planKey]
+                    const isExpanded = expandedPlanFeatures === planKey
+                    const isMostPopular = planKey === 'premium'
+                    const isStarter = planKey === 'starter'
+                    const isComingSoon = planKey === 'premium_plus_plus'
+                    return (
+                      <div
+                        key={planKey}
+                        className={`rounded-xl border-2 overflow-hidden transition-all ${
+                          isComingSoon ? 'border-amber-300 bg-amber-50/50' :
+                          isMostPopular ? 'border-emerald-300 bg-emerald-50/50' : isStarter ? 'border-amber-200 bg-amber-50/50' : 'border-gray-200 bg-gray-50/80'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setExpandedPlanFeatures(isExpanded ? null : planKey)}
+                          className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-white/60 transition-colors"
+                        >
+                          <div className="flex flex-col items-start gap-0.5">
+                            <span className="font-bold text-gray-900">{priceInfo.name}</span>
+                            {isComingSoon ? (
+                              <span className="text-xs font-semibold text-amber-700">Coming soon – pricing not yet available</span>
+                            ) : (
+                              <span className="text-xs font-semibold text-gray-600">
+                                {formatPrice(priceInfo.monthly, pricing.currencySymbol, priceLocale)}/mo • {formatPrice(priceInfo.yearly, pricing.currencySymbol, priceLocale)}/yr • {formatPrice(priceInfo.threeYear, pricing.currencySymbol, priceLocale)}/3yr
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {isStarter && (
+                              <span className="text-xs font-semibold text-amber-700 bg-amber-200/80 px-2 py-0.5 rounded-full">Entry</span>
+                            )}
+                            {isMostPopular && (
+                              <span className="text-xs font-semibold text-emerald-700 bg-emerald-200/80 px-2 py-0.5 rounded-full">Popular</span>
+                            )}
+                            {isComingSoon && (
+                              <span className="text-xs font-semibold text-amber-700 bg-amber-200/80 px-2 py-0.5 rounded-full">Coming soon</span>
+                            )}
+                            {isExpanded ? <ChevronUp className="w-5 h-5 text-gray-500" /> : <ChevronDown className="w-5 h-5 text-gray-500" />}
+                          </div>
+                        </button>
+                        {isExpanded && (
+                          <div className="px-4 pb-4 pt-0 border-t border-gray-200/80 bg-white/50">
+                            {isComingSoon ? (
+                              <div className="py-4 text-center">
+                                <p className="text-sm font-semibold text-gray-700">Coming soon</p>
+                                <p className="text-xs text-gray-600 mt-1">Pricing and plan details will be available soon.</p>
+                              </div>
+                            ) : (
+                              <>
+                                {/* Mobile / Desktop / Combo prices */}
+                                <div className="mb-3 p-3 bg-gray-100 rounded-lg">
+                                  <div className="text-xs font-bold text-gray-700 mb-2">Pricing ({pricing.currency}) – Mobile / Desktop / Combo</div>
+                                  <div className="grid grid-cols-3 gap-2 text-xs">
+                                    <div className="bg-white rounded p-2 border border-gray-200">
+                                      <div className="font-semibold text-gray-800">Mobile</div>
+                                      <div className="text-gray-600">{formatPrice(planFullPrices[planKey].mobile.mo, pricing.currencySymbol, priceLocale)}/mo • {formatPrice(planFullPrices[planKey].mobile.yr, pricing.currencySymbol, priceLocale)}/yr • {formatPrice(planFullPrices[planKey].mobile.threeYr, pricing.currencySymbol, priceLocale)}/3yr</div>
+                                    </div>
+                                    <div className="bg-white rounded p-2 border border-gray-200">
+                                      <div className="font-semibold text-gray-800">Desktop</div>
+                                      <div className="text-gray-600">{formatPrice(planFullPrices[planKey].desktop.mo, pricing.currencySymbol, priceLocale)}/mo • {formatPrice(planFullPrices[planKey].desktop.yr, pricing.currencySymbol, priceLocale)}/yr • {formatPrice(planFullPrices[planKey].desktop.threeYr, pricing.currencySymbol, priceLocale)}/3yr</div>
+                                    </div>
+                                    <div className="bg-white rounded p-2 border border-indigo-200 bg-indigo-50/50">
+                                      <div className="font-semibold text-gray-800">Combo</div>
+                                      <div className="text-gray-600">{formatPrice(planFullPrices[planKey].combo.mo, pricing.currencySymbol, priceLocale)}/mo • {formatPrice(planFullPrices[planKey].combo.yr, pricing.currencySymbol, priceLocale)}/yr • {formatPrice(planFullPrices[planKey].combo.threeYr, pricing.currencySymbol, priceLocale)}/3yr</div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <ul className="space-y-1.5 text-sm text-gray-700">
+                                  {features.map((f, i) => (
+                                    <li key={i} className="flex items-start gap-2">
+                                      <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                                      <span>{f}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             </div>
           </div>
@@ -1482,19 +1752,53 @@ Please review and process this registration request.
                 </div>
               </div>
 
-              {/* Subscription Plan Selection */}
-              <div>
+              {/* Device access: Mobile / Desktop / Combo */}
+              <div className="mb-6">
+                <label className="block text-sm font-bold text-gray-700 mb-3">
+                  Which device will you use? <span className="text-red-500">*</span>
+                </label>
+                <p className="text-xs text-gray-600 mb-3">Rates below will update based on your choice.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {(['mobile', 'desktop', 'combo'] as AccessType[]).map((access) => {
+                    const isSelected = registrationFormData.access_type === access
+                    const labels = { mobile: '📱 Mobile only', desktop: '🖥️ Desktop only', combo: '📱+🖥️ Combo (Mobile + Desktop)' }
+                    return (
+                      <button
+                        key={access}
+                        type="button"
+                        onClick={() => setRegistrationFormData({ ...registrationFormData, access_type: access })}
+                        className={`rounded-xl border-2 px-4 py-3 text-left font-semibold text-sm transition-all ${
+                          isSelected ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-300 ring-offset-2' : 'border-gray-300 bg-white hover:border-gray-400 hover:bg-gray-50'
+                        }`}
+                      >
+                        <span className={isSelected ? 'text-blue-800' : 'text-gray-800'}>{labels[access]}</span>
+                        {isSelected && <CheckCircle className="w-4 h-4 text-blue-600 inline-block ml-2 align-middle" />}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Subscription Plan Selection – prices by selected device (access_type) */}
+              <div key={selectedCountry}>
                 <label className="block text-sm font-bold text-gray-700 mb-3">
                   Select Subscription Plan <span className="text-red-500">*</span>
                 </label>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-                  {(['basic', 'standard', 'premium', 'premium_plus'] as SubscriptionTier[]).map((tier) => {
+                <p className="text-sm font-semibold text-gray-800 mb-1">
+                  Prices in {pricing.currency} ({pricing.countryName})
+                </p>
+                <p className="text-xs text-gray-600 mb-3">
+                  Showing prices for <strong>{registrationFormData.access_type === 'mobile' ? 'Mobile only' : registrationFormData.access_type === 'desktop' ? 'Desktop only' : 'Combo (all devices)'}</strong>.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {(['starter', 'basic', 'standard', 'premium', 'premium_plus'] as SubscriptionTier[]).map((tier) => {
                     const tierInfo = getTierPricing(tier)
-                    const tierPrice = calculateTierPrice(pricing.yearlyPrice, tier)
-                    const tierOriginalPrice = calculateTierPrice(pricing.originalPrice || pricing.yearlyPrice * 2, tier)
+                    const accessType = registrationFormData.access_type || 'combo'
+                    const prices = planFullPrices[tier][accessType]
                     const maxUsers = getMaxUsersForPlan(tier)
                     const isSelected = registrationFormData.subscription_tier === tier
                     const isMostPopular = tier === 'premium'
+                    const isStarter = tier === 'starter'
                     return (
                       <div
                         key={tier}
@@ -1511,34 +1815,39 @@ Please review and process this registration request.
                               : ''
                         }`}
                       >
-                        {/* Most Popular: full-width bar inside card - no overlap */}
+                        {/* Most Popular / Entry badges */}
                         {isMostPopular && (
                           <div className="bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 px-4 py-2 text-center">
                             <span className="text-sm font-black uppercase tracking-widest text-white drop-shadow-sm">★ Most Popular</span>
                           </div>
                         )}
+                        {isStarter && !isMostPopular && (
+                          <div className="bg-amber-500 px-4 py-2 text-center">
+                            <span className="text-sm font-black uppercase tracking-widest text-white drop-shadow-sm">Entry</span>
+                          </div>
+                        )}
                         <div className="p-5">
                           <div className="flex items-center justify-between mb-3">
-                            <h4 className={`font-bold ${isMostPopular ? 'text-emerald-900' : 'text-gray-900'}`}>{tierInfo.name}</h4>
+                            <h4 className={`font-bold ${isMostPopular ? 'text-emerald-900' : isStarter ? 'text-amber-900' : 'text-gray-900'}`}>{tierInfo.name}</h4>
                             {isSelected && <CheckCircle className="w-5 h-5 text-blue-600 flex-shrink-0" />}
                           </div>
                           <div className="mb-3">
-                            <div className="text-xs text-gray-500 line-through mb-1">
-                              {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
-                            </div>
                             <div className={`flex items-baseline gap-2 flex-wrap ${isMostPopular ? 'text-emerald-800' : 'text-gray-900'}`}>
                               <span className="text-2xl font-extrabold">
-                                {formatPrice(tierPrice, pricing.currencySymbol)}
-                                <span className="text-sm font-normal">/Year</span>
+                                {formatPrice(prices.yr, pricing.currencySymbol, priceLocale)}
+                                <span className="text-sm font-normal">/yr</span>
                               </span>
                               <span className="text-gray-400 font-bold">|</span>
                               <span className="text-2xl font-extrabold">
-                                {formatPrice(getDisplayMonthlyPrice(tierPrice, tier), pricing.currencySymbol)}
+                                {formatPrice(prices.mo, pricing.currencySymbol, priceLocale)}
                                 <span className="text-sm font-normal">/mo</span>
                               </span>
                             </div>
+                            <div className="text-xs text-gray-600 mt-1">
+                              {formatPrice(prices.threeYr, pricing.currencySymbol, priceLocale)}/3yr
+                            </div>
                             <div className="inline-block mt-1 bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                              50% OFF
+                              50% OFF (1st year)
                             </div>
                           </div>
                           <div className={`text-xs mb-2 ${isMostPopular ? 'text-emerald-800/90' : 'text-gray-600'}`}>
@@ -1641,30 +1950,38 @@ Please review and process this registration request.
                 </div>
               </div>
 
-              {/* Plan Selection */}
+              {/* Plan Selection – use same country-based prices as login/registration */}
               <div>
-                <h4 className="text-lg font-bold text-gray-900 mb-4">Select a Plan to Renew</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                  {(['basic', 'standard', 'premium', 'premium_plus', 'premium_plus_plus'] as SubscriptionTier[]).map((tier) => {
+                <h4 className="text-lg font-bold text-gray-900 mb-2">Select a Plan to Renew</h4>
+                <p className="text-sm font-semibold text-gray-700 mb-4">Prices in {pricing.currency} ({pricing.countryName}) – Combo</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {(['starter', 'basic', 'standard', 'premium', 'premium_plus', 'premium_plus_plus'] as SubscriptionTier[]).map((tier) => {
                     const tierInfo = getTierPricing(tier)
-                    const tierPrice = calculateTierPrice(pricing.yearlyPrice, tier)
-                    const tierOriginalPrice = calculateTierPrice(pricing.originalPrice || pricing.yearlyPrice * 2, tier)
+                    const comboPrices = planDisplayPrices[tier]
+                    const tierPrice = comboPrices.yearly
+                    const tierOriginalPrice = comboPrices.yearly * 2
                     const maxUsers = getMaxUsersForPlan(tier)
                     const isCurrentTier = subscriptionExpired.currentTier === tier
                     const isComingSoon = tier === 'premium_plus_plus'
+                    const isStarter = tier === 'starter'
                     return (
                       <div
                         key={tier}
                         className={`border-2 rounded-xl p-5 transition-all ${
                           isComingSoon
                             ? 'border-amber-300 bg-amber-50/50 cursor-default'
-                            : isCurrentTier
-                              ? 'border-blue-500 bg-blue-50 shadow-lg ring-2 ring-blue-200 cursor-pointer'
-                              : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50 cursor-pointer'
+                            : isStarter
+                              ? 'border-amber-300 bg-amber-50/50'
+                              : isCurrentTier
+                                ? 'border-blue-500 bg-blue-50 shadow-lg ring-2 ring-blue-200 cursor-pointer'
+                                : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50 cursor-pointer'
                         }`}
                       >
                         <div className="flex items-center justify-between mb-3">
-                          <h5 className="font-bold text-gray-900 text-lg">{tierInfo.name}</h5>
+                          <h5 className={`font-bold text-lg ${isStarter ? 'text-amber-900' : 'text-gray-900'}`}>{tierInfo.name}</h5>
+                          {isStarter && (
+                            <span className="bg-amber-500 text-white text-xs font-bold px-2 py-1 rounded-full">Entry</span>
+                          )}
                           {isComingSoon && (
                             <span className="bg-amber-500 text-white text-xs font-bold px-2 py-1 rounded-full">
                               Coming soon
@@ -1680,16 +1997,16 @@ Please review and process this registration request.
                           <>
                             <div className="mb-2">
                               <div className="text-sm text-gray-500 line-through mb-1">
-                                {formatPrice(tierOriginalPrice, pricing.currencySymbol)}
+                                {formatPrice(tierOriginalPrice, pricing.currencySymbol, priceLocale)}
                               </div>
                               <div className="flex items-baseline gap-3 flex-wrap">
                                 <span className="text-3xl font-extrabold text-gray-900">
-                                  {formatPrice(tierPrice, pricing.currencySymbol)}
+                                  {formatPrice(tierPrice, pricing.currencySymbol, priceLocale)}
                                   <span className="text-base font-normal">/Year</span>
                                 </span>
                                 <span className="text-gray-400 font-bold">|</span>
                                 <span className="text-3xl font-extrabold text-gray-900">
-                                  {formatPrice(getDisplayMonthlyPrice(tierPrice, tier), pricing.currencySymbol)}
+                                  {formatPrice(getDisplayMonthlyPrice(tierPrice, tier), pricing.currencySymbol, priceLocale)}
                                   <span className="text-base font-normal">/mo</span>
                                 </span>
                               </div>
@@ -1715,7 +2032,7 @@ Subscription Renewal Request
 
 Current Plan: ${subscriptionExpired.currentTier}
 Requested Plan: ${tierInfo.name}
-Price: ${formatPrice(tierPrice, pricing.currencySymbol)}/Year (${formatPrice(getDisplayMonthlyPrice(tierPrice, tier), pricing.currencySymbol)}/mo)
+Price: ${formatPrice(tierPrice, pricing.currencySymbol, priceLocale)}/Year (${formatPrice(getDisplayMonthlyPrice(tierPrice, tier), pricing.currencySymbol, priceLocale)}/mo)
 
 Please process this renewal request to restore access to the system.
 

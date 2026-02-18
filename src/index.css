@@ -22,6 +22,15 @@
   }
 }
 
+/* Login page: highlight on Starter price – bright and clearly visible */
+@keyframes price-highlight {
+  0%, 100% { filter: drop-shadow(0 0 4px rgba(253, 224, 71, 0.8)); }
+  50% { filter: drop-shadow(0 0 12px rgba(253, 224, 71, 1)); }
+}
+.animate-price-highlight {
+  animation: price-highlight 2.5s ease-in-out infinite;
+}
+
 /* Smooth animations */
 * {
   transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;

@@ -308,6 +308,7 @@ const SystemSettings = () => {
         valid_to: '',
         is_active: true,
         custom_unique_code: '',
+        access_type: 'combo',
       })
       
       // Reload companies to refresh the list
@@ -458,6 +459,7 @@ const SystemSettings = () => {
               companyPhone: userCompany.phone,
               companyEmail: userCompany.email,
               subscriptionTier: userCompany.subscription_tier,
+              accessType: userCompany.access_type,
               loginUrl: window.location.origin, // Current app URL
             }
             
@@ -676,6 +678,7 @@ const SystemSettings = () => {
       gstin: request.gstin || '',
       website: request.website || '',
       subscription_tier: subscriptionTier,
+      access_type: request.access_type || 'combo',
       max_users: maxUsers === 'unlimited' ? undefined : maxUsers,
       subscription_status: 'active',
       is_active: true,
@@ -1842,6 +1845,7 @@ const SystemSettings = () => {
                                       companyPhone: userCompany?.phone,
                                       companyEmail: userCompany?.email,
                                       subscriptionTier: userCompany?.subscription_tier,
+                                      accessType: userCompany?.access_type,
                                       loginUrl: window.location.origin,
                                     }
                                     const mailtoLink = generateUserCreatedMailtoLink(emailData)
@@ -1958,7 +1962,10 @@ const SystemSettings = () => {
                                   </div>
                                 ) : req.subscription_tier ? (
                                   <div className="text-xs text-gray-600 mt-1">
-                                    Plan: {req.subscription_tier === 'basic' ? 'Basic' : req.subscription_tier === 'standard' ? 'Standard' : req.subscription_tier === 'premium_plus' ? 'Premium Plus' : req.subscription_tier === 'premium_plus_plus' ? 'Premium Plus Plus' : 'Premium'}
+                                    Plan: {req.subscription_tier === 'starter' ? 'Starter' : req.subscription_tier === 'basic' ? 'Basic' : req.subscription_tier === 'standard' ? 'Standard' : req.subscription_tier === 'premium_plus' ? 'Premium Plus' : req.subscription_tier === 'premium_plus_plus' ? 'Premium Plus Plus' : 'Premium'}
+                                    {req.access_type && (
+                                      <span className="text-gray-500"> • {req.access_type === 'mobile' ? 'Mobile' : req.access_type === 'desktop' ? 'Desktop' : 'Combo'}</span>
+                                    )}
                                   </div>
                                 ) : null}
                               </td>

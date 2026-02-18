@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { expenseService } from '../services/expenseService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
+import { getLocalLocale } from '../utils/pricing'
 import { Expense, ExpenseType } from '../types/expense'
 import { Plus, Search, Edit, Trash2, Home, DollarSign, Calendar, User, BarChart3 } from 'lucide-react'
 
@@ -154,7 +155,7 @@ const Expenses = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-red-100 text-sm mb-1">Total Expenses</p>
-                <p className="text-3xl font-bold">₹{totalExpenses.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
+                <p className="text-3xl font-bold">₹{totalExpenses.toLocaleString(getLocalLocale(), { maximumFractionDigits: 2 })}</p>
                 <p className="text-red-100 text-sm mt-1">{filteredExpenses.length} expense{filteredExpenses.length !== 1 ? 's' : ''}</p>
               </div>
               <DollarSign className="w-12 h-12 opacity-80" />
@@ -217,7 +218,7 @@ const Expenses = () => {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center gap-2 text-sm text-gray-900">
                             <Calendar className="w-4 h-4 text-gray-400" />
-                            {new Date(expense.expense_date).toLocaleDateString('en-IN', {
+                            {new Date(expense.expense_date).toLocaleDateString(getLocalLocale(), {
                               day: '2-digit',
                               month: 'short',
                               year: 'numeric'
@@ -252,9 +253,9 @@ const Expenses = () => {
                                   const manual = expense.manual_extra || {}
                                   const manualSum = (manual.cash || 0) + (manual.upi || 0) + (manual.card || 0) + (manual.other || 0)
                                   const grandTotal = expense.amount + manualSum
-                                  return <>₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</>
+                                  return <>₹{grandTotal.toLocaleString(getLocalLocale(), { maximumFractionDigits: 2 })}</>
                                 })()
-                              : <>₹{expense.amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</>
+                              : <>₹{expense.amount.toLocaleString(getLocalLocale(), { maximumFractionDigits: 2 })}</>
                             }
                           </span>
                         </td>
@@ -264,15 +265,15 @@ const Expenses = () => {
                               const manual = expense.manual_extra || {}
                               const parts: string[] = []
                               if (expense.expense_type === 'closing') {
-                                if (expense.amount > 0) parts.push(`Cash ₹${expense.amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)
-                                if ((manual.cash || 0) > 0) parts.push(`Cash(sales) ₹${(manual.cash || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)
+                                if (expense.amount > 0) parts.push(`Cash ₹${expense.amount.toLocaleString(getLocalLocale(), { maximumFractionDigits: 0 })}`)
+                                if ((manual.cash || 0) > 0) parts.push(`Cash(sales) ₹${(manual.cash || 0).toLocaleString(getLocalLocale(), { maximumFractionDigits: 0 })}`)
                               } else {
                                 const cashPart = expense.amount - ((manual.upi || 0) + (manual.card || 0) + (manual.other || 0))
-                                if (cashPart > 0) parts.push(`Cash ₹${cashPart.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)
+                                if (cashPart > 0) parts.push(`Cash ₹${cashPart.toLocaleString(getLocalLocale(), { maximumFractionDigits: 0 })}`)
                               }
-                              if ((manual.upi || 0) > 0) parts.push(`UPI ₹${(manual.upi || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)
-                              if ((manual.card || 0) > 0) parts.push(`Card ₹${(manual.card || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)
-                              if ((manual.other || 0) > 0) parts.push(`Other ₹${(manual.other || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`)
+                              if ((manual.upi || 0) > 0) parts.push(`UPI ₹${(manual.upi || 0).toLocaleString(getLocalLocale(), { maximumFractionDigits: 0 })}`)
+                              if ((manual.card || 0) > 0) parts.push(`Card ₹${(manual.card || 0).toLocaleString(getLocalLocale(), { maximumFractionDigits: 0 })}`)
+                              if ((manual.other || 0) > 0) parts.push(`Other ₹${(manual.other || 0).toLocaleString(getLocalLocale(), { maximumFractionDigits: 0 })}`)
                               return (
                                 <span className="text-xs text-gray-600">
                                   {parts.length > 0 ? parts.join(' · ') : <span className="capitalize">{expense.payment_method}</span>}

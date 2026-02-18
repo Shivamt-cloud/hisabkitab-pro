@@ -1,4 +1,4 @@
-import { SubscriptionTier } from './device'
+import { SubscriptionTier, AccessType } from './device'
 
 export interface Company {
   id: number
@@ -19,6 +19,8 @@ export interface Company {
   valid_to?: string
   is_active: boolean
   subscription_tier?: SubscriptionTier
+  /** Which device access: mobile only, desktop only, or combo (both) */
+  access_type?: AccessType
   is_free_trial?: boolean
   max_users?: number
   subscription_start_date?: string

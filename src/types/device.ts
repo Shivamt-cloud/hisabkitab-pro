@@ -1,5 +1,8 @@
 // Device-related types
 
+/** How the user will access the app: mobile only, desktop only, or both (combo) */
+export type AccessType = 'mobile' | 'desktop' | 'combo'
+
 export interface Device {
   id: number
   user_id: string
@@ -13,7 +16,7 @@ export interface Device {
   is_active: boolean
 }
 
-export type SubscriptionTier = 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus'
+export type SubscriptionTier = 'starter' | 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus'
 
 export interface SubscriptionInfo {
   tier: SubscriptionTier

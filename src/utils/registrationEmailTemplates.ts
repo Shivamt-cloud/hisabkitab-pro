@@ -45,9 +45,17 @@ function calculatePriceWithGST(basePrice: number, gstRate: number): { gstAmount:
  * Generate global platform section for email templates
  */
 function getGlobalPlatformSection(request: RegistrationRequest): string {
-  const tier = request.subscription_tier || 'basic'
+  const tier = request.subscription_tier || 'starter'
   
-  const deviceAccessSection = tier === 'basic' ? `
+  const deviceAccessSection = tier === 'starter' ? `
+**Device Access Under Your Plan:**
+✅ **1 Device** (Entry plan):
+   • One device (Desktop, Laptop, or Tablet) for full business operations
+   • Access all features: Sales, Purchases, Inventory, Reports (including Purchase Report)
+   • Perfect to get started; upgrade anytime for more devices and users
+
+**Total:** 1 device for your business needs!
+` : tier === 'basic' ? `
 **Device Access Under Your Plan:**
 ✅ **1 Primary Device** for full business operations:
    • Desktop/Laptop for main business work
@@ -103,7 +111,7 @@ function getGlobalPlatformSection(request: RegistrationRequest): string {
 **Total:** Unlimited primary devices + 1 personal mobile = **Unlimited access** for your entire business!
 `
 
-  const planName = tier === 'basic' ? '📱 Basic Plan - 1 device + 1 mobile' : tier === 'standard' ? '📱📱📱 Standard Plan - 3 devices + 1 mobile' : tier === 'premium_plus' ? '🚗 Premium Plus Plan - Unlimited + Services (Bike, Car, E-bike)' : '♾️ Premium Plan - Unlimited'
+  const planName = tier === 'starter' ? '📱 Starter Plan - 1 device' : tier === 'basic' ? '📱 Basic Plan - 1 device + 1 mobile' : tier === 'standard' ? '📱📱📱 Standard Plan - 3 devices + 1 mobile' : tier === 'premium_plus' ? '🚗 Premium Plus Plan - Unlimited + Services (Bike, Car, E-bike)' : tier === 'premium_plus_plus' ? '🚗 Premium Plus Plus Plan - Unlimited + All Services' : '♾️ Premium Plan - Unlimited'
 
   return `
 **🌍 GLOBAL PLATFORM - ACCESS FROM ANYWHERE:**
@@ -423,7 +431,8 @@ ${getGlobalPlatformSection(request)}
 Business Name: ${request.business_name}
 Login Email: ${request.email}
 Account Status: ✅ Active
-Subscription Plan: ${request.subscription_tier === 'basic' ? 'Basic Plan' : request.subscription_tier === 'standard' ? 'Standard Plan' : request.subscription_tier === 'premium_plus' ? 'Premium Plus Plan' : request.subscription_tier === 'premium_plus_plus' ? 'Premium Plus Plus Plan' : 'Premium Plan'}
+Subscription Plan: ${request.subscription_tier === 'starter' ? 'Starter Plan' : request.subscription_tier === 'basic' ? 'Basic Plan' : request.subscription_tier === 'standard' ? 'Standard Plan' : request.subscription_tier === 'premium_plus' ? 'Premium Plus Plan' : request.subscription_tier === 'premium_plus_plus' ? 'Premium Plus Plus Plan' : 'Premium Plan'}
+Access: ${request.access_type === 'mobile' ? 'Mobile only' : request.access_type === 'desktop' ? 'Desktop only' : 'Combo (Mobile + Desktop)'}
 
 **IMMEDIATE NEXT STEPS:**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1018,8 +1027,9 @@ HisabKitab-Pro Team`
   free_trial: (request: RegistrationRequest): EmailTemplate => {
     // Calculate plan pricing based on selected tier
     const getPlanDetails = () => {
-      const tier = request.subscription_tier || 'basic'
+      const tier = request.subscription_tier || 'starter'
       const tierNames = {
+        starter: 'Starter Plan - 1 device',
         basic: 'Basic Plan - 1 device + 1 mobile',
         standard: 'Standard Plan - 3 devices + 1 mobile',
         premium: 'Premium Plan - Unlimited',
@@ -1030,13 +1040,14 @@ HisabKitab-Pro Team`
       // Estimate pricing (you may want to adjust based on country)
       const basePrice = 6000 // INR base price
       const tierMultipliers = {
+        starter: 0.6,
         basic: 1.0,
         standard: 1.33,
         premium: 2.0,
         premium_plus: 2.5,
         premium_plus_plus: 3.0
       }
-      const estimatedPrice = Math.round(basePrice * tierMultipliers[tier as keyof typeof tierMultipliers])
+      const estimatedPrice = Math.round(basePrice * (tierMultipliers[tier as keyof typeof tierMultipliers] ?? 1))
       
       return {
         name: tierNames[tier as keyof typeof tierNames],
@@ -1318,6 +1329,7 @@ export interface UserCreatedEmailData {
   companyPhone?: string
   companyEmail?: string
   subscriptionTier?: string
+  accessType?: 'mobile' | 'desktop' | 'combo'
   loginUrl?: string
 }
 
@@ -1356,6 +1368,7 @@ ${(() => {
     country: 'India',
     phone: data.companyPhone || '',
     subscription_tier: (data.subscriptionTier || 'basic') as any,
+    access_type: data.accessType || 'combo',
     status: 'activation_completed',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -1399,7 +1412,8 @@ ${data.companyCode ? `• Company Code: ${data.companyCode}` : ''}
 ${data.companyAddress ? `• Address: ${data.companyAddress}` : ''}
 ${data.companyPhone ? `• Phone: ${data.companyPhone}` : ''}
 ${data.companyEmail ? `• Company Email: ${data.companyEmail}` : ''}
-${data.subscriptionTier ? `• Subscription Plan: ${data.subscriptionTier === 'basic' ? 'Basic Plan' : data.subscriptionTier === 'standard' ? 'Standard Plan' : data.subscriptionTier === 'premium_plus' ? 'Premium Plus Plan' : data.subscriptionTier === 'premium_plus_plus' ? 'Premium Plus Plus Plan' : 'Premium Plan'}` : ''}
+${data.subscriptionTier ? `• Subscription Plan: ${data.subscriptionTier === 'starter' ? 'Starter Plan' : data.subscriptionTier === 'basic' ? 'Basic Plan' : data.subscriptionTier === 'standard' ? 'Standard Plan' : data.subscriptionTier === 'premium_plus' ? 'Premium Plus Plan' : data.subscriptionTier === 'premium_plus_plus' ? 'Premium Plus Plus Plan' : 'Premium Plan'}` : ''}
+${data.accessType ? `• Device access: ${data.accessType === 'mobile' ? 'Mobile only' : data.accessType === 'desktop' ? 'Desktop only' : 'Combo (Mobile + Desktop)'}` : ''}
 
 **📋 YOUR ROLE PERMISSIONS:**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

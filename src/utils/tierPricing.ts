@@ -3,7 +3,7 @@
  * Multiplies base price by tier multiplier
  */
 
-export type SubscriptionTier = 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus'
+export type SubscriptionTier = 'starter' | 'basic' | 'standard' | 'premium' | 'premium_plus' | 'premium_plus_plus'
 
 export interface TierPricing {
   tier: SubscriptionTier
@@ -15,6 +15,13 @@ export interface TierPricing {
 }
 
 export const TIER_PRICING: Record<SubscriptionTier, TierPricing> = {
+  starter: {
+    tier: 'starter',
+    name: 'Starter Plan',
+    deviceLimit: 1,
+    deviceDisplayLabel: '1 device',
+    multiplier: 0.6, // Entry: Combo yearly 3588 vs Basic 5988
+  },
   basic: {
     tier: 'basic',
     name: 'Basic Plan',
@@ -74,6 +81,7 @@ export function getTierPricing(tier: SubscriptionTier | null | undefined): TierP
  */
 export function getDisplayMonthlyPrice(tierPrice: number, tier: SubscriptionTier): number {
   const calculated = Math.round(tierPrice / 12)
+  if (tier === 'starter' && calculated === 300) return 299
   if (tier === 'basic' && calculated === 500) return 499
   return calculated
 }

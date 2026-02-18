@@ -15,6 +15,7 @@ import { paymentService } from '../services/paymentService'
 import { expenseService } from '../services/expenseService'
 import { serviceRecordService } from '../services/serviceRecordService'
 import { getTierPricing } from '../utils/tierPricing'
+import type { SubscriptionTier } from '../types/device'
 import { CONTACT_EMAIL, CONTACT_WEBSITE_URL, CONTACT_WEBSITE_DISPLAY, CONTACT_WHATSAPP_NUMBER, CONTACT_WHATSAPP_URL } from '../constants'
 import type { Expense } from '../types/expense'
 import { 
@@ -1177,7 +1178,7 @@ const Dashboard = () => {
                       <div className="flex items-center gap-2">
                         <Calendar className="w-4 h-4" />
                         <span className="text-sm font-semibold">
-                          {subscriptionInfo.tier ? (subscriptionInfo.tier === 'premium_plus' ? 'Premium Plus Plan' : subscriptionInfo.tier === 'premium' ? 'Premium Plan' : subscriptionInfo.tier === 'standard' ? 'Standard Plan' : 'Basic Plan') : 'Subscription'}
+                          {subscriptionInfo.tier ? (subscriptionInfo.tier === 'premium_plus' ? 'Premium Plus Plan' : subscriptionInfo.tier === 'premium_plus_plus' ? 'Premium Plus Plus Plan' : subscriptionInfo.tier === 'premium' ? 'Premium Plan' : subscriptionInfo.tier === 'standard' ? 'Standard Plan' : subscriptionInfo.tier === 'starter' ? 'Starter Plan' : 'Basic Plan') : 'Subscription'}
                         </span>
                       </div>
                       {showSubscriptionDetails ? (
@@ -1218,8 +1219,8 @@ const Dashboard = () => {
                             <p className="text-gray-900 font-semibold">
                               {subscriptionInfo.tier
                                 ? (() => {
-                                    const tierInfo = getTierPricing(subscriptionInfo.tier as 'basic' | 'standard' | 'premium' | 'premium_plus')
-                                    const icon = subscriptionInfo.tier === 'premium_plus' ? '🚗' : subscriptionInfo.tier === 'premium' ? '♾️' : subscriptionInfo.tier === 'standard' ? '📱📱📱' : '📱'
+                                    const tierInfo = getTierPricing(subscriptionInfo.tier as SubscriptionTier)
+                                    const icon = subscriptionInfo.tier === 'premium_plus' || subscriptionInfo.tier === 'premium_plus_plus' ? '🚗' : subscriptionInfo.tier === 'premium' ? '♾️' : subscriptionInfo.tier === 'standard' ? '📱📱📱' : subscriptionInfo.tier === 'starter' ? '📱' : '📱'
                                     return `${icon} ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}`
                                   })()
                                 : 'N/A'}
@@ -2366,17 +2367,19 @@ const Dashboard = () => {
                 {hasPermission('reports:read') && (
                   <>
                     <button 
-                      onClick={() => navigate('/analytics')}
-                      className="group w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                      onClick={() => hasPlanFeature('dashboard_analytics') ? navigate('/analytics') : showPlanUpgrade('dashboard_analytics')}
+                      className="group relative w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                     >
+                      {!hasPlanFeature('dashboard_analytics') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                       <TrendingUp className="w-5 h-5 group-hover:scale-110 transition-transform" />
                       <span>Analytics Dashboard</span>
                       <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                     </button>
                     <button 
-                      onClick={() => navigate('/audit-logs')}
-                      className="group w-full bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                      onClick={() => hasPlanFeature('audit_logs') ? navigate('/audit-logs') : showPlanUpgrade('audit_logs')}
+                      className="group relative w-full bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                     >
+                      {!hasPlanFeature('audit_logs') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                       <FileText className="w-5 h-5 group-hover:scale-110 transition-transform" />
                       <span>Audit Logs</span>
                       <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
@@ -2384,47 +2387,48 @@ const Dashboard = () => {
                   </>
                 )}
                 <button 
-                  onClick={() => (hasPermission('barcode_label_settings:read') || hasPermission('barcode_label_settings:update')) ? navigate('/settings/barcode-label') : showPlanUpgrade('settings_barcode_label')}
+                  onClick={() => ((hasPermission('barcode_label_settings:read') || hasPermission('barcode_label_settings:update')) && hasPlanFeature('settings_barcode_label')) ? navigate('/settings/barcode-label') : showPlanUpgrade('settings_barcode_label')}
                   className="group relative w-full bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
-                  {!(hasPermission('barcode_label_settings:read') || hasPermission('barcode_label_settings:update')) && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!((hasPermission('barcode_label_settings:read') || hasPermission('barcode_label_settings:update')) && hasPlanFeature('settings_barcode_label')) && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <Barcode className="w-5 h-5 group-hover:scale-110 transition-transform" />
                   <span>Barcode Label Settings</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                 </button>
                 <button 
-                  onClick={() => (hasPermission('receipt_printer_settings:read') || hasPermission('receipt_printer_settings:update')) ? navigate('/settings/receipt-printer') : showPlanUpgrade('settings_receipt_printer')}
+                  onClick={() => ((hasPermission('receipt_printer_settings:read') || hasPermission('receipt_printer_settings:update')) && hasPlanFeature('settings_receipt_printer')) ? navigate('/settings/receipt-printer') : showPlanUpgrade('settings_receipt_printer')}
                   className="group relative w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
-                  {!(hasPermission('receipt_printer_settings:read') || hasPermission('receipt_printer_settings:update')) && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!((hasPermission('receipt_printer_settings:read') || hasPermission('receipt_printer_settings:update')) && hasPlanFeature('settings_receipt_printer')) && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />
                   <span>Receipt Printer Settings</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                 </button>
                 {hasPermission('products:read') && (
                   <button 
-                    onClick={() => navigate('/settings/price-lists')}
-                    className="group w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-emerald-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                    onClick={() => hasPlanFeature('settings_price_lists') ? navigate('/settings/price-lists') : showPlanUpgrade('settings_price_lists')}
+                    className="group relative w-full bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-emerald-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                   >
+                    {!hasPlanFeature('settings_price_lists') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                     <Tag className="w-5 h-5 group-hover:scale-110 transition-transform" />
                     <span>Price Lists</span>
                     <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                   </button>
                 )}
                 <button 
-                  onClick={() => hasPermission('settings:update') ? navigate('/settings/automated-exports') : showPlanUpgrade('settings_automated_exports')}
+                  onClick={() => (hasPermission('settings:update') && hasPlanFeature('settings_automated_exports')) ? navigate('/settings/automated-exports') : showPlanUpgrade('settings_automated_exports')}
                   className="group relative w-full bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-violet-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
                 >
-                  {!hasPermission('settings:update') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!(hasPermission('settings:update') && hasPlanFeature('settings_automated_exports')) && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <Calendar className="w-5 h-5 group-hover:scale-110 transition-transform" />
                   <span>Automated Exports</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                 </button>
                 <button
-                  onClick={() => hasPermission('business_overview:read') ? navigate('/business-overview') : showPlanUpgrade('report_business_overview')}
+                  onClick={() => (hasPermission('business_overview:read') && hasPlanFeature('report_business_overview')) ? navigate('/business-overview') : showPlanUpgrade('report_business_overview')}
                   className="group relative w-full overflow-hidden bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white font-bold py-5 px-6 rounded-2xl hover:shadow-2xl hover:shadow-amber-500/30 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-3 border-2 border-amber-400/30"
                 >
-                  {!hasPermission('business_overview:read') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  {!(hasPermission('business_overview:read') && hasPlanFeature('report_business_overview')) && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_50%,_rgba(255,255,255,0.15)_0%,_transparent_50%)]" />
                   <BarChart3 className="w-6 h-6 relative z-10 group-hover:rotate-6 transition-transform" />
                   <span className="relative z-10">Business Overview</span>
@@ -2621,7 +2625,7 @@ const Dashboard = () => {
             // Reload subscription info by reloading company name
             loadCompanyName()
           }}
-          currentTier={(subscriptionInfo.tier as any) || 'basic'}
+          currentTier={(subscriptionInfo.tier as SubscriptionTier) || 'starter'}
           currentEndDate={subscriptionInfo.endDate}
         />
       )}

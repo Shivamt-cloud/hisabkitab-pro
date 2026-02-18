@@ -17,6 +17,7 @@ import {
   Filter,
   Home
 } from 'lucide-react'
+import { getLocalLocale } from '../utils/pricing'
 import { Sale } from '../types/sale'
 import { Purchase } from '../types/purchase'
 
@@ -45,49 +46,54 @@ const DailyActivity = () => {
   const [customers, setCustomers] = useState<Map<number, string>>(new Map())
   const [suppliers, setSuppliers] = useState<Map<number, string>>(new Map())
 
-  // Get date range based on filter
+  // Local date as YYYY-MM-DD (avoids UTC shift from toISOString)
+  const toLocalDateString = (d: Date) => {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+
+  // Get date range based on filter (uses local timezone)
   const getDateRange = (filter: DateFilter): { startDate: string; endDate: string } => {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-    
+    const todayStr = toLocalDateString(today)
+
     switch (filter) {
       case 'today':
-        const todayStr = today.toISOString().split('T')[0]
         return { startDate: todayStr, endDate: todayStr }
-      
+
       case 'yesterday':
         const yesterday = new Date(today)
         yesterday.setDate(yesterday.getDate() - 1)
-        const yesterdayStr = yesterday.toISOString().split('T')[0]
+        const yesterdayStr = toLocalDateString(yesterday)
         return { startDate: yesterdayStr, endDate: yesterdayStr }
-      
+
       case 'last7days':
         const last7Days = new Date(today)
         last7Days.setDate(last7Days.getDate() - 6)
-        return { 
-          startDate: last7Days.toISOString().split('T')[0], 
-          endDate: today.toISOString().split('T')[0] 
+        return {
+          startDate: toLocalDateString(last7Days),
+          endDate: todayStr,
         }
-      
+
       case 'last30days':
         const last30Days = new Date(today)
         last30Days.setDate(last30Days.getDate() - 29)
-        return { 
-          startDate: last30Days.toISOString().split('T')[0], 
-          endDate: today.toISOString().split('T')[0] 
+        return {
+          startDate: toLocalDateString(last30Days),
+          endDate: todayStr,
         }
-      
+
       case 'custom':
-        return { 
-          startDate: customStartDate || today.toISOString().split('T')[0], 
-          endDate: customEndDate || today.toISOString().split('T')[0] 
+        return {
+          startDate: customStartDate || todayStr,
+          endDate: customEndDate || todayStr,
         }
-      
+
       default:
-        return { 
-          startDate: today.toISOString().split('T')[0], 
-          endDate: today.toISOString().split('T')[0] 
-        }
+        return { startDate: todayStr, endDate: todayStr }
     }
   }
 
@@ -206,7 +212,7 @@ const DailyActivity = () => {
   }, [sales, purchases])
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
+    return new Intl.NumberFormat(getLocalLocale(), {
       style: 'currency',
       currency: 'INR',
       maximumFractionDigits: 0,
@@ -215,7 +221,7 @@ const DailyActivity = () => {
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString)
-    return date.toLocaleDateString('en-IN', {
+    return date.toLocaleDateString(getLocalLocale(), {
       day: 'numeric',
       month: 'short',
       year: 'numeric',

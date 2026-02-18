@@ -10,6 +10,10 @@ export interface PlanUserLimits {
 }
 
 export const PLAN_USER_LIMITS: Record<SubscriptionTier, PlanUserLimits> = {
+  starter: {
+    tier: 'starter',
+    maxUsers: 1,
+  },
   basic: {
     tier: 'basic',
     maxUsers: 3,
