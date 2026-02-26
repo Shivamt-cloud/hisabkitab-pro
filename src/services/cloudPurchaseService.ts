@@ -84,20 +84,38 @@ export const cloudPurchaseService = {
     }
 
     try {
-      let query = supabase!.from('purchases').select('*')
-
-      if (companyId !== undefined && companyId !== null) {
-        query = query.eq('company_id', companyId)
+      // Supabase defaults to 1000 rows max; fetch all pages so old + new records and filters (supplier/product) show everything
+      const PAGE_SIZE = 1000
+      let allData: Purchase[] = []
+      let offset = 0
+      let hasMore = true
+      let fetchError: { message?: string } | null = null
+      while (hasMore) {
+        let query = supabase!.from('purchases').select('*')
+        if (companyId !== undefined && companyId !== null) {
+          query = query.eq('company_id', companyId)
+        }
+        if (type) {
+          query = query.eq('type', type)
+        }
+        const { data: pageData, error } = await query
+          .order('purchase_date', { ascending: false })
+          .range(offset, offset + PAGE_SIZE - 1)
+        if (error) {
+          console.error('Error fetching purchases from cloud:', error)
+          fetchError = error
+          hasMore = false
+          break
+        }
+        const rows = (pageData || []) as Purchase[]
+        allData = allData.concat(rows)
+        hasMore = rows.length === PAGE_SIZE
+        offset += PAGE_SIZE
       }
+      const data = allData
 
-      if (type) {
-        query = query.eq('type', type)
-      }
-
-      const { data, error } = await query.order('purchase_date', { ascending: false })
-
-      if (error) {
-        console.error('Error fetching purchases from cloud:', error)
+      if (fetchError) {
+        console.error('Error fetching purchases from cloud:', fetchError)
         // Fallback to local storage
         let purchases = await getAll<Purchase>(STORES.PURCHASES)
         if (companyId !== undefined && companyId !== null) {
@@ -108,7 +126,7 @@ export const cloudPurchaseService = {
         if (type) {
           purchases = purchases.filter(p => p.type === type)
         }
-        return purchases
+        return purchases.map(p => ({ ...p, items: normalizePurchaseItems(p.items, p.id) }))
       }
 
       const normalized = (data || []).map((purchase: Purchase) => ({
@@ -128,24 +146,55 @@ export const cloudPurchaseService = {
         return normalized
       }
 
-      // Merge with local sold_quantity so we never overwrite a valid local inventory update (e.g. after a sale) with stale cloud data
+      // Merge with local sold_quantity so we never overwrite a valid local inventory update (e.g. after a sale) with stale cloud data.
+      // Also prefer local supplier_name/supplier_id when cloud has none (e.g. after edit that didn't sync or DB returned null).
+      const cloudIds = new Set((data || []).map((p: Purchase) => p.id))
       const merged = normalized.map((purchase: Purchase) => {
         const local = localPurchases.find((p: Purchase) => p.id === purchase.id)
-        if (!local?.items?.length) return purchase
-        const mergedItems = purchase.items.map((pi: PurchaseItem) => {
-          const localItem = local.items!.find((li: PurchaseItem) => li.id === pi.id)
-          const cloudSold = pi.sold_quantity ?? 0
-          const localSold = localItem?.sold_quantity ?? 0
-          const sold = Math.max(cloudSold, localSold)
-          if (sold === cloudSold) return pi
-          return { ...pi, sold_quantity: sold }
-        })
-        return { ...purchase, items: mergedItems }
+        let out: Purchase = purchase
+        if (local?.items?.length) {
+          const mergedItems = purchase.items.map((pi: PurchaseItem) => {
+            const localItem = local.items!.find((li: PurchaseItem) => li.id === pi.id)
+            const cloudSold = pi.sold_quantity ?? 0
+            const localSold = localItem?.sold_quantity ?? 0
+            const sold = Math.max(cloudSold, localSold)
+            if (sold === cloudSold) return pi
+            return { ...pi, sold_quantity: sold }
+          })
+          out = { ...purchase, items: mergedItems } as Purchase
+        }
+        const cloudName = (out as any).supplier_name
+        const localName = (local as any)?.supplier_name
+        if (localName && String(localName).trim() && (!cloudName || !String(cloudName).trim())) {
+          out = { ...out, supplier_name: String(localName).trim() } as Purchase
+        }
+        const cloudId = (out as any).supplier_id
+        const localId = (local as any)?.supplier_id
+        if (localId != null && (cloudId == null || cloudId === undefined)) {
+          out = { ...out, supplier_id: localId } as Purchase
+        }
+        return out
       })
 
+      // Include local-only purchases (e.g. from backup import not yet synced, or old inventory) so Purchase History shows them
+      let localOnly: Purchase[] = []
+      if (companyId !== undefined && companyId !== null) {
+        localOnly = localPurchases.filter(
+          (p: Purchase) => !cloudIds.has(p.id) && (p.company_id === companyId || p.company_id == null || p.company_id === undefined)
+        )
+      } else if (companyId !== null) {
+        localOnly = localPurchases.filter((p: Purchase) => !cloudIds.has(p.id))
+      }
+      if (type) localOnly = localOnly.filter((p: Purchase) => p.type === type)
+      localOnly = localOnly.map((p: Purchase) => ({ ...p, items: normalizePurchaseItems(p.items, p.id) }))
+
+      const combined = [...merged, ...localOnly].sort(
+        (a, b) => new Date(b.purchase_date).getTime() - new Date(a.purchase_date).getTime()
+      )
+
       // Sync to local storage in background (don't block UI – IndexedDB writes are slow with large datasets)
-      if (merged.length > 0) {
-        void Promise.all(merged.map((p) => put(STORES.PURCHASES, p))).catch((e) =>
+      if (combined.length > 0) {
+        void Promise.all(combined.map((p) => put(STORES.PURCHASES, p))).catch((e) =>
           console.warn('[cloudPurchaseService] Background sync failed:', e)
         )
       }
@@ -167,7 +216,7 @@ export const cloudPurchaseService = {
         }
       })()
 
-      return merged
+      return combined
     } catch (error) {
       console.error('Error in cloudPurchaseService.getAll:', error)
       // Fallback to local storage
@@ -349,9 +398,15 @@ export const cloudPurchaseService = {
           console.error('Error updating purchase in cloud after retry:', result.error)
           // Purchase is already updated locally; getAll() will merge local sold_quantity when fetching
         } else if (result.data) {
-          // Update local with cloud data
-          await put(STORES.PURCHASES, result.data as Purchase)
-          return result.data as Purchase
+          // Merge cloud response with our updated payload so supplier_name is never lost (cloud may return null if column was not persisted)
+          const cloudRow = result.data as any
+          const merged: Purchase = {
+            ...(result.data as Purchase),
+            supplier_name: (cloudRow.supplier_name && String(cloudRow.supplier_name).trim()) ? cloudRow.supplier_name : (updated.type === 'gst' ? (updated as GSTPurchase).supplier_name : (updated as SimplePurchase).supplier_name) ?? cloudRow.supplier_name,
+            supplier_id: cloudRow.supplier_id ?? (updated.type === 'gst' ? (updated as GSTPurchase).supplier_id : (updated as SimplePurchase).supplier_id),
+          } as Purchase
+          await put(STORES.PURCHASES, merged)
+          return merged
         }
       } catch (error) {
         console.error('Error in cloudPurchaseService.update:', error)

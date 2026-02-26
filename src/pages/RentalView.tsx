@@ -557,7 +557,7 @@ const RentalView = () => {
               <p className="font-semibold text-gray-700 mb-1">Thank you for your business!</p>
               <p className="mb-2">For any queries, please contact us using the details above.</p>
               <p className="text-gray-400">
-                Powered by <a href="https://hisabkitabpro.com" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-medium">HisabKitab Pro</a> · hisabkitabpro.com
+                Powered by <a href="https://hisabkitabpro.com" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-medium">HisabKitab Pro</a> · hisabkitabpro.com · WhatsApp: <a href="https://wa.me/917304877938" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">+91 7304877938</a> · Email: <a href="mailto:hisabkitabpro@gmail.com" className="text-indigo-600 hover:underline">hisabkitabpro@gmail.com</a>
               </p>
             </div>
             </div>

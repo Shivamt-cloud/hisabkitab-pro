@@ -32,6 +32,7 @@ import BarcodeScanner from '../components/BarcodeScanner'
 import SupplierModal from '../components/SupplierModal'
 import ProductModal from '../components/ProductModal'
 import BarcodePrintModal from '../components/BarcodePrintModal'
+import { parsePurchaseFormula } from '../utils/purchaseFormula'
 
 const GSTPurchaseForm = () => {
   const { hasPermission, user, getCurrentCompanyId } = useAuth()
@@ -41,6 +42,7 @@ const GSTPurchaseForm = () => {
   const location = useLocation() as { state?: { reorderPreload?: { supplierId: number; supplierName?: string; supplierGstin?: string; items: PurchaseItem[] } } }
   const isEditing = !!id
   const formRef = useRef<HTMLFormElement>(null)
+  const initialSupplierNameRef = useRef<string | undefined>(undefined)
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -68,6 +70,10 @@ const GSTPurchaseForm = () => {
   const [priceSegments, setPriceSegments] = useState<import('../types/priceList').PriceSegment[]>([])
   const [itemSegmentPrices, setItemSegmentPrices] = useState<Map<number, Record<number, number>>>(new Map())
   const [saleFormula, setSaleFormulaState] = useState<SaleFormulaConfig>(() => getSaleFormula())
+  const [additionalDiscountPct, setAdditionalDiscountPct] = useState<number>(0)
+  const [additionalDiscountAmount, setAdditionalDiscountAmount] = useState<number>(0)
+  const [formulaDraft, setFormulaDraft] = useState<{ index: number; field: 'unit_price' | 'mrp' | 'sale_price'; raw: string } | null>(null)
+  const [lastAppliedFormula, setLastAppliedFormula] = useState<Record<string, string>>({})
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
     try {
       const stored = localStorage.getItem(PURCHASE_ENTRY_COLUMNS_STORAGE_KEY)
@@ -90,13 +96,12 @@ const GSTPurchaseForm = () => {
   const isColumnVisible = (key: string) => visibleColumns.has(key)
 
   useEffect(() => {
-    loadData()
     loadCompanyName()
     if (isEditing && id) {
       loadPurchaseData(parseInt(id))
-    } else if (!isEditing && items.length === 0) {
-      // Auto-add first empty row for new purchases
-      addItem()
+    } else {
+      loadData()
+      if (!isEditing && items.length === 0) addItem()
     }
   }, [id, isEditing])
 
@@ -163,7 +168,7 @@ const GSTPurchaseForm = () => {
     }
   }
 
-  const loadData = async () => {
+  const loadData = async (): Promise<{ suppliersData: Supplier[]; productsData: Product[] } | null> => {
     try {
       const companyId = getCurrentCompanyId() ?? undefined
       const [suppliersData, productsData] = await Promise.all([
@@ -174,20 +179,21 @@ const GSTPurchaseForm = () => {
       console.log('Loaded products:', productsData.length, productsData)
       setSuppliers(suppliersData)
       setProducts(productsData)
+      return { suppliersData, productsData }
     } catch (error) {
       console.error('Error loading data:', error)
-      // Fallback: try loading all data without company filter
       try {
         const [allSuppliers, allProducts] = await Promise.all([
           supplierService.getAll(undefined),
           productService.getAll(true, undefined)
         ])
         console.log('Fallback - loaded all suppliers:', allSuppliers.length)
-        console.log('Fallback - loaded all products:', allProducts.length)
         setSuppliers(allSuppliers)
         setProducts(allProducts)
+        return { suppliersData: allSuppliers, productsData: allProducts }
       } catch (fallbackError) {
         console.error('Error loading data (fallback):', fallbackError)
+        return null
       }
     }
   }
@@ -211,9 +217,27 @@ const GSTPurchaseForm = () => {
 
   const loadPurchaseData = async (purchaseId: number) => {
     try {
+      // Load suppliers first so dropdown is populated; when editing, ensure purchase's supplier appears in list
+      const data = await loadData()
       const purchase = await purchaseService.getById(purchaseId)
       if (purchase && purchase.type === 'gst') {
         const gstPurchase = purchase as GSTPurchase
+        initialSupplierNameRef.current = gstPurchase.supplier_name?.trim() || undefined
+        const supplierId = gstPurchase.supplier_id
+        const currentList = data?.suppliersData ?? []
+        const inList = currentList.some((s: Supplier) => s.id === supplierId)
+        if (supplierId && !inList) {
+          let supplierToAdd: Supplier | null = null
+          try {
+            const fetched = await supplierService.getById(supplierId)
+            if (fetched) supplierToAdd = fetched
+          } catch (_) {}
+          if (!supplierToAdd) {
+            const name = (gstPurchase.supplier_name && String(gstPurchase.supplier_name).trim()) || `Supplier #${supplierId}`
+            supplierToAdd = { id: supplierId, name, gstin: gstPurchase.supplier_gstin, is_registered: !!gstPurchase.supplier_gstin }
+          }
+          setSuppliers([...currentList, supplierToAdd!])
+        }
         setSelectedSupplier(gstPurchase.supplier_id)
         setInvoiceNumber(gstPurchase.invoice_number)
         setPurchaseDate(gstPurchase.purchase_date)
@@ -233,6 +257,12 @@ const GSTPurchaseForm = () => {
           expiry_date: item.expiry_date ? item.expiry_date.split('T')[0] : '',
         }))
         setItems(mappedItems)
+        const beforeDiscount = mappedItems.reduce((s, i) => s + (i.total ?? 0), 0)
+        const inferredDiscount = Math.max(0, beforeDiscount - gstPurchase.grand_total)
+        if (inferredDiscount > 0 && beforeDiscount > 0) {
+          setAdditionalDiscountAmount(Math.round(inferredDiscount * 100) / 100)
+          setAdditionalDiscountPct(Math.round((inferredDiscount / beforeDiscount) * 10000) / 100)
+        }
         const companyId = getCurrentCompanyId()
         productSegmentPriceService.getAll(companyId).then(all => {
           const byIndex = new Map<number, Record<number, number>>()
@@ -492,15 +522,69 @@ const GSTPurchaseForm = () => {
     setItems(newItems)
   }
 
+  const formulaKey = (index: number, field: string) => `${index}-${field}`
+
+  const handlePriceFieldChange = (index: number, field: 'unit_price' | 'mrp' | 'sale_price', rawValue: string) => {
+    const trimmed = rawValue.trim()
+    if (!trimmed.startsWith('=')) {
+      setFormulaDraft(prev => (prev?.index === index && prev?.field === field ? null : prev))
+      setLastAppliedFormula(prev => { const next = { ...prev }; delete next[formulaKey(index, field)]; return next })
+      const num = trimmed === '' ? 0 : parseFloat(trimmed)
+      updateItem(index, field, isNaN(num) ? 0 : Math.round(num * 100) / 100)
+      return
+    }
+    setFormulaDraft({ index, field, raw: rawValue })
+  }
+
+  const applyFormulaIfAny = (index: number, field: 'unit_price' | 'mrp' | 'sale_price', rawValue: string) => {
+    const trimmed = rawValue.trim()
+    if (trimmed.startsWith('=')) {
+      const parsed = parsePurchaseFormula(rawValue)
+      if (parsed !== null) {
+        updateItem(index, field, parsed)
+        setLastAppliedFormula(prev => ({ ...prev, [formulaKey(index, field)]: trimmed }))
+      }
+    }
+    setFormulaDraft(prev => (prev?.index === index && prev?.field === field ? null : prev))
+  }
+
+  const handlePriceFieldBlur = (index: number, field: 'unit_price' | 'mrp' | 'sale_price', rawValue: string) => {
+    applyFormulaIfAny(index, field, rawValue)
+  }
+
+  const handlePriceFieldFocus = (index: number, field: 'unit_price' | 'mrp' | 'sale_price') => {
+    const saved = lastAppliedFormula[formulaKey(index, field)]
+    if (saved) setFormulaDraft({ index, field, raw: saved })
+  }
+
+  const handlePriceFieldKeyDown = (index: number, field: 'unit_price' | 'mrp' | 'sale_price', rawValue: string, e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      applyFormulaIfAny(index, field, rawValue)
+      ;(e.target as HTMLInputElement).blur()
+    }
+  }
+
+  const getPriceFieldDisplayValue = (index: number, field: 'unit_price' | 'mrp' | 'sale_price', itemValue: number | undefined) => {
+    if (formulaDraft?.index === index && formulaDraft?.field === field) return formulaDraft.raw
+    const v = itemValue ?? 0
+    return v === 0 ? '' : String(v)
+  }
+
   const calculateTotals = () => {
-    const grandTotal = items.reduce((sum, item) => sum + item.total, 0)
+    const totalBeforeDiscount = items.reduce((sum, item) => sum + (item.total ?? 0), 0)
     const totalTax = items.reduce((sum, item) => sum + (item.tax_amount || 0), 0)
-    const subtotal = grandTotal - totalTax // Net after discount (before tax)
+    const subtotal = totalBeforeDiscount - totalTax // Net after item discount (before tax)
 
     const cgstAmount = totalTax / 2
     const sgstAmount = totalTax / 2
 
-    return { subtotal, totalTax, cgstAmount, sgstAmount, grandTotal }
+    const discountAmount = Math.min(
+      Math.max(0, additionalDiscountAmount),
+      totalBeforeDiscount
+    )
+    const grandTotal = Math.max(0, totalBeforeDiscount - discountAmount)
+
+    return { subtotal, totalTax, cgstAmount, sgstAmount, totalBeforeDiscount, discountAmount, grandTotal }
   }
 
   const validate = (): boolean => {
@@ -551,6 +635,7 @@ const GSTPurchaseForm = () => {
     try {
       const supplier = suppliers.find(s => s.id === selectedSupplier)
       const totals = calculateTotals()
+      const supplierName = supplier?.name ?? (isEditing ? initialSupplierNameRef.current : undefined)
 
       if (isEditing && id) {
         // Update existing purchase
@@ -559,7 +644,7 @@ const GSTPurchaseForm = () => {
           purchase_date: purchaseDate,
           due_date: dueDate.trim() || undefined,
           supplier_id: selectedSupplier as number,
-          supplier_name: supplier?.name,
+          supplier_name: supplierName,
           supplier_gstin: supplier?.gstin,
           invoice_number: invoiceNumber,
           items: itemsWithBarcodes.map(item => ({
@@ -603,7 +688,7 @@ const GSTPurchaseForm = () => {
           purchase_date: purchaseDate,
           due_date: dueDate.trim() || undefined,
           supplier_id: selectedSupplier as number,
-          supplier_name: supplier?.name,
+          supplier_name: supplierName,
           supplier_gstin: supplier?.gstin,
           invoice_number: invoiceNumber,
           items: finalItems,
@@ -1186,12 +1271,15 @@ const GSTPurchaseForm = () => {
                         {isColumnVisible('purchase_price') && (
                         <td className="px-2 py-1.5">
                           <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={item.unit_price === 0 || item.unit_price === undefined ? '' : item.unit_price}
-                            onChange={(e) => updateItem(index, 'unit_price', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
-                            placeholder="0"
+                            type="text"
+                            inputMode="decimal"
+                            value={getPriceFieldDisplayValue(index, 'unit_price', item.unit_price)}
+                            onChange={(e) => handlePriceFieldChange(index, 'unit_price', e.target.value)}
+                            onFocus={() => handlePriceFieldFocus(index, 'unit_price')}
+                            onBlur={(e) => handlePriceFieldBlur(index, 'unit_price', e.target.value)}
+                            onKeyDown={(e) => handlePriceFieldKeyDown(index, 'unit_price', getPriceFieldDisplayValue(index, 'unit_price', item.unit_price), e)}
+                            placeholder="0 or =200-45% then Enter"
+                            title="Number or formula e.g. =180-45% then Enter. Click again to see formula."
                             className={`${EXCEL_INPUT_CLASS} min-w-[70px] w-20 ${errors[`item_${index}_price`] ? 'border-red-300' : ''}`}
                           />
                         </td>
@@ -1199,12 +1287,15 @@ const GSTPurchaseForm = () => {
                         {isColumnVisible('mrp') && (
                         <td className="px-2 py-1.5">
                           <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={item.mrp === 0 || item.mrp === undefined ? '' : item.mrp}
-                            onChange={(e) => updateItem(index, 'mrp', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
-                            placeholder="0"
+                            type="text"
+                            inputMode="decimal"
+                            value={getPriceFieldDisplayValue(index, 'mrp', item.mrp)}
+                            onChange={(e) => handlePriceFieldChange(index, 'mrp', e.target.value)}
+                            onFocus={() => handlePriceFieldFocus(index, 'mrp')}
+                            onBlur={(e) => handlePriceFieldBlur(index, 'mrp', e.target.value)}
+                            onKeyDown={(e) => handlePriceFieldKeyDown(index, 'mrp', getPriceFieldDisplayValue(index, 'mrp', item.mrp), e)}
+                            placeholder="0 or =200-45% then Enter"
+                            title="Number or formula e.g. =180-45% then Enter. Click again to see formula."
                             className={`${EXCEL_INPUT_CLASS} min-w-[70px] w-20`}
                           />
                         </td>
@@ -1217,13 +1308,15 @@ const GSTPurchaseForm = () => {
                             return (
                               <div className="flex items-center gap-0.5">
                                 <input
-                                  type="number"
-                                  step="0.01"
-                                  min="0"
-                                  value={hasVal ? item.sale_price : ''}
-                                  onChange={(e) => updateItem(index, 'sale_price', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
-                                  placeholder={suggested ? `Suggested: ${suggested.value.toFixed(2)}` : '0'}
-                                  title={suggested ? `Suggested: ${suggested.description} = ₹${suggested.value.toFixed(2)}` : ''}
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={getPriceFieldDisplayValue(index, 'sale_price', item.sale_price)}
+                                  onChange={(e) => handlePriceFieldChange(index, 'sale_price', e.target.value)}
+                                  onFocus={() => handlePriceFieldFocus(index, 'sale_price')}
+                                  onBlur={(e) => handlePriceFieldBlur(index, 'sale_price', e.target.value)}
+                                  onKeyDown={(e) => handlePriceFieldKeyDown(index, 'sale_price', getPriceFieldDisplayValue(index, 'sale_price', item.sale_price), e)}
+                                  placeholder={suggested ? `Suggested: ${suggested.value.toFixed(2)}` : '0 or =200-45% then Enter'}
+                                  title={suggested ? `Suggested: ${suggested.description}. Or formula e.g. =180-45% then Enter` : 'Number or formula e.g. =180-45% then Enter'}
                                   className={`${EXCEL_INPUT_CLASS} min-w-[70px] w-20 flex-1`}
                                 />
                                 {suggested && !hasVal && (
@@ -1323,7 +1416,7 @@ const GSTPurchaseForm = () => {
                         )}
                         {isColumnVisible('total') && (
                         <td className="px-2 py-1.5">
-                          <div className="font-semibold text-sm text-gray-900">₹{item.total.toFixed(2)}</div>
+                          <div className="font-semibold text-sm text-gray-900">₹{(item.total ?? 0).toFixed(2)}</div>
                           {item.hsn_code && <div className="text-[10px] text-gray-500">HSN: {item.hsn_code}</div>}
                         </td>
                         )}
@@ -1379,7 +1472,7 @@ const GSTPurchaseForm = () => {
               <div className="mb-8 pt-8 border-t border-gray-200">
                 <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-200">
                   <h3 className="font-bold text-gray-900 mb-4">Purchase Summary</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-6 gap-4 text-sm">
+                  <div className="grid grid-cols-2 md:grid-cols-6 gap-4 text-sm mb-4">
                     <div>
                       <p className="text-gray-600">Total Quantity</p>
                       <p className="font-bold text-gray-900 text-lg">{(() => { const q = items.reduce((s, i) => s + (i.quantity ?? 0), 0); return q % 1 === 0 ? q : q.toFixed(2); })()}</p>
@@ -1399,6 +1492,47 @@ const GSTPurchaseForm = () => {
                     <div>
                       <p className="text-gray-600">Total Tax</p>
                       <p className="font-bold text-gray-900 text-lg">₹{totals.totalTax.toFixed(2)}</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm border-t border-blue-200 pt-4">
+                    <div>
+                      <p className="text-gray-600 mb-1">Discount (%)</p>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="any"
+                        value={additionalDiscountPct === 0 ? '' : additionalDiscountPct}
+                        onChange={(e) => {
+                          const v = e.target.value === '' ? 0 : Math.max(0, Math.min(100, parseFloat(e.target.value) || 0))
+                          setAdditionalDiscountPct(v)
+                          const base = items.reduce((s, i) => s + i.total, 0)
+                          setAdditionalDiscountAmount(Math.round(base * v * 100) / 10000)
+                        }}
+                        placeholder="0"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                      />
+                    </div>
+                    <div>
+                      <p className="text-gray-600 mb-1">Discount (₹)</p>
+                      <input
+                        type="number"
+                        min={0}
+                        step="any"
+                        value={additionalDiscountAmount === 0 ? '' : additionalDiscountAmount}
+                        onChange={(e) => {
+                          const base = items.reduce((s, i) => s + i.total, 0)
+                          const v = e.target.value === '' ? 0 : Math.max(0, parseFloat(e.target.value) || 0)
+                          setAdditionalDiscountAmount(v)
+                          setAdditionalDiscountPct(base > 0 ? Math.round((v / base) * 10000) / 100 : 0)
+                        }}
+                        placeholder="0"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                      />
+                    </div>
+                    <div>
+                      <p className="text-gray-600">Discount</p>
+                      <p className="font-bold text-gray-900 text-lg">−₹{totals.discountAmount.toFixed(2)}</p>
                     </div>
                     <div>
                       <p className="text-gray-600">Grand Total</p>

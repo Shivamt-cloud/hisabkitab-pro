@@ -2,6 +2,7 @@ import { useRef, useState, useEffect } from 'react'
 import { InvoiceData } from '../types/invoice'
 import { Printer, Download, X, Share2, Plus, Receipt } from 'lucide-react'
 import { exportInvoiceToPDF, exportHTMLToPDF, printReceipt, buildReceiptHTML } from '../utils/exportUtils'
+import { CONTACT_EMAIL, CONTACT_WEBSITE_URL, CONTACT_WHATSAPP_NUMBER, CONTACT_WHATSAPP_URL } from '../constants'
 import { settingsService } from '../services/settingsService'
 
 type InvoiceTemplateType = 'compact' | 'detailed' | 'with_logo'
@@ -82,7 +83,7 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
     message += `*Items:*\n`
     
     invoiceData.items.forEach((item, index) => {
-      message += `${index + 1}. ${item.product_name} - Qty: ${item.quantity} - ₹${item.total.toFixed(2)}\n`
+      message += `${index + 1}. ${item.product_name} - Qty: ${item.quantity} - ₹${(item.total ?? 0).toFixed(2)}\n`
     })
     
     message += `\n*Total Amount: ₹${grandTotal}*\n`
@@ -323,11 +324,22 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
               const itemDiscount = item.mrp && item.mrp > item.unit_price 
                 ? (item.mrp - item.unit_price) * item.quantity 
                 : 0
+              const isReturn = item.sale_type === 'return'
               return (
-                <tr key={index} className="border-b border-gray-200">
+                <tr
+                  key={index}
+                  className={`border-b border-gray-200 ${isReturn ? 'bg-red-50/80 border-l-4 border-l-red-500' : ''}`}
+                >
                   <td className="py-2 px-3">
                     <div>
-                      <p className="font-medium text-gray-900">{item.product_name}</p>
+                      <p className="font-medium text-gray-900 flex items-center gap-2 flex-wrap">
+                        {item.product_name}
+                        {isReturn && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold bg-red-200 text-red-800">
+                            RETURN
+                          </span>
+                        )}
+                      </p>
                       {template !== 'compact' && item.gst_rate !== undefined && (
                         <p className="text-xs text-gray-500">GST @ {item.gst_rate}%</p>
                       )}
@@ -366,7 +378,7 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
                     </td>
                   )}
                   <td className="py-2 px-3 text-right font-semibold text-gray-900">
-                    ₹{item.total.toFixed(2)}
+                    ₹{(item.total ?? 0).toFixed(2)}
                   </td>
                 </tr>
               )
@@ -464,12 +476,10 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
               }`}>
                 {invoiceData.payment_status.toUpperCase()}
               </span>
-              {invoiceData.credit_balance !== undefined && invoiceData.credit_balance >= 0 && (
+              {invoiceData.credit_balance !== undefined && invoiceData.credit_balance > 0 && (
                 <div className="mt-3 pt-3 border-t border-gray-200">
                   <span className="text-gray-600">Available Credit Balance:</span>
-                  <div className={`mt-1 font-semibold text-lg ${
-                    invoiceData.credit_balance > 0 ? 'text-green-600' : 'text-gray-600'
-                  }`}>
+                  <div className="mt-1 font-semibold text-lg text-green-600">
                     ₹{invoiceData.credit_balance.toFixed(2)}
                   </div>
                   <p className="text-xs text-gray-500 mt-1">Credit can be used on future purchases</p>
@@ -494,9 +504,9 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
             <h4 className="text-sm font-bold text-gray-900 mb-3 uppercase">Return & Exchange Policy</h4>
             <div className="text-xs text-gray-600 space-y-2">
               <ul className="list-disc list-inside space-y-1 ml-2">
+                <li className="bg-amber-100 border-l-4 border-amber-500 pl-2 py-0.5 font-bold text-amber-900">No money return.</li>
                 <li>Items can be returned within 7 days of purchase with original invoice.</li>
                 <li>Products must be in original condition with all tags and packaging intact.</li>
-                <li>Refund will be processed through the original payment method within 5-7 business days.</li>
                 <li>Items purchased on sale or with special discounts may have different return policies.</li>
                 <li>Customized or personalized items are not eligible for return unless defective.</li>
                 <li>Returned items will be inspected before processing the refund.</li>
@@ -555,7 +565,10 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
             <p className="mt-2">Visit us at: {invoiceData.company_info.website}</p>
           )}
           <p className="mt-4 pt-3 border-t border-gray-100 text-indigo-600 font-semibold">
-            Powered by <a href="https://hisabkitabpro.com" target="_blank" rel="noopener noreferrer" className="hover:underline">HisabKitab Pro</a> · hisabkitabpro.com
+            Powered by <a href={CONTACT_WEBSITE_URL} target="_blank" rel="noopener noreferrer" className="hover:underline">HisabKitab Pro</a> · hisabkitabpro.com
+          </p>
+          <p className="mt-1 text-sm text-gray-600">
+            WhatsApp: <a href={CONTACT_WHATSAPP_URL} target="_blank" rel="noopener noreferrer" className="hover:underline">+91 {CONTACT_WHATSAPP_NUMBER}</a> · Email: <a href={`mailto:${CONTACT_EMAIL}`} className="hover:underline">{CONTACT_EMAIL}</a>
           </p>
           <p className="mt-2 text-gray-400">This is a computer-generated invoice and does not require a signature.</p>
         </div>
@@ -645,14 +658,18 @@ const generateInvoiceHTML = (invoiceData: InvoiceData): string => {
           </tr>
         </thead>
         <tbody>
-          ${invoiceData.items.map(item => `
-            <tr>
-              <td>${item.product_name}</td>
+          ${invoiceData.items.map(item => {
+            const isReturn = item.sale_type === 'return'
+            const rowStyle = isReturn ? 'background: #fef2f2; border-left: 4px solid #ef4444;' : ''
+            const nameCell = isReturn ? `${item.product_name} <span style="display: inline-block; margin-left: 6px; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; background: #fecaca; color: #991b1b;">RETURN</span>` : item.product_name
+            return `
+            <tr style="${rowStyle}">
+              <td>${nameCell}</td>
               <td class="text-right">${item.quantity} ${item.unit || 'pcs'}</td>
               <td class="text-right">₹${item.unit_price.toFixed(2)}</td>
-              <td class="text-right">₹${item.total.toFixed(2)}</td>
+              <td class="text-right">₹${(item.total ?? 0).toFixed(2)}</td>
             </tr>
-          `).join('')}
+          `}).join('')}
         </tbody>
       </table>
       <div class="totals">
@@ -725,10 +742,10 @@ const generateInvoiceHTML = (invoiceData: InvoiceData): string => {
             <p style="margin: 8px 0 0 0; font-weight: 600; color: ${invoiceData.payment_status === 'paid' ? '#16a34a' : '#dc2626'}; text-transform: uppercase;">
               ${invoiceData.payment_status}
             </p>
-            ${invoiceData.credit_balance !== undefined && invoiceData.credit_balance >= 0 ? `
+            ${invoiceData.credit_balance !== undefined && invoiceData.credit_balance > 0 ? `
               <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
                 <p style="margin: 0; color: #6b7280; font-size: 14px;">Available Credit Balance:</p>
-                <p style="margin: 4px 0 0 0; font-weight: 600; font-size: 18px; color: ${invoiceData.credit_balance > 0 ? '#16a34a' : '#6b7280'};">
+                <p style="margin: 4px 0 0 0; font-weight: 600; font-size: 18px; color: #16a34a;">
                   ₹${invoiceData.credit_balance.toFixed(2)}
                 </p>
                 <p style="margin: 4px 0 0 0; font-size: 11px; color: #9ca3af;">Credit can be used on future purchases</p>
@@ -740,9 +757,9 @@ const generateInvoiceHTML = (invoiceData: InvoiceData): string => {
       <div class="terms-section">
         <h4>Return & Exchange Policy</h4>
         <ul>
+          <li style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 4px 8px; margin: 4px 0; font-weight: 700; color: #78350f;">No money return.</li>
           <li>Items can be returned within 7 days of purchase with original invoice.</li>
           <li>Products must be in original condition with all tags and packaging intact.</li>
-          <li>Refund will be processed through the original payment method within 5-7 business days.</li>
           <li>Items purchased on sale or with special discounts may have different return policies.</li>
           <li>Customized or personalized items are not eligible for return unless defective.</li>
         </ul>
@@ -767,7 +784,8 @@ const generateInvoiceHTML = (invoiceData: InvoiceData): string => {
       <div class="footer">
         <p><strong>Thank you for your business!</strong></p>
         <p style="margin-top: 12px; font-weight: 600; color: #4f46e5; font-size: 13px;">Powered by HisabKitab Pro · hisabkitabpro.com</p>
-        <p style="margin-top: 8px;"><a href="https://hisabkitabpro.com" target="_blank" rel="noopener noreferrer" style="color: #4f46e5;">hisabkitabpro.com</a></p>
+        <p style="margin-top: 4px; font-size: 11px;">WhatsApp: <a href="${CONTACT_WHATSAPP_URL}" target="_blank" rel="noopener noreferrer" style="color: #4f46e5;">+91 ${CONTACT_WHATSAPP_NUMBER}</a> · Email: <a href="mailto:${CONTACT_EMAIL}" style="color: #4f46e5;">${CONTACT_EMAIL}</a></p>
+        <p style="margin-top: 8px;"><a href="${CONTACT_WEBSITE_URL}" target="_blank" rel="noopener noreferrer" style="color: #4f46e5;">hisabkitabpro.com</a></p>
         <p style="margin-top: 12px;">This is a computer-generated invoice and does not require a signature.</p>
       </div>
     </div>

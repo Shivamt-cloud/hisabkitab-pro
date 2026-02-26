@@ -347,7 +347,7 @@ const QuickSale = () => {
                         </button>
                       </div>
                     </div>
-                    <p className="font-bold text-gray-900">₹{item.total.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                    <p className="font-bold text-gray-900">₹{(item.total ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
                     <button
                       type="button"
                       onClick={() => removeItem(index)}

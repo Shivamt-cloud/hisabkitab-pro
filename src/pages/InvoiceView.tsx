@@ -41,6 +41,11 @@ const InvoiceView = () => {
         return
       }
 
+      // Mixed sale = has both return and sale items → return was settled, no credit from this invoice
+      const hasReturnItems = sale.items?.some((i: { sale_type?: string }) => i.sale_type === 'return')
+      const hasSaleItems = sale.items?.some((i: { sale_type?: string }) => i.sale_type === 'sale')
+      const isMixedSettledSale = hasReturnItems && hasSaleItems
+
       // Get customer information if available
       let customerInfo
       let customerCreditBalance: number | undefined
@@ -57,8 +62,12 @@ const InvoiceView = () => {
             state: customer.state,
             pincode: customer.pincode,
           }
-          // Get current credit balance (after this transaction)
-          customerCreditBalance = customer.credit_balance || 0
+          // For mixed sale (return + purchase, amount settled), show no credit on this invoice
+          if (isMixedSettledSale) {
+            customerCreditBalance = 0
+          } else {
+            customerCreditBalance = customer.credit_balance || 0
+          }
         }
       } else if (sale.customer_name) {
         customerInfo = {
@@ -84,6 +93,7 @@ const InvoiceView = () => {
           gst_rate: product?.gst_rate ?? snap?.gst_rate,
           unit: product?.unit ?? snap?.unit,
           sales_person_name: item.sales_person_name || sale.sales_person_name || undefined,
+          sale_type: item.sale_type,
         }
       })
       

@@ -235,20 +235,23 @@ export const saleService = {
     
     // Handle customer credit balance
     if (sale.customer_id) {
-      // Calculate return amount (negative total for return items)
+      // Return items total (amount we would add to credit if return-only)
       const returnItemsTotal = newSale.items
         .filter(item => item.sale_type === 'return')
         .reduce((sum, item) => sum + item.total, 0)
-      
-      // Calculate credit from payment methods (credit payment method)
+      const hasReturnItems = returnItemsTotal > 0
+      const hasSaleItems = newSale.items.some(item => item.sale_type === 'sale')
+
+      // Credit from payment methods (when customer chooses to take credit instead of cash for part of payment)
       const creditPaymentTotal = (newSale.payment_methods || [])
         .filter((pm: { method: string; amount: number }) => pm.method === 'credit')
         .reduce((sum: number, pm: { method: string; amount: number }) => sum + (pm.amount || 0), 0)
-      
-      // If there are returns OR credit payment method, add credit to customer
-      // Priority: Use credit payment method amount if available, otherwise use return items total
-      const creditToAdd = creditPaymentTotal > 0 ? creditPaymentTotal : returnItemsTotal
-      
+
+      // Only add return amount to credit when it was NOT settled by purchases in the same transaction.
+      // Mixed sale+return (e.g. return ₹440 + buy ₹597 = pay ₹157): no credit – amount is settled.
+      const returnCreditToAdd = hasReturnItems && !hasSaleItems ? returnItemsTotal : 0
+      const creditToAdd = creditPaymentTotal > 0 ? creditPaymentTotal : returnCreditToAdd
+
       if (creditToAdd > 0) {
         await customerService.updateCreditBalance(sale.customer_id, creditToAdd)
         newSale.credit_added = creditToAdd

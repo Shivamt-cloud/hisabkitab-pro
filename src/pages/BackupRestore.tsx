@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { backupService } from '../services/backupService'
@@ -34,9 +34,16 @@ import {
 const BackupRestore = () => {
   const { user, getCurrentCompanyId } = useAuth()
   const navigate = useNavigate()
+  const importAbortRef = useRef<AbortController | null>(null)
   const [importing, setImporting] = useState(false)
   const [importProgress, setImportProgress] = useState<{ current: number; total: number; message: string } | null>(null)
-  const [importResult, setImportResult] = useState<{ success: boolean; message: string; validationWarnings?: any[] } | null>(null)
+  const [importResult, setImportResult] = useState<{
+    success: boolean
+    message: string
+    validationWarnings?: any[]
+    stats?: { purchases?: number; products?: number; customers?: number; suppliers?: number; categories?: number }
+    placeholderChangeCount?: number
+  } | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [fileContent, setFileContent] = useState<string | null>(null)
   const [fileName, setFileName] = useState<string>('')
@@ -444,7 +451,7 @@ const BackupRestore = () => {
   const handleFileSelect = async () => {
     const input = document.createElement('input')
     input.type = 'file'
-    input.accept = 'application/json,.json,.xlsx,.xls'
+    input.accept = 'application/json,.json,.xlsx,.xls,.numbers'
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0]
       if (file) {
@@ -454,8 +461,8 @@ const BackupRestore = () => {
         
         const fileExtension = file.name.toLowerCase().split('.').pop()
         
-        // Handle XLSX/XLS files
-        if (fileExtension === 'xlsx' || fileExtension === 'xls') {
+        // Handle XLSX/XLS and Mac Numbers files
+        if (fileExtension === 'xlsx' || fileExtension === 'xls' || fileExtension === 'numbers') {
           try {
             setImporting(true)
             const result = await convertXLSXToJSON(file)
@@ -474,22 +481,51 @@ const BackupRestore = () => {
                 setImporting(false)
                 return
               }
-              setFileContent(result.jsonData)
-              
+              const noData = result.stats && (result.stats.purchases ?? 0) === 0 && (result.stats.products ?? 0) === 0 &&
+                (result.stats.customers ?? 0) === 0 && (result.stats.suppliers ?? 0) === 0 && (result.stats.categories ?? 0) === 0
+              const placeholderCount = result.placeholderChangeCount ?? 0
+              if (placeholderCount > 0) {
+                const userProceed = window.confirm(
+                  `We found ${placeholderCount} missing required value(s) (Supplier Name, Bill No, Bill Date, Product/Desc, Qty). We have filled them with placeholders so your file can be imported. Do you want to proceed?`
+                )
+                if (!userProceed) {
+                  setImportResult({
+                    success: true,
+                    message: result.message + '\n\nYou chose not to proceed. You can fix the file and re-upload.',
+                    validationWarnings: result.validationWarnings,
+                    stats: result.stats,
+                    placeholderChangeCount: placeholderCount,
+                  })
+                  setSelectedFile(null)
+                  setFileContent(null)
+                  setFileName('')
+                  setImporting(false)
+                  return
+                }
+              }
+              if (!noData) {
+                setFileContent(result.jsonData)
+              } else {
+                setSelectedFile(null)
+                setFileContent(null)
+                setFileName('')
+              }
               // Check for validation warnings
               const hasWarnings = result.validationWarnings && result.validationWarnings.length > 0
               let message = result.message || `Successfully converted Excel file. Found: ${result.stats?.products || 0} products, ${result.stats?.categories || 0} categories, ${result.stats?.suppliers || 0} suppliers, ${result.stats?.customers || 0} customers, ${result.stats?.purchases || 0} purchases.`
-              
-              if (hasWarnings) {
-                message += `\n\n⚠️ WARNING: The uploaded Excel file does not match the suggested format. Some data may not import correctly.`
-              } else {
-                message += ` ⚠️ IMPORTANT: Click the "Import" button below to actually import this data into your database.`
+              if (!noData) {
+                if (hasWarnings) {
+                  message += `\n\n⚠️ WARNING: The uploaded Excel file does not match the suggested format. Some data may not import correctly.`
+                } else {
+                  message += ` ⚠️ IMPORTANT: Click the "Import" button below to actually import this data into your database.`
+                }
               }
-              
               setImportResult({
                 success: true,
                 message: message,
                 validationWarnings: result.validationWarnings,
+                stats: result.stats,
+                placeholderChangeCount: placeholderCount > 0 ? placeholderCount : undefined,
               })
             } else {
               setImportResult({
@@ -502,9 +538,14 @@ const BackupRestore = () => {
             }
             setImporting(false)
           } catch (error: any) {
+            const isNumbers = fileExtension === 'numbers'
+            let message = 'Failed to convert file: ' + (error.message || 'Unknown error')
+            if (isNumbers) {
+              message += '\n\n💡 Tip: If the file does not open, export it as Excel from Numbers first: File → Export To → Excel…, then upload the .xlsx file.'
+            }
             setImportResult({
               success: false,
-              message: 'Failed to convert Excel file: ' + (error.message || 'Unknown error'),
+              message,
             })
             setSelectedFile(null)
             setFileContent(null)
@@ -601,6 +642,9 @@ const BackupRestore = () => {
         // Ignore parsing errors
       }
       
+      const abortController = new AbortController()
+      importAbortRef.current = abortController
+
       const result = await backupService.importFromFile(fileContent, user?.id, {
         importProducts: true,
         importPurchases: true,
@@ -609,6 +653,7 @@ const BackupRestore = () => {
         importSettings: true,
         merge: true, // Merge with existing data
         companyId: companyId, // Pass company ID to ensure purchases are linked correctly
+        signal: abortController.signal,
       })
       
       setImportResult(result)
@@ -634,8 +679,13 @@ const BackupRestore = () => {
       })
       setImportProgress(null)
     } finally {
+      importAbortRef.current = null
       setImporting(false)
     }
+  }
+
+  const handleStopImport = () => {
+    importAbortRef.current?.abort()
   }
 
   const handleCancelImport = () => {
@@ -860,29 +910,53 @@ const BackupRestore = () => {
 
             {importResult && (
               <div className="mb-6 space-y-4">
+                {(() => {
+                  const noDataRows = importResult.success && importResult.stats &&
+                    (importResult.stats.purchases ?? 0) === 0 && (importResult.stats.products ?? 0) === 0 &&
+                    (importResult.stats.customers ?? 0) === 0 && (importResult.stats.suppliers ?? 0) === 0 &&
+                    (importResult.stats.categories ?? 0) === 0
+                  const isWarning = noDataRows
+                  return (
                 <div className={`p-4 rounded-lg flex items-start gap-3 ${
-                  importResult.success 
-                    ? 'bg-green-50 border border-green-200' 
+                  isWarning
+                    ? 'bg-amber-50 border border-amber-300'
+                    : importResult.success
+                    ? 'bg-green-50 border border-green-200'
                     : 'bg-red-50 border border-red-200'
                 }`}>
-                  {importResult.success ? (
+                  {isWarning ? (
+                    <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                  ) : importResult.success ? (
                     <CheckCircle className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
                   ) : (
                     <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
                   )}
                   <div className="flex-1">
                     <p className={`font-semibold mb-1 ${
-                      importResult.success ? 'text-green-800' : 'text-red-800'
+                      isWarning ? 'text-amber-900' : importResult.success ? 'text-green-800' : 'text-red-800'
                     }`}>
-                      {importResult.success ? 'File Converted Successfully' : 'Import Failed'}
+                      {isWarning ? 'No data rows found' : importResult.success ? 'File Converted Successfully' : 'Import Failed'}
                     </p>
+                    {importResult.success && importResult.stats && !noDataRows && (
+                      <p className="text-sm font-semibold text-green-800 mb-2">
+                        Summary: {[
+                          (importResult.stats.purchases ?? 0) > 0 && `${importResult.stats.purchases} purchases`,
+                          (importResult.stats.products ?? 0) > 0 && `${importResult.stats.products} products`,
+                          (importResult.stats.customers ?? 0) > 0 && `${importResult.stats.customers} customers`,
+                          (importResult.stats.suppliers ?? 0) > 0 && `${importResult.stats.suppliers} suppliers`,
+                          (importResult.stats.categories ?? 0) > 0 && `${importResult.stats.categories} categories`,
+                        ].filter(Boolean).join(' · ')}
+                      </p>
+                    )}
                     <p className={`text-sm whitespace-pre-line ${
-                      importResult.success ? 'text-green-700' : 'text-red-700'
+                      isWarning ? 'text-amber-800' : importResult.success ? 'text-green-700' : 'text-red-700'
                     }`}>
                       {importResult.message}
                     </p>
                   </div>
                 </div>
+                  )
+                })()}
 
                 {/* Show validation warnings if any */}
                 {importResult.success && importResult.validationWarnings && importResult.validationWarnings.length > 0 && (
@@ -943,7 +1017,7 @@ const BackupRestore = () => {
                   <Upload className="w-12 h-12" />
                   <div className="text-center">
                     <h3 className="text-xl font-bold mb-2">Select Backup File</h3>
-                    <p className="text-sm opacity-90">Choose a backup JSON file or Excel (XLSX) file to import</p>
+                    <p className="text-sm opacity-90">Choose a backup JSON file, Excel (XLSX/XLS), or Numbers (.numbers) file to import</p>
                   </div>
                 </button>
               ) : (
@@ -956,6 +1030,17 @@ const BackupRestore = () => {
                       <div>
                         <p className="font-semibold text-gray-900">{fileName}</p>
                         <p className="text-sm text-gray-600">File ready for import</p>
+                        {importResult?.success && importResult?.stats && (
+                          <p className="text-sm text-gray-700 mt-1 font-medium">
+                            {[
+                              (importResult.stats.purchases ?? 0) > 0 && `${importResult.stats.purchases} purchases`,
+                              (importResult.stats.products ?? 0) > 0 && `${importResult.stats.products} products`,
+                              (importResult.stats.customers ?? 0) > 0 && `${importResult.stats.customers} customers`,
+                              (importResult.stats.suppliers ?? 0) > 0 && `${importResult.stats.suppliers} suppliers`,
+                              (importResult.stats.categories ?? 0) > 0 && `${importResult.stats.categories} categories`,
+                            ].filter(Boolean).join(' · ') || 'No data rows'}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <button
@@ -983,13 +1068,23 @@ const BackupRestore = () => {
                         </>
                       )}
                     </button>
-                    <button
-                      onClick={handleCancelImport}
-                      disabled={importing}
-                      className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Cancel
-                    </button>
+                    {importing ? (
+                      <button
+                        type="button"
+                        onClick={handleStopImport}
+                        className="px-6 py-3 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition-colors flex items-center justify-center gap-2"
+                      >
+                        <XCircle className="w-5 h-5" />
+                        Stop
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleCancelImport}
+                        className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    )}
                   </div>
                   
                   {/* Progress Indicator */}

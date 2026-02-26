@@ -13,7 +13,11 @@ export interface PurchaseReorderItem {
   sale_price?: number
   discount_percentage?: number
   ordered_qty: number
+  ordered_qty_box?: number
+  ordered_qty_piece?: number
   received_qty?: number
+  received_qty_box?: number
+  received_qty_piece?: number
   total: number
   article?: string
   barcode?: string

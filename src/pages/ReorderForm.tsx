@@ -7,9 +7,10 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { purchaseService, supplierService } from '../services/purchaseService'
+import { companyService } from '../services/companyService'
 import { purchaseReorderService } from '../services/purchaseReorderService'
 import { productService, Product } from '../services/productService'
-import { Home, Package, ShoppingBag, ChevronRight, FileDown, FileSpreadsheet, AlertTriangle } from 'lucide-react'
+import { Home, Package, ShoppingBag, ChevronRight, FileDown, FileSpreadsheet, AlertTriangle, Search } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
 import { exportReorderToPdf, exportReorderToExcel } from '../utils/exportUtils'
 import type { Purchase } from '../types/purchase'
@@ -24,6 +25,8 @@ interface ReorderRow {
   last_qty: number | null
   last_rate: number | null
   reorder_qty: number
+  reorder_qty_box: number
+  reorder_qty_piece: number
   reorder_rate: number
 }
 
@@ -53,8 +56,13 @@ const ReorderForm = () => {
   const [reorderNumber, setReorderNumber] = useState('')
   const [expectedDate, setExpectedDate] = useState('')
   const [notes, setNotes] = useState('')
+  const [itemSearch, setItemSearch] = useState('')
+  const [addProductQuery, setAddProductQuery] = useState('')
+  const [addProductOpen, setAddProductOpen] = useState(false)
+  const [companyName, setCompanyName] = useState('')
   const [lastSavedReorderId, setLastSavedReorderId] = useState<number | null>(null)
   const appliedLowStockRef = useRef(false)
+  const addProductRef = useRef<HTMLDivElement>(null)
 
   const companyId = getCurrentCompanyId()
 
@@ -63,16 +71,18 @@ const ReorderForm = () => {
       setLoading(true)
       const cid = getCurrentCompanyId()
       try {
-        const [sups, purchs, prods, nextRo] = await Promise.all([
+        const [sups, purchs, prods, nextRo, company] = await Promise.all([
           supplierService.getAll(cid ?? undefined),
           purchaseService.getAll(undefined, cid ?? undefined),
           productService.getAll(true, cid ?? undefined),
           purchaseReorderService.getNextReorderNumber(cid ?? undefined),
+          cid ? companyService.getById(cid) : Promise.resolve(null),
         ])
         setSuppliers(sups)
         setPurchases(purchs)
         setProducts(prods)
         setReorderNumber(nextRo)
+        setCompanyName(company?.name || company?.unique_code || '')
       } catch (e) {
         console.error('Reorder form load error:', e)
       } finally {
@@ -97,6 +107,8 @@ const ReorderForm = () => {
         last_qty: null,
         last_rate: item.last_purchase_rate ?? null,
         reorder_qty: item.suggested_qty,
+        reorder_qty_box: 1,
+        reorder_qty_piece: item.suggested_qty,
         reorder_rate: item.last_purchase_rate ?? 0,
       }
     })
@@ -160,6 +172,8 @@ const ReorderForm = () => {
         last_qty: last.qty,
         last_rate: last.rate,
         reorder_qty: last.qty,
+        reorder_qty_box: 1,
+        reorder_qty_piece: last.qty,
         reorder_rate: last.rate,
       })
     })
@@ -167,10 +181,17 @@ const ReorderForm = () => {
     setRows(newRows)
   }, [selectedSupplierId, previousPurchaseByProduct, products])
 
-  const updateRow = (index: number, field: 'reorder_qty' | 'reorder_rate', value: number) => {
+  const updateRow = (index: number, field: 'reorder_qty' | 'reorder_qty_box' | 'reorder_qty_piece' | 'reorder_rate', value: number) => {
     setRows(prev => {
       const next = [...prev]
-      next[index] = { ...next[index], [field]: value }
+      const row = { ...next[index], [field]: value }
+      // Ordered Qty: Box × Piece when both > 0; else Box or Piece (whichever is set)
+      if (field === 'reorder_qty_box' || field === 'reorder_qty_piece') {
+        const box = row.reorder_qty_box
+        const piece = row.reorder_qty_piece
+        row.reorder_qty = box > 0 && piece > 0 ? Math.round(box * piece * 100) / 100 : (box || piece)
+      }
+      next[index] = row
       return next
     })
   }
@@ -191,6 +212,8 @@ const ReorderForm = () => {
         last_qty: null,
         last_rate: null,
         reorder_qty: 1,
+        reorder_qty_box: 1,
+        reorder_qty_piece: 1,
         reorder_rate: 0,
       },
     ])
@@ -198,8 +221,36 @@ const ReorderForm = () => {
 
   const unusedProducts = useMemo(() => {
     const usedIds = new Set(rows.map(r => r.product_id))
-    return products.filter(p => !usedIds.has(p.id))
+    return products
+      .filter(p => !usedIds.has(p.id))
+      .sort((a, b) => a.name.localeCompare(b.name))
   }, [products, rows])
+
+  const addProductSuggestions = useMemo(() => {
+    if (!addProductQuery.trim()) return unusedProducts.slice(0, 15)
+    const q = addProductQuery.trim().toLowerCase()
+    return unusedProducts
+      .filter(p => (p.name || '').toLowerCase().includes(q))
+      .slice(0, 15)
+  }, [unusedProducts, addProductQuery])
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (addProductRef.current && !addProductRef.current.contains(e.target as Node)) {
+        setAddProductOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const filteredRowsWithIndex = useMemo(() => {
+    if (!itemSearch.trim()) return rows.map((row, i) => ({ row, index: i }))
+    const q = itemSearch.trim().toLowerCase()
+    return rows
+      .map((row, i) => ({ row, index: i }))
+      .filter(({ row }) => (row.product_name || '').trim().toLowerCase().includes(q))
+  }, [rows, itemSearch])
 
   // Low-stock list: same logic as Reorder List (stock) for "Add from low stock" in this form
   const lowStockRows = useMemo((): ReorderRow[] => {
@@ -232,6 +283,8 @@ const ReorderForm = () => {
         last_qty: last?.qty ?? null,
         last_rate: last?.rate ?? null,
         reorder_qty: suggested,
+        reorder_qty_box: 1,
+        reorder_qty_piece: suggested,
         reorder_rate: last?.rate ?? 0,
       })
     })
@@ -256,18 +309,25 @@ const ReorderForm = () => {
 
   const orderDate = new Date().toISOString().slice(0, 10)
 
+  const getOrderedQty = (r: ReorderRow) =>
+    r.reorder_qty_box > 0 && r.reorder_qty_piece > 0 ? r.reorder_qty_box * r.reorder_qty_piece : (r.reorder_qty_box || r.reorder_qty_piece)
+
   const buildReorderItems = () =>
     rows
-      .filter(r => r.reorder_qty > 0)
-      .map(r => ({
+      .filter(r => getOrderedQty(r) > 0)
+      .map(r => {
+        const orderedQty = getOrderedQty(r)
+        return {
         product_id: r.product_id,
         product_name: r.product_name,
         unit_price: r.reorder_rate,
-        ordered_qty: r.reorder_qty,
+        ordered_qty: orderedQty,
+        ordered_qty_box: r.reorder_qty_box,
+        ordered_qty_piece: r.reorder_qty_piece,
         received_qty: 0,
-        total: Math.round(r.reorder_qty * r.reorder_rate * 100) / 100,
+        total: Math.round(orderedQty * r.reorder_rate * 100) / 100,
         gst_rate: reorderType === 'gst' ? 18 : undefined,
-      }))
+      }})
 
   const placeOrder = async () => {
     if (!companyId) {
@@ -280,7 +340,7 @@ const ReorderForm = () => {
     }
     const items = buildReorderItems()
     if (items.length === 0) {
-      toast.error('Add at least one item and set Reorder Qty > 0')
+      toast.error('Add at least one item and set Qty (Box) × Qty (Piece) > 0')
       return
     }
     const roNum = reorderNumber?.trim() || `RO-${new Date().toISOString().slice(0, 10)}-${Date.now().toString().slice(-4)}`
@@ -326,7 +386,7 @@ const ReorderForm = () => {
     }
     const items = buildReorderItems()
     if (items.length === 0) {
-      toast.error('Add at least one item and set Reorder Qty > 0 to export')
+      toast.error('Add at least one item and set Qty (Box) × Qty (Piece) > 0 to export')
       return
     }
     const roNum = reorderNumber?.trim() || `RO-${Date.now()}`
@@ -347,7 +407,7 @@ const ReorderForm = () => {
           grand_total: Math.round((subtotal + totalTax) * 100) / 100,
           items,
         },
-        undefined,
+        companyName || undefined,
         `Reorder_${roNum}`
       )
       toast.success('PDF downloaded')
@@ -364,7 +424,7 @@ const ReorderForm = () => {
     }
     const items = buildReorderItems()
     if (items.length === 0) {
-      toast.error('Add at least one item and set Reorder Qty > 0 to export')
+      toast.error('Add at least one item and set Qty (Box) × Qty (Piece) > 0 to export')
       return
     }
     const roNum = reorderNumber?.trim() || `RO-${Date.now()}`
@@ -385,7 +445,7 @@ const ReorderForm = () => {
           grand_total: Math.round((subtotal + totalTax) * 100) / 100,
           items,
         },
-        undefined,
+        companyName || undefined,
         `Reorder_${roNum}`
       )
       toast.success('Excel downloaded')
@@ -398,18 +458,20 @@ const ReorderForm = () => {
   const continueToGSTPurchase = () => {
     if (!selectedSupplierId || !selectedSupplier || rows.length === 0) return
     const items: PurchaseItem[] = rows
-      .filter(r => r.reorder_qty > 0)
-      .map(r => ({
+      .filter(r => getOrderedQty(r) > 0)
+      .map(r => {
+        const qty = getOrderedQty(r)
+        return {
         product_id: r.product_id,
         product_name: r.product_name,
-        quantity: r.reorder_qty,
+        quantity: qty,
         unit_price: r.reorder_rate,
-        total: Math.round(r.reorder_qty * r.reorder_rate * 100) / 100,
+        total: Math.round(qty * r.reorder_rate * 100) / 100,
         gst_rate: 18,
         tax_amount: 0,
         hsn_code: '',
         purchase_type: 'purchase' as const,
-      }))
+      }})
     if (items.length === 0) return
     navigate(reorderType === 'gst' ? '/purchases/new-gst' : '/purchases/new-simple', {
       state: {
@@ -423,7 +485,7 @@ const ReorderForm = () => {
     })
   }
 
-  const canContinue = selectedSupplierId && selectedSupplier && rows.some(r => r.reorder_qty > 0)
+  const canContinue = selectedSupplierId && selectedSupplier && rows.some(r => getOrderedQty(r) > 0)
 
   return (
     <ProtectedRoute requiredPermission="purchases:create">
@@ -510,6 +572,16 @@ const ReorderForm = () => {
                 </div>
               </div>
 
+              {/* Order from - your business */}
+              {companyName && (
+                <div className="bg-indigo-50 rounded-xl border border-indigo-200 p-4">
+                  <p className="text-sm text-indigo-800 font-medium">
+                    Order from: <span className="font-bold text-indigo-900">{companyName}</span>
+                  </p>
+                  <p className="text-xs text-indigo-600 mt-1">Suppliers will see this on the reorder PDF/Excel.</p>
+                </div>
+              )}
+
               {/* Supplier selection */}
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                 <h2 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
@@ -539,17 +611,66 @@ const ReorderForm = () => {
               </div>
 
               {/* Listed products: from supplier's previous purchases or from low stock list */}
-              {(selectedSupplierId || rows.length > 0 || lowStockRows.length > 0) && (
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                  <div className="p-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-4">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="p-4 border-b border-gray-200 space-y-3">
+                  <div className="flex flex-wrap items-center gap-4">
                     <h2 className="text-lg font-semibold text-gray-900">
-                      {selectedSupplierId ? `Products from previous purchases — ${selectedSupplier?.name}` : 'Items to order'}
+                      {selectedSupplierId ? `Products from ${selectedSupplier?.name}` : 'Items to order'}
                     </h2>
-                    <p className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded w-full sm:w-auto">
-                      Set <strong>Reorder Qty</strong> and <strong>Rate</strong> for each row, then use Place Order or Download PDF/Excel.
-                    </p>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button
+                    <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2 border border-gray-200">
+                      <Search className="w-4 h-4 text-gray-500 shrink-0" />
+                      <input
+                        type="text"
+                        value={itemSearch}
+                        onChange={e => setItemSearch(e.target.value)}
+                        placeholder="Search items by name..."
+                        className="w-48 sm:w-56 px-2 py-1.5 bg-white border border-gray-300 rounded text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        title="Filter items by product name"
+                      />
+                    </div>
+                    <div className="relative" ref={addProductRef}>
+                      <input
+                        type="text"
+                        value={addProductQuery}
+                        onChange={e => {
+                          setAddProductQuery(e.target.value)
+                          setAddProductOpen(true)
+                        }}
+                        onFocus={() => setAddProductOpen(true)}
+                        placeholder={selectedSupplierId ? 'Search to add product...' : 'Select supplier first'}
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm min-w-[220px] bg-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+                        disabled={!selectedSupplierId}
+                        title={selectedSupplierId ? 'Add any product to the order' : 'Select a supplier first'}
+                      />
+                      {addProductOpen && selectedSupplierId && (addProductQuery.trim() || addProductSuggestions.length > 0) && (
+                        <div className="absolute top-full left-0 mt-1 w-full max-h-60 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[220px]">
+                          {addProductSuggestions.length === 0 ? (
+                            <div className="px-3 py-2 text-sm text-gray-500">No matching products</div>
+                          ) : (
+                            addProductSuggestions.map(p => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => {
+                                  addProductRow(p.id)
+                                  setAddProductQuery('')
+                                  setAddProductOpen(false)
+                                }}
+                                className="w-full px-3 py-2 text-left text-sm hover:bg-indigo-50 border-b border-gray-100 last:border-0"
+                              >
+                                {p.name}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded w-full sm:w-auto">
+                    Set <strong>Qty (Box)</strong> and/or <strong>Qty (Piece)</strong> (or both: Box × Piece). Enter <strong>Rate</strong> for each row.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
                         type="button"
                         onClick={addFromLowStockList}
                         disabled={lowStockRows.length === 0}
@@ -564,21 +685,6 @@ const ReorderForm = () => {
                           </span>
                         )}
                       </button>
-                      <select
-                        value=""
-                        onChange={e => {
-                          const id = e.target.value ? parseInt(e.target.value) : undefined
-                          if (id) addProductRow(id)
-                          e.target.value = ''
-                        }}
-                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm min-w-[180px]"
-                      >
-                        <option value="">Add product...</option>
-                        {unusedProducts.slice(0, 100).map(p => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                        {unusedProducts.length > 100 && <option disabled>+{unusedProducts.length - 100} more</option>}
-                      </select>
                       <button
                         type="button"
                         disabled={saving}
@@ -632,14 +738,23 @@ const ReorderForm = () => {
                             <th className="px-3 py-2 text-left font-semibold text-gray-700 border-b border-gray-200">Last Purchase Date</th>
                             <th className="px-3 py-2 text-right font-semibold text-gray-700 border-b border-gray-200">Last Qty</th>
                             <th className="px-3 py-2 text-right font-semibold text-gray-700 border-b border-gray-200">Last Rate (₹)</th>
-                            <th className="px-3 py-2 text-right font-semibold text-gray-700 border-b border-gray-200">Reorder Qty</th>
+                            <th className="px-3 py-2 text-right font-semibold text-gray-700 border-b border-gray-200" title="Ordered Qty = Qty (Box) × Qty (Piece)">Ordered Qty</th>
+                            <th className="px-3 py-2 text-right font-semibold text-gray-700 border-b border-gray-200">Qty (Box)</th>
+                            <th className="px-3 py-2 text-right font-semibold text-gray-700 border-b border-gray-200">Qty (Piece)</th>
                             <th className="px-3 py-2 text-right font-semibold text-gray-700 border-b border-gray-200">Rate (₹)</th>
                             <th className="px-3 py-2 text-right font-semibold text-gray-700 border-b border-gray-200">Total</th>
                             <th className="px-3 py-2 w-16 border-b border-gray-200" />
                           </tr>
                         </thead>
                         <tbody>
-                          {rows.map((row, index) => (
+                          {filteredRowsWithIndex.length === 0 && itemSearch.trim() ? (
+                            <tr>
+                              <td colSpan={10} className="px-4 py-6 text-center text-gray-500">
+                                No items match &quot;{itemSearch.trim()}&quot;
+                              </td>
+                            </tr>
+                          ) : (
+                          filteredRowsWithIndex.map(({ row, index }) => (
                             <tr key={`${row.product_id}-${index}`} className="border-b border-gray-100 hover:bg-gray-50">
                               <td className="px-3 py-2 font-medium text-gray-900">
                                 {row.product_name}
@@ -656,18 +771,37 @@ const ReorderForm = () => {
                               <td className="px-3 py-2 text-right text-gray-600">
                                 {row.last_rate != null ? `₹${row.last_rate.toFixed(2)}` : '—'}
                               </td>
+                              <td className="px-3 py-2 text-right text-gray-800 font-medium" title="Ordered Qty = Box × Piece, or Box or Piece when only one is set">
+                                {getOrderedQty(row)}
+                              </td>
                               <td className="px-3 py-2">
                                 <input
                                   type="text"
                                   inputMode="numeric"
-                                  value={row.reorder_qty === 0 ? '' : String(row.reorder_qty)}
+                                  value={row.reorder_qty_box === 0 ? '' : String(row.reorder_qty_box)}
                                   onChange={e => {
                                     const v = e.target.value.replace(/[^0-9.]/g, '')
                                     const num = v === '' ? 0 : Math.max(0, parseFloat(v) || 0)
-                                    updateRow(index, 'reorder_qty', num)
+                                    updateRow(index, 'reorder_qty_box', num)
                                   }}
                                   placeholder="0"
                                   className="w-20 px-2 py-1.5 border border-gray-300 rounded text-right"
+                                  title="Ordered Qty in Box"
+                                />
+                              </td>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={row.reorder_qty_piece === 0 ? '' : String(row.reorder_qty_piece)}
+                                  onChange={e => {
+                                    const v = e.target.value.replace(/[^0-9.]/g, '')
+                                    const num = v === '' ? 0 : Math.max(0, parseFloat(v) || 0)
+                                    updateRow(index, 'reorder_qty_piece', num)
+                                  }}
+                                  placeholder="0"
+                                  className="w-20 px-2 py-1.5 border border-gray-300 rounded text-right"
+                                  title="Ordered Qty in Piece"
                                 />
                               </td>
                               <td className="px-3 py-2">
@@ -685,7 +819,7 @@ const ReorderForm = () => {
                                 />
                               </td>
                               <td className="px-3 py-2 text-right font-medium">
-                                ₹{(row.reorder_qty * row.reorder_rate).toFixed(2)}
+                                ₹{(getOrderedQty(row) * row.reorder_rate).toFixed(2)}
                               </td>
                               <td className="px-3 py-2">
                                 <button
@@ -696,14 +830,14 @@ const ReorderForm = () => {
                                   Remove
                                 </button>
                               </td>
-                            </tr>
-                          ))}
+                              </tr>
+                            ))
+                          )}
                         </tbody>
                       </table>
                     </div>
                   )}
                 </div>
-              )}
             </div>
           )}
         </main>

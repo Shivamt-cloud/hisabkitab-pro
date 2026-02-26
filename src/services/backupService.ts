@@ -204,8 +204,12 @@ export const backupService = {
     importStockAdjustments?: boolean
     merge?: boolean // If false, clear existing data first
     companyId?: number | null // Optional: company ID to assign to imported records
+    signal?: AbortSignal // Optional: abort to stop import
   } = {}): Promise<{ success: boolean; message: string; imported: number }> => {
     try {
+      if (options.signal?.aborted) {
+        return { success: false, message: 'Import stopped by user.', imported: 0 }
+      }
       const backup: BackupData = JSON.parse(jsonString)
       const companyId = options.companyId
 
@@ -552,7 +556,10 @@ export const backupService = {
         allSuppliers.forEach(s => {
           supplierNameMap.set(s.name.toLowerCase(), s)
         })
-        
+        // Lazy-created placeholder supplier for purchases with no supplier name (e.g. Excel import without supplier column)
+        let noSupplierId: number | null = null
+        const NO_SUPPLIER_PLACEHOLDER_NAME = 'Imported (No supplier)'
+
         let processedCount = 0
         let skippedCount = 0
         let errorCount = 0
@@ -569,6 +576,14 @@ export const backupService = {
         let batchStart = 0
         
         while (batchStart < totalPurchases) {
+          if (options.signal?.aborted) {
+            console.log(`⏹ Import stopped by user. Imported ${purchaseImportedCount} purchases so far.`)
+            return {
+              success: importedCount > 0,
+              message: `Import stopped by user. ${importedCount} record(s) were imported before stopping.`,
+              imported: importedCount,
+            }
+          }
           const batch = backup.data.purchases.slice(batchStart, batchStart + BATCH_SIZE)
           
           for (const purchase of batch) {
@@ -758,15 +773,16 @@ export const backupService = {
                 }
               }
 
-              // Verify supplier exists - check by company_id and name (using Map for O(1) lookup)
-              let supplierId = purchase.supplier_id
-              if (!supplierId && purchase.supplier_name) {
-                // Try to find supplier by name (using Map)
-                const supplier = supplierNameMap.get(purchase.supplier_name.toLowerCase())
-                
+              // Resolve supplier by name first (file supplier_id is not trusted after import - IDs change).
+              // This ensures purchases imported without a supplier column get a real supplier created/linked.
+              let supplierId: number | null = null
+              const supplierName = (purchase.supplier_name && String(purchase.supplier_name).trim()) || ''
+
+              if (supplierName) {
+                // Reuse existing supplier by name (same name = same supplier, no duplicate creation)
+                const supplier = supplierNameMap.get(supplierName.toLowerCase())
                 if (supplier && (!companyId || supplier.company_id === companyId || !supplier.company_id)) {
                   supplierId = supplier.id
-                  // Update supplier with GSTIN if missing (batch updates later)
                   if (purchase.supplier_gstin && !supplier.gstin) {
                     try {
                       await supplierService.update(supplier.id, {
@@ -780,10 +796,9 @@ export const backupService = {
                     }
                   }
                 } else {
-                  // Supplier not found - create it
                   try {
                     const newSupplier = await supplierService.create({
-                      name: purchase.supplier_name,
+                      name: supplierName,
                       email: '',
                       phone: '',
                       gstin: purchase.supplier_gstin || '',
@@ -796,34 +811,46 @@ export const backupService = {
                       company_id: companyId ?? undefined,
                     })
                     supplierId = newSupplier.id
-                    supplierNameMap.set(purchase.supplier_name.toLowerCase(), newSupplier)
+                    supplierNameMap.set(supplierName.toLowerCase(), newSupplier) // so next purchase with same name reuses this supplier
                     allSuppliers.push(newSupplier)
                   } catch (supplierError: any) {
                     errorCount++
-                    continue // Skip this purchase if supplier can't be created
+                    continue
                   }
                 }
-              } else if (supplierId) {
-                // Supplier ID provided - verify it exists
-                const supplier = allSuppliers.find(s => s.id === supplierId)
-                if (!supplier) {
-                  // Try to find by name
-                  if (purchase.supplier_name) {
-                    const supplierByName = supplierNameMap.get(purchase.supplier_name.toLowerCase())
-                    if (supplierByName && (!companyId || supplierByName.company_id === companyId || !supplierByName.company_id)) {
-                      supplierId = supplierByName.id
-                    } else {
+              }
+
+              if (!supplierId) {
+                // No supplier name in file (e.g. purchase-only import without supplier column) - use placeholder
+                if (noSupplierId === null) {
+                  let existing = supplierNameMap.get(NO_SUPPLIER_PLACEHOLDER_NAME.toLowerCase())
+                  if (existing && (!companyId || existing.company_id === companyId || !existing.company_id)) {
+                    noSupplierId = existing.id
+                  } else {
+                    try {
+                      const placeholder = await supplierService.create({
+                        name: NO_SUPPLIER_PLACEHOLDER_NAME,
+                        email: '',
+                        phone: '',
+                        gstin: '',
+                        address: '',
+                        city: '',
+                        state: '',
+                        pincode: '',
+                        contact_person: '',
+                        is_registered: false,
+                        company_id: companyId ?? undefined,
+                      })
+                      noSupplierId = placeholder.id
+                      supplierNameMap.set(NO_SUPPLIER_PLACEHOLDER_NAME.toLowerCase(), placeholder)
+                      allSuppliers.push(placeholder)
+                    } catch (e: any) {
                       errorCount++
                       continue
                     }
-                  } else {
-                    errorCount++
-                    continue
                   }
-                } else if (companyId && supplier.company_id && supplier.company_id !== companyId) {
-                  errorCount++
-                  continue
                 }
+                supplierId = noSupplierId
               }
 
               if (!supplierId) {
@@ -836,7 +863,7 @@ export const backupService = {
             // CRITICAL: Preserve barcode and article fields for sales functionality
             // ALWAYS assign sequential IDs (SR No) to items: 1, 2, 3, ...
             // This ensures consistent sequential numbering regardless of Excel SrNo column
-            const validItems = processedItems.map((item: any, index: number) => {
+              const validItems = processedItems.map((item: any, index: number) => {
               const cleanItem: any = { ...item }
               // Remove internal processing flags
               delete cleanItem._needsProductCreation
@@ -844,6 +871,12 @@ export const backupService = {
               delete cleanItem._creationReason
               // Ensure product_id is a number (should be set by now, but fallback to 0)
               cleanItem.product_id = cleanItem.product_id || 0
+              // Auto-calculate item total from quantity × unit_price when missing or zero (e.g. import without total column)
+              const qty = Number(cleanItem.quantity) || 0
+              const unitPrice = Number(cleanItem.unit_price ?? cleanItem.purchase_price) ?? 0
+              if (qty >= 0 && (cleanItem.total == null || cleanItem.total === 0)) {
+                cleanItem.total = Math.round(qty * unitPrice * 100) / 100
+              }
               // ALWAYS assign sequential ID (SR No) starting from 1
               // System ignores any SrNo from Excel sheet and uses its own logic
               cleanItem.id = index + 1
@@ -901,17 +934,24 @@ export const backupService = {
               continue
             }
 
+            // When grand_total is 0 (e.g. import without total column), derive from item totals
+            const itemsSum = validItems.reduce((sum: number, it: any) => sum + (Number(it.total) || 0), 0)
+            const roundedItemsSum = Math.round(itemsSum * 100) / 100
+
             if (purchase.type === 'gst') {
               const gstPurchase = purchase as any
+              const subtotal = gstPurchase.subtotal || 0
+              const totalTax = gstPurchase.total_tax || gstPurchase.tax_amount || 0
+              const grandTotal = gstPurchase.grand_total || (roundedItemsSum > 0 ? roundedItemsSum : subtotal + totalTax)
               try {
                 const createdPurchase = await purchaseService.createGST({
                   supplier_id: supplierId,
                   invoice_number: gstPurchase.invoice_number || '',
                   purchase_date: gstPurchase.purchase_date,
                   items: validItems,
-                  subtotal: gstPurchase.subtotal || 0,
-                  total_tax: gstPurchase.total_tax || gstPurchase.tax_amount || 0,
-                  grand_total: gstPurchase.grand_total || 0,
+                  subtotal: subtotal || (roundedItemsSum > 0 ? roundedItemsSum - totalTax : 0),
+                  total_tax: totalTax,
+                  grand_total: grandTotal,
                   payment_status: (gstPurchase.payment_status || 'pending') as any,
                   notes: gstPurchase.notes,
                   company_id: companyId, // Set company_id from options
@@ -935,13 +975,14 @@ export const backupService = {
               }
             } else {
               const simplePurchase = purchase as any
+              const totalAmount = simplePurchase.total_amount || (roundedItemsSum > 0 ? roundedItemsSum : 0)
               try {
                 const createdPurchase = await purchaseService.createSimple({
                   supplier_id: supplierId,
                   invoice_number: simplePurchase.invoice_number,
                   purchase_date: simplePurchase.purchase_date,
                   items: validItems,
-                  total_amount: simplePurchase.total_amount || 0,
+                  total_amount: totalAmount,
                   payment_status: (simplePurchase.payment_status || 'pending') as any,
                   notes: simplePurchase.notes,
                   company_id: companyId, // Set company_id from options

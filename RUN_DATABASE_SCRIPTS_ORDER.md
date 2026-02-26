@@ -2,6 +2,8 @@
 
 Use this order so the app has all required tables and columns.
 
+**One-shot option:** Run **`FINAL_SUPABASE_RUN_ALL.sql`** once in Supabase SQL Editor. It includes all parts below in the correct order. Safe to re-run.
+
 ## 1. Base schema (run first, once)
 
 **`RUN_ALL_SUPABASE_TABLES_ONE_SCRIPT.sql`**
@@ -35,6 +37,20 @@ Use this order so the app has all required tables and columns.
 
 - **registration_requests:** `access_type` TEXT DEFAULT 'combo' (mobile | desktop | combo)
 - **companies:** `access_type` TEXT DEFAULT 'combo'
+- Safe to re-run
+
+## 2.6.5. Reorder ordered qty (box × piece)
+
+**`ADD_ORDERED_QTY_BOX_PIECE.sql`**
+
+- **purchase_reorder_items:** `ordered_qty_box`, `ordered_qty_piece` for Ordered Qty breakdown
+- Safe to re-run
+
+## 2.7. Reorder received box/piece (run after ADD_ORDERED_QTY_BOX_PIECE)
+
+**`ADD_RECEIVED_QTY_BOX_PIECE.sql`**
+
+- **purchase_reorder_items:** `received_qty_box`, `received_qty_piece` for Received Qty breakdown
 - Safe to re-run
 
 ## 3. App-specific columns and constraints (run after 1 and 2)
@@ -84,5 +100,7 @@ These are **not required** if you have run the three steps above (RUN_ALL → AP
 - [ ] Run **ADD_STARTER_TIER_AND_DEVICE_LIMITS.sql** (Starter plan + device limits for all tiers)
 - [ ] Run **ADD_ACCESS_TYPE_COLUMN.sql** (Mobile / Desktop / Combo device choice)
 - [ ] Run **APPLY_REMAINING_SUPABASE_MIGRATIONS.sql**
+- [ ] Run **ADD_ORDERED_QTY_BOX_PIECE.sql** (reorder: ordered qty box/piece)
+- [ ] Run **ADD_RECEIVED_QTY_BOX_PIECE.sql** (reorder: received qty box/piece; run after ADD_ORDERED_QTY_BOX_PIECE)
 
 After these, the database has everything the app expects for Supabase sync.

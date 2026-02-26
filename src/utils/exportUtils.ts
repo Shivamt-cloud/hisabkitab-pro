@@ -6,10 +6,14 @@
 import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
+import { CONTACT_EMAIL, CONTACT_WEBSITE_DISPLAY, CONTACT_WEBSITE_URL, CONTACT_WHATSAPP_NUMBER, CONTACT_WHATSAPP_URL } from '../constants'
 
 /** Shown on all PDFs and Excel exports so readers can reach us */
 export const POWERED_BY_TEXT = 'Powered by HisabKitab Pro · hisabkitabpro.com'
-export const POWERED_BY_URL = 'https://hisabkitabpro.com'
+export const POWERED_BY_CONTACT = `WhatsApp: +91 ${CONTACT_WHATSAPP_NUMBER} · Email: ${CONTACT_EMAIL}`
+export const POWERED_BY_URL = CONTACT_WEBSITE_URL
+export const POWERED_BY_WHATSAPP_URL = CONTACT_WHATSAPP_URL
+export const POWERED_BY_EMAIL = CONTACT_EMAIL
 
 /**
  * Export data to Excel file
@@ -24,7 +28,7 @@ export function exportToExcel(
   const workbook = XLSX.utils.book_new()
   
   // Add headers row + data + powered-by footer
-  const worksheetData = [headers, ...data, [], [POWERED_BY_TEXT]]
+  const worksheetData = [headers, ...data, [], [POWERED_BY_TEXT], [POWERED_BY_CONTACT]]
   
   // Create worksheet from array
   const worksheet = XLSX.utils.aoa_to_sheet(worksheetData)
@@ -59,7 +63,7 @@ export function exportMultiSheetExcel(
 ): void {
   const workbook = XLSX.utils.book_new()
   for (const { sheetName, headers, rows } of sheets) {
-    const worksheetData = [headers, ...rows, [], [POWERED_BY_TEXT]]
+    const worksheetData = [headers, ...rows, [], [POWERED_BY_TEXT], [POWERED_BY_CONTACT]]
     const worksheet = XLSX.utils.aoa_to_sheet(worksheetData)
     const maxWidths = headers.map((header, colIndex) => {
       const dataWidth = Math.max(
@@ -384,6 +388,7 @@ export function exportDataToPDF(
   pdf.setFont('helvetica', 'normal')
   pdf.setTextColor(100, 100, 100)
   pdf.text(POWERED_BY_TEXT, pageWidth / 2, pageHeight - 10, { align: 'center' })
+  pdf.text(POWERED_BY_CONTACT, pageWidth / 2, pageHeight - 5, { align: 'center' })
   pdf.setTextColor(0, 0, 0)
 
   // Save PDF
@@ -503,7 +508,7 @@ export function exportInvoiceToPDF(
     pdf.text(item.product_name, margin, yPosition)
     pdf.text(`${item.quantity} ${item.unit || 'pcs'}`, margin + 60, yPosition)
     pdf.text(`₹${item.unit_price.toFixed(2)}`, margin + 80, yPosition)
-    pdf.text(`₹${item.total.toFixed(2)}`, pageWidth - margin - 30, yPosition, { align: 'right' })
+    pdf.text(`₹${(item.total ?? 0).toFixed(2)}`, pageWidth - margin - 30, yPosition, { align: 'right' })
     yPosition += 7
   })
 
@@ -546,6 +551,8 @@ export function exportInvoiceToPDF(
   pdf.setFontSize(9)
   pdf.setTextColor(80, 80, 80)
   pdf.text(POWERED_BY_TEXT, pageWidth / 2, yPosition, { align: 'center' })
+  yPosition += 5
+  pdf.text(POWERED_BY_CONTACT, pageWidth / 2, yPosition, { align: 'center' })
   pdf.setTextColor(0, 0, 0)
 
   // Save PDF
@@ -993,11 +1000,13 @@ export function buildReceiptHTML(
       ${instagramHandle ? `<div style="margin-top: 2px; font-size: 9px;">Instagram: ${instagramHandle}</div>` : ''}
       ${facebookPage ? `<div style="margin-top: 2px; font-size: 9px;">Facebook: ${facebookPage}</div>` : ''}
       <div style="margin-top: 6px; font-size: 10px; font-weight: 600; color: #4f46e5;">${POWERED_BY_TEXT}</div>
+      <div style="margin-top: 2px; font-size: 9px;">${POWERED_BY_CONTACT}</div>
       <div style="margin-top: 4px; font-size: 9px;">This is a computer-generated receipt</div>
     </div>
     ` : `
     <div class="footer">
       <div style="margin-top: 6px; font-size: 10px; font-weight: 600; color: #4f46e5;">${POWERED_BY_TEXT}</div>
+      <div style="margin-top: 2px; font-size: 9px;">${POWERED_BY_CONTACT}</div>
       <div style="margin-top: 4px; font-size: 9px;">This is a computer-generated receipt</div>
     </div>`}
   </div>
@@ -1038,15 +1047,12 @@ export function printReceipt(
 }
 
 // --- Reorder PDF/Excel export with app advertisement ---
-const REORDER_AD_LINK = 'https://hisabkitabpro.com/login'
+const REORDER_AD_LINK = `${CONTACT_WEBSITE_URL}/login`
 const REORDER_AD_TEXT = [
   'HisabKitab-Pro – Inventory & Business Management',
   `Login: ${REORDER_AD_LINK}`,
-  'India pricing (First Year Discount Applied – 50% OFF):',
-  '• Basic: ₹6,000/year (₹500/month) – 1 device + 1 mobile',
-  '• Standard: ₹7,980/year (₹665/month) – 3 devices + 1 mobile (Most popular)',
-  '• Premium: ₹12,000/year (₹1,000/month) – Unlimited devices',
-  'Features: Inventory, GST/simple purchases, sales, customers, suppliers, reports, multi-company.',
+  `WhatsApp: +91 ${CONTACT_WHATSAPP_NUMBER} · Email: ${CONTACT_EMAIL}`,
+  'Start from Rs. 55/month only',
 ]
 
 export interface ReorderExportData {
@@ -1063,6 +1069,8 @@ export interface ReorderExportData {
   items: Array<{
     product_name?: string
     ordered_qty: number
+    ordered_qty_box?: number
+    ordered_qty_piece?: number
     unit_price: number
     total: number
     hsn_code?: string
@@ -1082,8 +1090,16 @@ export function exportReorderToPdf(
 
   pdf.setFontSize(16)
   pdf.setFont('helvetica', 'bold')
-  pdf.text(companyName || 'Purchase Reorder', margin, y)
-  y += 8
+  pdf.text('Purchase Reorder', margin, y)
+  y += 6
+  if (companyName) {
+    pdf.setFontSize(11)
+    pdf.setFont('helvetica', 'bold')
+    pdf.setTextColor(79, 70, 229)
+    pdf.text(`Order from: ${companyName}`, margin, y)
+    pdf.setTextColor(0, 0, 0)
+    y += 6
+  }
   pdf.setFontSize(10)
   pdf.setFont('helvetica', 'normal')
   pdf.text(`Reorder #: ${data.reorder_number}`, margin, y)
@@ -1101,11 +1117,21 @@ export function exportReorderToPdf(
   }
   y += 10
 
+  // Column positions (mm from left) - spaced for clear alignment
+  const colItem = margin
+  const colQty = 60
+  const colBox = 75
+  const colPiece = 90
+  const colRate = 105
+  const colAmountX = pageWidth - margin - 5
+
   pdf.setFont('helvetica', 'bold')
-  pdf.text('Item', margin, y)
-  pdf.text('Qty', margin + 80, y)
-  pdf.text('Rate (₹)', margin + 100, y)
-  pdf.text('Amount (₹)', pageWidth - margin - 25, y, { align: 'right' })
+  pdf.text('Item', colItem, y)
+  pdf.text('Qty', colQty, y)
+  pdf.text('Box', colBox, y)
+  pdf.text('Piece', colPiece, y)
+  pdf.text('Rate (Rs.)', colRate, y)
+  pdf.text('Amount (Rs.)', colAmountX, y, { align: 'right' })
   y += 6
   pdf.line(margin, y, pageWidth - margin, y)
   y += 6
@@ -1115,47 +1141,55 @@ export function exportReorderToPdf(
       pdf.addPage()
       y = margin
     }
-    pdf.text(item.product_name || '—', margin, y)
-    pdf.text(String(item.ordered_qty), margin + 80, y)
-    pdf.text(`₹${Number(item.unit_price).toFixed(2)}`, margin + 100, y)
-    pdf.text(`₹${Number(item.total).toFixed(2)}`, pageWidth - margin - 25, y, { align: 'right' })
+    pdf.text((item.product_name || '—').slice(0, 28), colItem, y)
+    pdf.text(String(item.ordered_qty), colQty, y)
+    pdf.text(String(item.ordered_qty_box ?? 0), colBox, y)
+    pdf.text(String(item.ordered_qty_piece ?? 0), colPiece, y)
+    pdf.text(`Rs.${Number(item.unit_price).toFixed(2)}`, colRate, y)
+    pdf.text(`Rs.${Number(item.total ?? 0).toFixed(2)}`, colAmountX, y, { align: 'right' })
     y += 6
   })
   y += 6
   pdf.line(margin, y, pageWidth - margin, y)
   y += 6
   pdf.text('Subtotal:', pageWidth - margin - 45, y, { align: 'right' })
-  pdf.text(`₹${data.subtotal.toFixed(2)}`, pageWidth - margin - 5, y, { align: 'right' })
+  pdf.text(`Rs.${data.subtotal.toFixed(2)}`, pageWidth - margin - 5, y, { align: 'right' })
   y += 5
   if (data.total_tax > 0) {
     pdf.text('Tax:', pageWidth - margin - 45, y, { align: 'right' })
-    pdf.text(`₹${data.total_tax.toFixed(2)}`, pageWidth - margin - 5, y, { align: 'right' })
+    pdf.text(`Rs.${data.total_tax.toFixed(2)}`, pageWidth - margin - 5, y, { align: 'right' })
     y += 5
   }
   pdf.setFont('helvetica', 'bold')
   pdf.text('Grand Total:', pageWidth - margin - 45, y, { align: 'right' })
-  pdf.text(`₹${data.grand_total.toFixed(2)}`, pageWidth - margin - 5, y, { align: 'right' })
+  pdf.text(`Rs.${data.grand_total.toFixed(2)}`, pageWidth - margin - 5, y, { align: 'right' })
   y += 15
 
-  // Ad block
+  // Ad block – centered and highlighted
   if (y > pdf.internal.pageSize.height - 55) {
     pdf.addPage()
     y = margin
   }
-  pdf.setFontSize(10)
+  const centerX = pageWidth / 2
+  pdf.setFontSize(11)
   pdf.setFont('helvetica', 'bold')
-  pdf.text(POWERED_BY_TEXT, margin, y)
-  y += 6
+  pdf.setTextColor(79, 70, 229) // indigo-600 highlight
+  pdf.text(POWERED_BY_TEXT, centerX, y, { align: 'center' })
+  y += 5
+  pdf.text(POWERED_BY_CONTACT, centerX, y, { align: 'center' })
+  pdf.setTextColor(0, 0, 0)
+  y += 8
+  pdf.setFontSize(9)
   pdf.setFont('helvetica', 'normal')
   REORDER_AD_TEXT.forEach((line) => {
     if (y > pdf.internal.pageSize.height - 15) {
       pdf.addPage()
       y = margin
     }
-    pdf.text(line, margin, y)
+    pdf.text(line, centerX, y, { align: 'center' })
     y += 5
   })
-  pdf.text(REORDER_AD_LINK, margin, y)
+  pdf.text(REORDER_AD_LINK, centerX, y, { align: 'center' })
   pdf.save(`${filename || `Reorder_${data.reorder_number}`}.pdf`)
 }
 
@@ -1165,7 +1199,8 @@ export function exportReorderToExcel(
   filename?: string
 ): void {
   const sheetData: any[][] = [
-    [companyName || 'Purchase Reorder'],
+    ['Purchase Reorder'],
+    ...(companyName ? [['Order from:', companyName]] : []),
     ['Reorder #', data.reorder_number],
     ['Order Date', data.order_date],
     ['Expected Date', data.expected_date || ''],
@@ -1173,10 +1208,12 @@ export function exportReorderToExcel(
     ['GSTIN', data.supplier_gstin || ''],
     ['Status', data.status],
     [],
-    ['Product', 'Ordered Qty', 'Unit Price', 'Total'],
+    ['Product', 'Ordered Qty', 'Qty (Box)', 'Qty (Piece)', 'Unit Price', 'Total'],
     ...data.items.map((it) => [
       it.product_name || '',
       it.ordered_qty,
+      it.ordered_qty_box ?? 0,
+      it.ordered_qty_piece ?? 0,
       it.unit_price,
       it.total,
     ]),

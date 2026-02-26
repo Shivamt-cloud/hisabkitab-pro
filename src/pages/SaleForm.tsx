@@ -1933,7 +1933,7 @@ const SaleForm = () => {
           if (item.purchase_item_unique_key === saleItem.purchase_item_unique_key) {
             const newQuantity = Math.max(0.01, Math.min(quantity, maxQuantity))
             const newTotal = Math.round(item.unit_price * newQuantity * 100) / 100
-            console.log(`[SaleForm] Updating quantity (unique key) for ${item.product_name}: ${item.quantity} -> ${newQuantity}, Total: ₹${item.total.toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
+            console.log(`[SaleForm] Updating quantity (unique key) for ${item.product_name}: ${item.quantity} -> ${newQuantity}, Total: ₹${(item.total ?? 0).toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
             return { ...item, quantity: newQuantity, total: newTotal }
           }
           return item
@@ -1953,7 +1953,7 @@ const SaleForm = () => {
           const newQuantity = Math.max(0.01, Math.min(quantity, maxQuantity))
           // Recalculate total based on new quantity and current unit price
           const newTotal = Math.round(item.unit_price * newQuantity * 100) / 100
-          console.log(`[SaleForm] Updating quantity for ${item.product_name}: ${item.quantity} -> ${newQuantity}, Unit Price: ₹${item.unit_price.toFixed(2)}, Total: ₹${item.total.toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
+          console.log(`[SaleForm] Updating quantity for ${item.product_name}: ${item.quantity} -> ${newQuantity}, Unit Price: ₹${item.unit_price.toFixed(2)}, Total: ₹${(item.total ?? 0).toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
           return {
             ...item,
             quantity: newQuantity,
@@ -2002,8 +2002,12 @@ const SaleForm = () => {
     }))
   }
 
+  // Subtotal: sale items add to total, return items subtract (so mixed cart shows correct amount due)
   const getSubtotal = () => {
-    return saleItems.reduce((sum, item) => sum + item.total, 0)
+    return saleItems.reduce((sum, item) => {
+      const amount = item.total || 0
+      return sum + (item.sale_type === 'return' ? -amount : amount)
+    }, 0)
   }
 
   // Calculate discount amount based on type
@@ -2591,12 +2595,12 @@ const SaleForm = () => {
                                 <>
                                   <span className="text-xs text-gray-600">MRP: ₹{mrpPerUnit.toFixed(2)} × {item.quantity} = ₹{mrpTotal.toFixed(2)}</span>
                                   <span className="text-gray-400">|</span>
-                                  <span className="text-xs text-gray-600">Sale: ₹{sellingPricePerUnit.toFixed(2)} × {item.quantity} = ₹{item.total.toFixed(2)}</span>
+                                  <span className="text-xs text-gray-600">Sale: ₹{sellingPricePerUnit.toFixed(2)} × {item.quantity} = ₹{(item.total ?? 0).toFixed(2)}</span>
                                   <span className="text-gray-400">|</span>
-                                  <span className="font-semibold text-gray-900">Total: ₹{item.total.toFixed(2)}</span>
+                                  <span className="font-semibold text-gray-900">Total: ₹{(item.total ?? 0).toFixed(2)}</span>
                                 </>
                               ) : (
-                                <span className="font-semibold text-gray-900">Total: ₹{item.total.toFixed(2)}</span>
+                                <span className="font-semibold text-gray-900">Total: ₹{(item.total ?? 0).toFixed(2)}</span>
                               )}
                               {item.mrp != null && item.mrp > item.unit_price && (
                                 <span className="text-green-600 text-xs font-medium">{discountPercent}% OFF</span>

@@ -3,7 +3,7 @@
  */
 import type { ServiceRecord, ServiceVehicleType } from '../types/serviceRecord'
 import { SERVICE_PAYMENT_METHODS, SERVICE_STATUS_LABELS, getServiceTotal } from '../types/serviceRecord'
-import { POWERED_BY_TEXT } from './exportUtils'
+import { POWERED_BY_TEXT, POWERED_BY_CONTACT } from './exportUtils'
 
 const VEHICLE_LABEL: Record<ServiceVehicleType, string> = {
   bike: 'Bike',
@@ -50,7 +50,7 @@ export function getServiceNotifyMessage(
     message += `Payment: ${paymentMethod} · ${paymentStatus}\n`
   }
   message += `\nThank you for your business! 🙏\n\n`
-  message += POWERED_BY_TEXT
+  message += `${POWERED_BY_TEXT}\n${POWERED_BY_CONTACT}`
   return message
 }
 
@@ -94,6 +94,6 @@ export function getUpcomingServiceReminderMessage(
   message += `\nPlease visit us for your next service. We look forward to serving you! 🙏\n\n`
   if (companyAddress) message += `${companyName}\n${companyAddress}\n\n`
   else message += `${companyName}\n\n`
-  message += POWERED_BY_TEXT
+  message += `${POWERED_BY_TEXT}\n${POWERED_BY_CONTACT}`
   return message
 }

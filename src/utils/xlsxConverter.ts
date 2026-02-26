@@ -16,6 +16,8 @@ export interface ConversionResult {
     customers?: number
     categories?: number
   }
+  /** Number of missing required values (Supplier Name, Bill No, Bill Date, Product/Desc, Qty) that were filled with placeholders */
+  placeholderChangeCount?: number
   validationWarnings?: {
     isValid: boolean
     missingColumns: string[]
@@ -38,16 +40,18 @@ function parseDate(dateStr: any): string {
   }
 
   const str = String(dateStr).trim()
-  
-  // Try parsing as Excel date number
-  if (typeof dateStr === 'number') {
+  if (str === '') return new Date().toISOString()
+
+  // Excel / Mac Numbers: date as number (e.g. 44927) or string number ("44927")
+  const asNum = typeof dateStr === 'number' ? dateStr : (str.match(/^\d+$/) ? parseInt(str, 10) : NaN)
+  if (!isNaN(asNum) && asNum > 0) {
     try {
-      // Excel dates are days since 1900-01-01
-      const excelEpoch = new Date(1899, 11, 30)
-      const date = new Date(excelEpoch.getTime() + dateStr * 86400000)
-      return date.toISOString()
+      // Excel/Mac Numbers: serial 1 = 1900-01-01, so epoch is 1899-12-31
+      const excelEpoch = new Date(1899, 11, 31)
+      const date = new Date(excelEpoch.getTime() + asNum * 86400000)
+      if (!isNaN(date.getTime())) return date.toISOString()
     } catch {
-      return new Date().toISOString()
+      // fall through to string parsing
     }
   }
 
@@ -88,7 +92,17 @@ function parseDate(dateStr: any): string {
 }
 
 /**
- * Clean and convert value to string
+ * Safe cell read: if column index is out of bounds or value is missing, return null (column not present = blank)
+ */
+function safeCell(row: any[], index: number | null): any {
+  if (index === null || index < 0) return null
+  if (!row || index >= row.length) return null
+  const v = row[index]
+  return v === undefined ? null : v
+}
+
+/**
+ * Clean and convert value to string; missing column => '' (blank)
  */
 function cleanString(value: any): string {
   if (value === null || value === undefined) {
@@ -98,7 +112,7 @@ function cleanString(value: any): string {
 }
 
 /**
- * Clean and convert value to number
+ * Clean and convert value to number; missing column => 0
  */
 function cleanNumber(value: any): number {
   if (value === null || value === undefined) {
@@ -116,10 +130,38 @@ function cleanNumber(value: any): number {
 }
 
 /**
- * Clean and convert value to integer
+ * Clean and convert value to integer; missing column => 0
  */
 function cleanInt(value: any): number {
   return Math.round(cleanNumber(value))
+}
+
+/** String from row column: missing column or empty => '' */
+function cellStr(row: any[], index: number | null): string {
+  return cleanString(safeCell(row, index))
+}
+
+/** Number from row column: missing column or empty => 0 */
+function cellNum(row: any[], index: number | null): number {
+  return cleanNumber(safeCell(row, index))
+}
+
+/** Optional value: missing column or empty => null */
+function cellOptional(row: any[], index: number | null): any {
+  const v = safeCell(row, index)
+  if (v === null || v === undefined) return null
+  const s = String(v).trim()
+  return s === '' ? null : v
+}
+
+/** Optional number: missing column or empty => null; otherwise number */
+function cellNumOptional(row: any[], index: number | null): number | null {
+  const v = safeCell(row, index)
+  if (v === null || v === undefined) return null
+  const s = String(v).trim()
+  if (s === '') return null
+  const n = parseFloat(String(v).replace(/,/g, ''))
+  return isNaN(n) ? null : n
 }
 
 /**
@@ -128,12 +170,29 @@ function cleanInt(value: any): number {
 function findColumnIndex(headers: string[], keywords: string[]): number | null {
   const headersLower = headers.map(h => String(h).toLowerCase().trim())
   for (const keyword of keywords) {
-    const index = headersLower.findIndex(h => h.includes(keyword.toLowerCase()))
+    const kw = keyword.toLowerCase()
+    const index = headersLower.findIndex(h => h && h.includes(kw))
     if (index !== -1) {
       return index
     }
   }
   return null
+}
+
+/** Try multiple rows as header and return the first result that has purchase data */
+function tryConvertPurchaseSheet(jsonData: any[][]): { purchases: any[]; suppliers: any[]; placeholderChangeCount: number } {
+  const maxHeaderRow = Math.min(15, Math.max(0, jsonData.length - 2))
+  let best = { purchases: [] as any[], suppliers: [] as any[], placeholderChangeCount: 0 }
+  for (let headerRow = 0; headerRow <= maxHeaderRow; headerRow++) {
+    const headerRowData = jsonData[headerRow]
+    if (!headerRowData || !Array.isArray(headerRowData)) continue
+    const headers = headerRowData.map((h: any) => String(h ?? '').trim())
+    const rows = jsonData.slice(headerRow + 1)
+    const result = convertPurchaseData(rows, headers)
+    if (result.purchases.length > 0) return result
+    best = result
+  }
+  return best
 }
 
 /**
@@ -288,21 +347,30 @@ function validateCustomerFormat(headers: string[]): {
 /**
  * Convert purchase data from Excel to JSON format
  */
+/** Generate a short random suffix for placeholders to keep keys unique */
+function randomSuffix(): string {
+  return Math.random().toString(36).slice(2, 8)
+}
+
 function convertPurchaseData(rows: any[][], headers: string[]): {
   suppliers: any[]
   purchases: any[]
+  placeholderChangeCount: number
 } {
-  // Find column indices
-  const supplierNameIdx = findColumnIndex(headers, ['customer name', 'supplier name', 'vendor name', 'supplier'])
+  let placeholderChangeCount = 0
+  // Find column indices (broad keywords to match Excel/Numbers variants)
+  const supplierNameIdx = findColumnIndex(headers, ['supplier name', 'customer name', 'vendor name', 'vendor', 'supplier', 'party name', 'party', 'from', 'name of supplier'])
   const gstinIdx = findColumnIndex(headers, ['gst number', 'gstin', 'gst no', 'gst'])
-  const invoiceNumberIdx = findColumnIndex(headers, ['bill no', 'invoice no', 'invoice number', 'bill number'])
-  const invoiceDateIdx = findColumnIndex(headers, ['bill date', 'invoice date', 'date', 'purchase date'])
+  const invoiceNumberIdx = findColumnIndex(headers, ['bill no', 'invoice no', 'invoice number', 'bill number', 'inv no', 'inv no.', 'invoice #', 'bill #', 'invoice', 'bill no.'])
+  const invoiceDateIdx = findColumnIndex(headers, ['bill date', 'invoice date', 'date', 'purchase date', 'bill dt', 'invoice dt', 'dt'])
   const hsnCodeIdx = findColumnIndex(headers, ['hsn', 'hsn code', 'hsn_code'])
-  const descriptionIdx = findColumnIndex(headers, ['desc', 'description', 'product', 'item', 'product name'])
+  // Prefer "Product" column for item name (avoids confusion with Desc); fallback to Desc/description
+  const productNameIdx = findColumnIndex(headers, ['product', 'product name', 'item', 'particulars', 'item name', 'item description', 'description'])
+  const descriptionIdx = findColumnIndex(headers, ['desc', 'description'])
   const articleIdx = findColumnIndex(headers, ['article', 'article no', 'article number', 'article code', 'art'])
   const barcodeIdx = findColumnIndex(headers, ['barcode', 'barcode no', 'barcode number', 'ean'])
   const gstRateIdx = findColumnIndex(headers, ['gst%', 'gst rate', 'gst_percent', 'tax rate', 'gst'])
-  const quantityIdx = findColumnIndex(headers, ['qty', 'quantity'])
+  const quantityIdx = findColumnIndex(headers, ['qty', 'quantity', 'qty.', 'nos', 'no. of', 'number'])
   const unitIdx = findColumnIndex(headers, ['unit', 'uom', 'unit of measure'])
   const taxableAmountIdx = findColumnIndex(headers, ['taxable amt', 'taxable amount', 'subtotal', 'base amount'])
   const sgstIdx = findColumnIndex(headers, ['sgst'])
@@ -313,20 +381,65 @@ function convertPurchaseData(rows: any[][], headers: string[]): {
   const salePriceIdx = findColumnIndex(headers, ['sale', 'sale price', 'selling price', 'sell price'])
   const mrpIdx = findColumnIndex(headers, ['mrp', 'maximum retail price', 'max retail price'])
 
+  // Positional fallback: if header matching failed (e.g. merged cells, different locale), use sample-template column order: SrNo, Supplier, GST, Bill No, Bill Date, HSN, Product, Desc, Article, Barcode, GST%, Qty, ...
+  const col = (idx: number | null, fallback: number) => (idx !== null ? idx : (headers.length > fallback ? fallback : 0))
+  const sIdx = col(supplierNameIdx, 1)
+  const iIdx = col(invoiceNumberIdx, 3)
+  const dIdx = col(invoiceDateIdx, 4)
+  const qIdx = col(quantityIdx, 11)
+  const descIdx = descriptionIdx ?? productNameIdx ?? 6
+
   const purchasesDict: Record<string, any> = {}
   const suppliersDict: Record<string, any> = {}
   let purchaseId = 1
 
+  // Carry-forward: many Excel sheets have Supplier/Bill No only on the first row of each bill; line-item rows have empty cells
+  let lastSupplierName = ''
+  let lastInvoiceNumber = ''
+  let lastInvoiceDate = ''
+  let lastGstin = ''
+
   for (const row of rows) {
-    if (!row || row.length === 0) continue
+    // Normalize: xlsx can return object or sparse array; ensure we have an array
+    const r = Array.isArray(row) ? row : (row && typeof row === 'object' ? Object.values(row) : [])
+    if (!r || r.length === 0) continue
 
     try {
-      const supplierName = supplierNameIdx !== null ? cleanString(row[supplierNameIdx]) : ''
-      const gstin = gstinIdx !== null ? cleanString(row[gstinIdx]) : ''
-      const invoiceNumber = invoiceNumberIdx !== null ? cleanString(row[invoiceNumberIdx]) : ''
-      const invoiceDate = invoiceDateIdx !== null ? parseDate(row[invoiceDateIdx]) : new Date().toISOString()
+      const rawSupplierName = cellStr(r, sIdx)
+      const rawGstin = cellStr(r, gstinIdx)
+      const rawInvoiceNumber = cellStr(r, iIdx)
+      const rawInvoiceDate = safeCell(r, dIdx)
 
-      if (!supplierName || !invoiceNumber) continue
+      // Skip row if it looks like a header row (e.g. "Supplier Name", "Bill No")
+      const looksLikeHeader = /^(supplier name|bill no|invoice no|sr\s*no|s\.?no\.?|date|qty|product|desc)$/i.test(rawSupplierName) ||
+        /^(supplier name|bill no|invoice no|sr\s*no|date|qty)$/i.test(rawInvoiceNumber)
+      if (looksLikeHeader) continue
+
+      // Use current row values, or carry forward, or fill with placeholder so row is not skipped
+      let supplierName = rawSupplierName || lastSupplierName
+      let gstin = rawGstin || lastGstin
+      let invoiceNumber = rawInvoiceNumber || lastInvoiceNumber
+      let invoiceDate = rawInvoiceDate != null && String(rawInvoiceDate).trim() !== ''
+        ? parseDate(rawInvoiceDate)
+        : (lastInvoiceDate || new Date().toISOString())
+
+      if (!supplierName) {
+        supplierName = `(No supplier - ${randomSuffix()})`
+        placeholderChangeCount++
+      }
+      if (!invoiceNumber) {
+        invoiceNumber = `(No bill no - ${randomSuffix()})`
+        placeholderChangeCount++
+      }
+      if (!invoiceDate) invoiceDate = new Date().toISOString()
+      if (!(rawInvoiceDate != null && String(rawInvoiceDate).trim() !== '') && !lastInvoiceDate)
+        placeholderChangeCount++
+
+      // Update carry-forward when this row had header info (so next rows can use it)
+      if (rawSupplierName) lastSupplierName = rawSupplierName.trim()
+      if (rawInvoiceNumber) lastInvoiceNumber = rawInvoiceNumber.trim()
+      if (rawInvoiceDate != null && String(rawInvoiceDate).trim() !== '') lastInvoiceDate = parseDate(rawInvoiceDate)
+      if (rawGstin) lastGstin = rawGstin
 
       // Create supplier if not exists
       const supplierKey = supplierName.toUpperCase().trim()
@@ -334,14 +447,14 @@ function convertPurchaseData(rows: any[][], headers: string[]): {
         suppliersDict[supplierKey] = {
           id: Object.keys(suppliersDict).length + 1,
           name: supplierName.trim(),
-          gstin: gstin,
-          email: '',
-          phone: '',
-          address: '',
-          city: '',
-          state: '',
-          pincode: '',
-          contact_person: '',
+          gstin: gstin || null,
+          email: null,
+          phone: null,
+          address: null,
+          city: null,
+          state: null,
+          pincode: null,
+          contact_person: null,
           is_registered: !!gstin,
           company_id: 1,
           created_at: invoiceDate,
@@ -378,41 +491,46 @@ function convertPurchaseData(rows: any[][], headers: string[]): {
 
       const purchase = purchasesDict[purchaseKey]
 
-      // Extract item data
-      const hsnCode = hsnCodeIdx !== null ? cleanString(row[hsnCodeIdx]) : ''
-      const description = descriptionIdx !== null ? cleanString(row[descriptionIdx]) : hsnCode || 'Unknown Product'
-      const article = articleIdx !== null ? cleanString(row[articleIdx]) : ''
+      // Extract item data: missing column => blank/null; required (Product/Desc, Qty) => placeholder if missing
+      const hsnCode = cellStr(r, hsnCodeIdx)
+      const productName = cellStr(r, productNameIdx)
+      const descValue = cellStr(r, descriptionIdx)
+      let productOrDesc = productName || descValue || cellStr(r, descIdx) || hsnCode || ''
+      if (!productOrDesc) {
+        productOrDesc = '(No product)'
+        placeholderChangeCount++
+      } else if (productOrDesc === 'Unknown Product') {
+        productOrDesc = '(No product)'
+        placeholderChangeCount++
+      }
+      const article = cellStr(r, articleIdx)
       
-      // CRITICAL: Handle barcode extraction properly - Excel may read barcodes as numbers
-      // Preserve leading zeros and handle both string and numeric barcodes
       let barcode = ''
-      if (barcodeIdx !== null && row[barcodeIdx] !== null && row[barcodeIdx] !== undefined) {
-        const barcodeValue = row[barcodeIdx]
-        // If it's a number, convert to string without scientific notation and preserve as-is
+      const barcodeValue = safeCell(r, barcodeIdx ?? 9)
+      if (barcodeValue !== null && barcodeValue !== undefined) {
         if (typeof barcodeValue === 'number') {
-          // For large numbers (barcodes), convert to string without scientific notation
-          barcode = String(Math.floor(barcodeValue)) // Use Math.floor to avoid decimal places
+          barcode = String(Math.floor(barcodeValue))
         } else {
           barcode = String(barcodeValue).trim()
         }
-        // Remove empty strings
-        if (barcode === '' || barcode === 'null' || barcode === 'undefined') {
-          barcode = ''
-        }
+        if (barcode === '' || barcode === 'null' || barcode === 'undefined') barcode = ''
       }
-      const gstRate = gstRateIdx !== null ? cleanNumber(row[gstRateIdx]) : 0
-      const quantity = quantityIdx !== null ? cleanInt(row[quantityIdx]) : 0
-      const unit = unitIdx !== null ? cleanString(row[unitIdx]) : 'pcs'
-      const taxableAmount = taxableAmountIdx !== null ? cleanNumber(row[taxableAmountIdx]) : 0
-      const sgstAmount = sgstIdx !== null ? cleanNumber(row[sgstIdx]) : 0
-      const cgstAmount = cgstIdx !== null ? cleanNumber(row[cgstIdx]) : 0
-      const igstAmount = igstIdx !== null ? cleanNumber(row[igstIdx]) : 0
-      const totalAmount = totalAmountIdx !== null ? cleanNumber(row[totalAmountIdx]) : 0
+      const gstRate = cellNum(r, gstRateIdx)
+      let quantity = cellNum(r, qIdx)
+      if (quantity <= 0) {
+        quantity = 1
+        placeholderChangeCount++
+      }
+      const unit = cellStr(r, unitIdx) || 'pcs'
+      const taxableAmount = cellNum(r, taxableAmountIdx)
+      const sgstAmount = cellNum(r, sgstIdx)
+      const cgstAmount = cellNum(r, cgstIdx)
+      const igstAmount = cellNum(r, igstIdx)
+      const totalAmount = cellNum(r, totalAmountIdx)
       
-      // Extract price columns (M, N, O)
-      const purchasePrice = purchasePriceIdx !== null ? cleanNumber(row[purchasePriceIdx]) : 0
-      const salePrice = salePriceIdx !== null ? cleanNumber(row[salePriceIdx]) : 0
-      const mrp = mrpIdx !== null ? cleanNumber(row[mrpIdx]) : 0
+      const purchasePrice = cellNum(r, purchasePriceIdx)
+      const salePrice = cellNum(r, salePriceIdx)
+      const mrp = cellNum(r, mrpIdx)
 
       // Calculate unit price (prefer Purchase column, fallback to calculated from taxable amount)
       const unitPrice = purchasePrice > 0 ? purchasePrice : (quantity > 0 ? taxableAmount / quantity : 0)
@@ -425,30 +543,36 @@ function convertPurchaseData(rows: any[][], headers: string[]): {
       // Use provided GST rate or calculate from tax amounts
       const finalGstRate = gstRate > 0 ? gstRate : cgstRate + sgstRate + igstRate
 
-      // Create purchase item
+      // Item total: use column value if present, else auto-calculate from quantity × unit price
+      const itemTotal = totalAmount > 0
+        ? Math.round(totalAmount * 100) / 100
+        : (quantity > 0 && unitPrice >= 0 ? Math.round(quantity * unitPrice * 100) / 100 : 0)
+
+      // Create purchase item; missing/blank columns => null
       const item = {
         product_id: null,
-        product_name: description,
+        product_name: productOrDesc,
         quantity: quantity,
         unit_price: Math.round(unitPrice * 100) / 100,
         purchase_price: Math.round(unitPrice * 100) / 100,
-        mrp: mrp > 0 ? Math.round(mrp * 100) / 100 : undefined, // Use MRP from Excel (Column O)
-        sale_price: salePrice > 0 ? Math.round(salePrice * 100) / 100 : (mrp > 0 ? Math.round(mrp * 100) / 100 : undefined), // Use Sale from Excel (Column N), fallback to MRP
-        hsn_code: hsnCode,
+        mrp: mrp > 0 ? Math.round(mrp * 100) / 100 : null,
+        sale_price: salePrice > 0 ? Math.round(salePrice * 100) / 100 : (mrp > 0 ? Math.round(mrp * 100) / 100 : null),
+        hsn_code: hsnCode || null,
         gst_rate: Math.round(finalGstRate * 100) / 100,
         cgst_rate: cgstRate > 0 ? Math.round(cgstRate * 100) / 100 : null,
         sgst_rate: sgstRate > 0 ? Math.round(sgstRate * 100) / 100 : null,
         igst_rate: igstRate > 0 ? Math.round(igstRate * 100) / 100 : null,
         tax_amount: Math.round((cgstAmount + sgstAmount + igstAmount) * 100) / 100,
-        total: Math.round(totalAmount * 100) / 100,
-        article: article, // Use article from Excel file
-        barcode: barcode, // Use barcode from Excel file
+        total: itemTotal,
+        article: article || null,
+        barcode: barcode || null,
       }
 
       purchase.items.push(item)
+      const itemTotalForPurchase = itemTotal > 0 ? itemTotal : (taxableAmount + (cgstAmount + sgstAmount + igstAmount))
       purchase.subtotal = Math.round((purchase.subtotal + taxableAmount) * 100) / 100
       purchase.total_tax = Math.round((purchase.total_tax + cgstAmount + sgstAmount + igstAmount) * 100) / 100
-      purchase.grand_total = Math.round((purchase.grand_total + totalAmount) * 100) / 100
+      purchase.grand_total = Math.round((purchase.grand_total + (totalAmount > 0 ? totalAmount : itemTotalForPurchase)) * 100) / 100
     } catch (error) {
       console.error('Error processing row:', error)
       continue
@@ -458,6 +582,7 @@ function convertPurchaseData(rows: any[][], headers: string[]): {
   return {
     suppliers: Object.values(suppliersDict),
     purchases: Object.values(purchasesDict),
+    placeholderChangeCount,
   }
 }
 
@@ -483,30 +608,33 @@ function convertProductsData(rows: any[][], headers: string[]): any[] {
   let productId = 1
 
   for (const row of rows) {
-    if (!row || row.length === 0) continue
+    const r = Array.isArray(row) ? row : (row && typeof row === 'object' ? Object.values(row) : [])
+    if (!r || r.length === 0) continue
 
     try {
-      const name = nameIdx !== null ? cleanString(row[nameIdx]) : ''
+      const name = cellStr(r, nameIdx)
       if (!name) continue
 
+      const sku = cellStr(r, skuIdx)
+      const barcodeVal = cellStr(r, barcodeIdx)
       products.push({
         id: productId++,
         name: name,
-        sku: skuIdx !== null ? cleanString(row[skuIdx]) : '',
-        barcode: barcodeIdx !== null ? cleanString(row[barcodeIdx]) : '',
-        category_name: categoryIdx !== null ? cleanString(row[categoryIdx]) : '',
-        description: descriptionIdx !== null ? cleanString(row[descriptionIdx]) : '',
-        unit: unitIdx !== null ? cleanString(row[unitIdx]) : 'pcs',
-        purchase_price: purchasePriceIdx !== null ? cleanNumber(row[purchasePriceIdx]) : 0,
-        selling_price: sellingPriceIdx !== null ? cleanNumber(row[sellingPriceIdx]) : 0,
-        stock_quantity: stockIdx !== null ? cleanInt(row[stockIdx]) : 0,
-        min_stock_level: minStockIdx !== null ? cleanInt(row[minStockIdx]) : undefined,
-        hsn_code: hsnIdx !== null ? cleanString(row[hsnIdx]) : '',
-        gst_rate: gstRateIdx !== null ? cleanNumber(row[gstRateIdx]) : 0,
-        tax_type: taxTypeIdx !== null ? cleanString(row[taxTypeIdx]).toLowerCase() : 'exclusive',
+        sku: sku || null,
+        barcode: barcodeVal || null,
+        category_name: cellStr(r, categoryIdx) || null,
+        description: cellStr(r, descriptionIdx) || null,
+        unit: cellStr(r, unitIdx) || 'pcs',
+        purchase_price: cellNum(r, purchasePriceIdx),
+        selling_price: cellNum(r, sellingPriceIdx),
+        stock_quantity: cellNum(r, stockIdx),
+        min_stock_level: cellNumOptional(r, minStockIdx),
+        hsn_code: cellStr(r, hsnIdx) || null,
+        gst_rate: cellNum(r, gstRateIdx),
+        tax_type: (cellStr(r, taxTypeIdx) || 'exclusive').toLowerCase(),
         is_active: true,
         status: 'active',
-        barcode_status: barcodeIdx !== null && cleanString(row[barcodeIdx]) ? 'active' : 'inactive',
+        barcode_status: barcodeVal ? 'active' : 'inactive',
       })
     } catch (error) {
       console.error('Error processing product row:', error)
@@ -536,24 +664,25 @@ function convertCustomersData(rows: any[][], headers: string[]): any[] {
   let customerId = 1
 
   for (const row of rows) {
-    if (!row || row.length === 0) continue
+    const r = Array.isArray(row) ? row : (row && typeof row === 'object' ? Object.values(row) : [])
+    if (!r || r.length === 0) continue
 
     try {
-      const name = nameIdx !== null ? cleanString(row[nameIdx]) : ''
+      const name = cellStr(r, nameIdx)
       if (!name) continue
 
       customers.push({
         id: customerId++,
         name: name,
-        email: emailIdx !== null ? cleanString(row[emailIdx]) : '',
-        phone: phoneIdx !== null ? cleanString(row[phoneIdx]) : '',
-        gstin: gstinIdx !== null ? cleanString(row[gstinIdx]) : '',
-        address: addressIdx !== null ? cleanString(row[addressIdx]) : '',
-        city: cityIdx !== null ? cleanString(row[cityIdx]) : '',
-        state: stateIdx !== null ? cleanString(row[stateIdx]) : '',
-        pincode: pincodeIdx !== null ? cleanString(row[pincodeIdx]) : '',
-        contact_person: contactPersonIdx !== null ? cleanString(row[contactPersonIdx]) : '',
-        credit_limit: creditLimitIdx !== null ? cleanNumber(row[creditLimitIdx]) : 0,
+        email: cellStr(r, emailIdx) || null,
+        phone: cellStr(r, phoneIdx) || null,
+        gstin: cellStr(r, gstinIdx) || null,
+        address: cellStr(r, addressIdx) || null,
+        city: cellStr(r, cityIdx) || null,
+        state: cellStr(r, stateIdx) || null,
+        pincode: cellStr(r, pincodeIdx) || null,
+        contact_person: cellStr(r, contactPersonIdx) || null,
+        credit_limit: cellNum(r, creditLimitIdx),
         is_active: true,
       })
     } catch (error) {
@@ -584,27 +713,29 @@ function convertSuppliersData(rows: any[][], headers: string[]): any[] {
   let supplierId = 1
 
   for (const row of rows) {
-    if (!row || row.length === 0) continue
+    const r = Array.isArray(row) ? row : (row && typeof row === 'object' ? Object.values(row) : [])
+    if (!r || r.length === 0) continue
 
     try {
-      const name = nameIdx !== null ? cleanString(row[nameIdx]) : ''
+      const name = cellStr(r, nameIdx)
       if (!name) continue
 
-      const isRegisteredStr = isRegisteredIdx !== null ? String(row[isRegisteredIdx]).toLowerCase() : ''
+      const isRegisteredStr = String(safeCell(r, isRegisteredIdx) ?? '').toLowerCase()
       const isRegistered = isRegisteredStr === 'yes' || isRegisteredStr === 'true' || isRegisteredStr === '1'
+      const gstinVal = cellStr(r, gstinIdx)
 
       suppliers.push({
         id: supplierId++,
         name: name,
-        email: emailIdx !== null ? cleanString(row[emailIdx]) : '',
-        phone: phoneIdx !== null ? cleanString(row[phoneIdx]) : '',
-        gstin: gstinIdx !== null ? cleanString(row[gstinIdx]) : '',
-        address: addressIdx !== null ? cleanString(row[addressIdx]) : '',
-        city: cityIdx !== null ? cleanString(row[cityIdx]) : '',
-        state: stateIdx !== null ? cleanString(row[stateIdx]) : '',
-        pincode: pincodeIdx !== null ? cleanString(row[pincodeIdx]) : '',
-        contact_person: contactPersonIdx !== null ? cleanString(row[contactPersonIdx]) : '',
-        is_registered: isRegistered || !!gstinIdx,
+        email: cellStr(r, emailIdx) || null,
+        phone: cellStr(r, phoneIdx) || null,
+        gstin: gstinVal || null,
+        address: cellStr(r, addressIdx) || null,
+        city: cellStr(r, cityIdx) || null,
+        state: cellStr(r, stateIdx) || null,
+        pincode: cellStr(r, pincodeIdx) || null,
+        contact_person: cellStr(r, contactPersonIdx) || null,
+        is_registered: isRegistered || !!gstinVal,
       })
     } catch (error) {
       console.error('Error processing supplier row:', error)
@@ -630,22 +761,22 @@ function convertCategoriesData(rows: any[][], headers: string[]): { categories: 
 
   // First pass: create all categories (non-subcategories)
   for (const row of rows) {
-    if (!row || row.length === 0) continue
+    const r = Array.isArray(row) ? row : (row && typeof row === 'object' ? Object.values(row) : [])
+    if (!r || r.length === 0) continue
 
     try {
-      const name = nameIdx !== null ? cleanString(row[nameIdx]) : ''
+      const name = cellStr(r, nameIdx)
       if (!name) continue
 
-      const isSubcategoryStr = isSubcategoryIdx !== null ? String(row[isSubcategoryIdx]).toLowerCase() : ''
+      const isSubcategoryStr = String(safeCell(r, isSubcategoryIdx) ?? '').toLowerCase()
       const isSubcategory = isSubcategoryStr === 'yes' || isSubcategoryStr === 'true' || isSubcategoryStr === '1'
-      const parentCategoryName = parentCategoryIdx !== null ? cleanString(row[parentCategoryIdx]) : ''
+      const parentCategoryName = cellStr(r, parentCategoryIdx)
 
       if (!isSubcategory && !parentCategoryName) {
-        // Main category
         categories.push({
           id: categoryId++,
           name: name,
-          description: descriptionIdx !== null ? cleanString(row[descriptionIdx]) : '',
+          description: cellStr(r, descriptionIdx) || null,
           parent_id: null,
           is_active: true,
         })
@@ -658,15 +789,16 @@ function convertCategoriesData(rows: any[][], headers: string[]): { categories: 
 
   // Second pass: create subcategories
   for (const row of rows) {
-    if (!row || row.length === 0) continue
+    const r = Array.isArray(row) ? row : (row && typeof row === 'object' ? Object.values(row) : [])
+    if (!r || r.length === 0) continue
 
     try {
-      const name = nameIdx !== null ? cleanString(row[nameIdx]) : ''
+      const name = cellStr(r, nameIdx)
       if (!name) continue
 
-      const isSubcategoryStr = isSubcategoryIdx !== null ? String(row[isSubcategoryIdx]).toLowerCase() : ''
+      const isSubcategoryStr = String(safeCell(r, isSubcategoryIdx) ?? '').toLowerCase()
       const isSubcategory = isSubcategoryStr === 'yes' || isSubcategoryStr === 'true' || isSubcategoryStr === '1'
-      const parentCategoryName = parentCategoryIdx !== null ? cleanString(row[parentCategoryIdx]) : ''
+      const parentCategoryName = cellStr(r, parentCategoryIdx)
 
       if (isSubcategory || parentCategoryName) {
         // Find parent category
@@ -675,7 +807,7 @@ function convertCategoriesData(rows: any[][], headers: string[]): { categories: 
           subCategories.push({
             id: categoryId++,
             name: name,
-            description: descriptionIdx !== null ? cleanString(row[descriptionIdx]) : '',
+            description: cellStr(r, descriptionIdx) || null,
             parent_id: parentCategory.id,
             is_active: true,
           })
@@ -707,6 +839,7 @@ export async function convertXLSXToJSON(file: File): Promise<ConversionResult> {
     let customers: any[] = []
     let categories: any[] = []
     let subCategories: any[] = []
+    let placeholderChangeCount = 0
     const validationWarnings: ConversionResult['validationWarnings'] = []
 
     // First pass: Validate all sheets
@@ -812,8 +945,9 @@ export async function convertXLSXToJSON(file: File): Promise<ConversionResult> {
 
       // Process based on sheet name
       if (sheetNameLower.includes('purchase') || sheetNameLower.includes('bill')) {
-        const result = convertPurchaseData(rows, headers)
+        const result = tryConvertPurchaseSheet(jsonData)
         purchases = result.purchases
+        placeholderChangeCount += result.placeholderChangeCount
         // Merge suppliers from purchases with existing suppliers
         const suppliersMap = new Map(suppliers.map(s => [s.name.toUpperCase(), s]))
         result.suppliers.forEach(s => {
@@ -845,16 +979,32 @@ export async function convertXLSXToJSON(file: File): Promise<ConversionResult> {
       }
     }
 
-    // If no purchases sheet found, try first sheet as purchases only when it is not already Customers/Products/Suppliers/Categories (backward compatibility)
-    if (purchases.length === 0 && workbook.SheetNames.length > 0 && !firstSheetIsOtherType) {
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
-      const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' }) as any[][]
-      if (jsonData.length >= 2) {
-        const headers = jsonData[0].map(h => String(h).trim())
-        const rows = jsonData.slice(1)
-        const result = convertPurchaseData(rows, headers)
-        purchases = result.purchases
-        suppliers = result.suppliers
+    // If no purchases sheet found, try first sheet then any other sheet with enough rows (backward compatibility)
+    if (purchases.length === 0 && workbook.SheetNames.length > 0) {
+      const sheetsToTry = !firstSheetIsOtherType
+        ? [workbook.SheetNames[0]]
+        : []
+      // Also try any sheet with many rows (e.g. "Sheet 2" with 3400 lines) that wasn't already matched by name
+      for (const name of workbook.SheetNames) {
+        const n = name.toLowerCase()
+        if (n.includes('purchase') || n.includes('bill')) continue
+        if (n.includes('customer') || n.includes('product') || n.includes('supplier') || n.includes('vendor') || n.includes('categor')) continue
+        const ws = workbook.Sheets[name]
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as any[][]
+        if (data.length >= 10 && !sheetsToTry.includes(name)) sheetsToTry.push(name)
+      }
+      for (const sheetName of sheetsToTry) {
+        const worksheet = workbook.Sheets[sheetName]
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as any[][]
+        if (jsonData.length >= 2) {
+          const result = tryConvertPurchaseSheet(jsonData)
+          if (result.purchases.length > 0) {
+            purchases = result.purchases
+            suppliers = result.suppliers
+            placeholderChangeCount += result.placeholderChangeCount
+            break
+          }
+        }
       }
     }
 
@@ -896,10 +1046,18 @@ export async function convertXLSXToJSON(file: File): Promise<ConversionResult> {
     if (customers.length > 0) messages.push(`${customers.length} customers`)
     if (purchases.length > 0) messages.push(`${purchases.length} purchases`)
 
-    // If there are validation warnings, show them but still allow conversion
-    let message = `Successfully converted: ${messages.join(', ')}`
-    if (validationWarnings.length > 0) {
-      message += `\n\n⚠️ WARNING: Format validation issues detected. Some data may not import correctly.`
+    const hasNoData = purchases.length === 0 && products.length === 0 && customers.length === 0 && suppliers.length === 0 && categories.length === 0
+    let message: string
+    if (hasNoData) {
+      message = `No data rows were found in the file.\n\nPlease check:\n• Sheet name should contain "Purchase" or "Bill" (e.g. "Purchases").\n• First row must be column headers: Supplier Name, Bill No, Bill Date, Product (or Desc), Qty.\n• Data should start from row 2.\n• Download the sample template from Backup & Restore to match the format.`
+    } else {
+      message = `Successfully converted: ${messages.join(', ')}`
+      if (placeholderChangeCount > 0) {
+        message += `\n\nWe filled ${placeholderChangeCount} missing required value(s) (Supplier Name, Bill No, Bill Date, Product/Desc, Qty) with placeholders so all rows could be imported. You can edit them after import.`
+      }
+      if (validationWarnings.length > 0) {
+        message += `\n\n⚠️ WARNING: Format validation issues detected. Some data may not import correctly.`
+      }
     }
 
     return {
@@ -907,6 +1065,7 @@ export async function convertXLSXToJSON(file: File): Promise<ConversionResult> {
       message: message,
       jsonData: JSON.stringify(backup, null, 2),
       stats,
+      placeholderChangeCount: placeholderChangeCount > 0 ? placeholderChangeCount : undefined,
       validationWarnings: validationWarnings.length > 0 ? validationWarnings : undefined,
     }
   } catch (error: any) {

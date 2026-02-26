@@ -42,6 +42,8 @@ export interface InvoiceItem {
   unit?: string
   /** Sales person for this line (when different per item) */
   sales_person_name?: string
+  /** Sale or return – used to highlight return rows on invoice */
+  sale_type?: 'sale' | 'return'
 }
 
 export interface CompanyInfo {

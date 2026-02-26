@@ -3,7 +3,7 @@ import type { ServiceRecord, ServiceVehicleType } from '../types/serviceRecord'
 import { SERVICE_PAYMENT_METHODS, SERVICE_STATUS_LABELS, getServiceSubtotal, getServiceDiscountValue, getServiceTotal } from '../types/serviceRecord'
 import { Printer, MessageCircle, Mail, CalendarClock } from 'lucide-react'
 import { LockIcon } from './icons/LockIcon'
-import { exportHTMLToPDF, POWERED_BY_TEXT, POWERED_BY_URL } from '../utils/exportUtils'
+import { exportHTMLToPDF, POWERED_BY_TEXT, POWERED_BY_CONTACT, POWERED_BY_URL } from '../utils/exportUtils'
 import { getServiceNotifyMessage, getUpcomingServiceReminderMessage, getDaysUntilNextService } from '../utils/serviceNotifyMessage'
 
 function formatPhoneForWhatsApp(phone: string): string | null {
@@ -351,6 +351,7 @@ export function ServiceReceipt({ record, companyName = 'HisabKitab', companyAddr
               {POWERED_BY_TEXT}
             </a>
           </p>
+          <p className="text-center mt-1 text-xs text-gray-500">{POWERED_BY_CONTACT}</p>
         </div>
       </div>
     </div>

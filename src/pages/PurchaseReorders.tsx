@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { purchaseReorderService } from '../services/purchaseReorderService'
+import { companyService } from '../services/companyService'
 import { Home, Package, Eye, CheckCircle, X, FileDown, FileSpreadsheet, Pencil } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
 import { exportReorderToPdf, exportReorderToExcel } from '../utils/exportUtils'
@@ -25,16 +26,21 @@ export default function PurchaseReorders() {
   const [reorders, setReorders] = useState<PurchaseReorder[]>([])
   const [loading, setLoading] = useState(true)
   const [receiveModal, setReceiveModal] = useState<PurchaseReorder | null>(null)
-  const [receiveRows, setReceiveRows] = useState<{ product_id: number; product_name?: string; ordered_qty: number; received_qty: number; unit_price: number }[]>([])
+  const [receiveRows, setReceiveRows] = useState<{ product_id: number; product_name?: string; ordered_qty: number; received_qty: number; received_qty_box: number; received_qty_piece: number; unit_price: number }[]>([])
   const [saving, setSaving] = useState(false)
+  const [companyName, setCompanyName] = useState('')
 
   const companyId = getCurrentCompanyId()
 
   const load = async () => {
     setLoading(true)
     try {
-      const list = await purchaseReorderService.getAll(companyId ?? undefined)
+      const [list, company] = await Promise.all([
+        purchaseReorderService.getAll(companyId ?? undefined),
+        companyId ? companyService.getById(companyId) : Promise.resolve(null),
+      ])
       setReorders(list)
+      setCompanyName(company?.name || company?.unique_code || '')
     } catch (e) {
       console.error(e)
       toast.error('Failed to load reorders')
@@ -50,20 +56,29 @@ export default function PurchaseReorders() {
   const openReceive = (reorder: PurchaseReorder) => {
     setReceiveModal(reorder)
     setReceiveRows(
-      (reorder.items || []).map((it) => ({
-        product_id: it.product_id,
-        product_name: it.product_name,
-        ordered_qty: it.ordered_qty ?? 0,
-        received_qty: it.received_qty ?? 0,
-        unit_price: it.unit_price ?? 0,
-      }))
+      (reorder.items || []).map((it) => {
+        const box = it.received_qty_box ?? 0
+        const piece = it.received_qty_piece ?? 0
+        const qty = it.received_qty ?? 0
+        return {
+          product_id: it.product_id,
+          product_name: it.product_name,
+          ordered_qty: it.ordered_qty ?? 0,
+          received_qty: box * piece || qty,
+          received_qty_box: box || (qty > 0 ? 1 : 0),
+          received_qty_piece: piece || qty,
+          unit_price: it.unit_price ?? 0,
+        }
+      })
     )
   }
 
-  const updateReceiveQty = (index: number, value: number) => {
+  const updateReceiveQty = (index: number, field: 'received_qty_box' | 'received_qty_piece', value: number) => {
     setReceiveRows((prev) => {
       const next = [...prev]
-      next[index] = { ...next[index], received_qty: Math.max(0, value) }
+      const row = { ...next[index], [field]: Math.max(0, value) }
+      row.received_qty = row.received_qty_box * row.received_qty_piece
+      next[index] = row
       return next
     })
   }
@@ -75,6 +90,8 @@ export default function PurchaseReorders() {
       const items = (r.items || []).map((it) => ({
         product_name: it.product_name,
         ordered_qty: it.ordered_qty ?? 0,
+        ordered_qty_box: it.ordered_qty_box ?? 0,
+        ordered_qty_piece: it.ordered_qty_piece ?? 0,
         unit_price: it.unit_price ?? 0,
         total: it.total ?? 0,
         hsn_code: it.hsn_code,
@@ -94,7 +111,7 @@ export default function PurchaseReorders() {
           grand_total: r.grand_total,
           items,
         },
-        undefined,
+        companyName || undefined,
         `Reorder_${r.reorder_number}`
       )
       toast.success('PDF downloaded')
@@ -109,6 +126,8 @@ export default function PurchaseReorders() {
       const items = (r.items || []).map((it) => ({
         product_name: it.product_name,
         ordered_qty: it.ordered_qty ?? 0,
+        ordered_qty_box: it.ordered_qty_box ?? 0,
+        ordered_qty_piece: it.ordered_qty_piece ?? 0,
         unit_price: it.unit_price ?? 0,
         total: it.total ?? 0,
         hsn_code: it.hsn_code,
@@ -128,7 +147,7 @@ export default function PurchaseReorders() {
           grand_total: r.grand_total,
           items,
         },
-        undefined,
+        companyName || undefined,
         `Reorder_${r.reorder_number}`
       )
       toast.success('Excel downloaded')
@@ -140,7 +159,7 @@ export default function PurchaseReorders() {
 
   const confirmReceive = async () => {
     if (!receiveModal) return
-    const hasAny = receiveRows.some((r) => r.received_qty > 0)
+    const hasAny = receiveRows.some((r) => r.received_qty_box * r.received_qty_piece > 0)
     if (!hasAny) {
       toast.error('Enter at least one received qty')
       return
@@ -149,12 +168,17 @@ export default function PurchaseReorders() {
     try {
       const result = await purchaseReorderService.markReceived(
         receiveModal.id,
-        receiveRows.map((r) => ({
-          product_id: r.product_id,
-          received_qty: r.received_qty,
-          unit_price: r.unit_price,
-          product_name: r.product_name,
-        }))
+        receiveRows.map((r) => {
+          const receivedQty = r.received_qty_box * r.received_qty_piece
+          return {
+            product_id: r.product_id,
+            received_qty: receivedQty,
+            received_qty_box: r.received_qty_box,
+            received_qty_piece: r.received_qty_piece,
+            unit_price: r.unit_price,
+            product_name: r.product_name,
+          }
+        })
       )
       if (result) {
         toast.success('Order received. Purchase created and stock updated.')
@@ -320,21 +344,23 @@ export default function PurchaseReorders() {
         {/* Receive modal */}
         {receiveModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="bg-white rounded-xl shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
               <div className="p-4 border-b border-gray-200 flex items-center justify-between">
                 <h2 className="text-lg font-semibold">Order Received — {receiveModal.reorder_number}</h2>
                 <button type="button" onClick={() => setReceiveModal(null)} className="p-2 rounded-lg hover:bg-gray-100">
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="p-4 overflow-y-auto flex-1">
-                <p className="text-sm text-gray-600 mb-3">Edit received quantity for each line. Then confirm to create purchase and update stock.</p>
-                <table className="w-full text-sm">
+              <div className="p-4 overflow-y-auto overflow-x-auto flex-1">
+                <p className="text-sm text-gray-600 mb-3">Enter Received (Box) and Received (Piece) for each line. Received Qty = Box × Piece.</p>
+                <table className="w-full text-sm min-w-[500px]">
                   <thead>
                     <tr className="border-b border-gray-200">
                       <th className="text-left py-2 font-medium">Product</th>
                       <th className="text-right py-2 font-medium">Ordered</th>
-                      <th className="text-right py-2 font-medium">Received Qty</th>
+                      <th className="text-right py-2 font-medium">Received (Box)</th>
+                      <th className="text-right py-2 font-medium">Received (Piece)</th>
+                      <th className="text-right py-2 font-medium">= Total</th>
                       <th className="text-right py-2 font-medium">Rate (₹)</th>
                     </tr>
                   </thead>
@@ -343,19 +369,35 @@ export default function PurchaseReorders() {
                       <tr key={index} className="border-b border-gray-100">
                         <td className="py-2">{row.product_name || `Product #${row.product_id}`}</td>
                         <td className="py-2 text-right">{row.ordered_qty}</td>
-                        <td className="py-2">
+                        <td className="py-2 pl-2">
                           <input
                             type="text"
                             inputMode="numeric"
-                            value={row.received_qty === 0 ? '' : String(row.received_qty)}
+                            value={row.received_qty_box === 0 ? '' : String(row.received_qty_box)}
                             onChange={(e) => {
                               const v = e.target.value.replace(/[^0-9.]/g, '')
-                              updateReceiveQty(index, v === '' ? 0 : Math.max(0, parseFloat(v) || 0))
+                              updateReceiveQty(index, 'received_qty_box', v === '' ? 0 : Math.max(0, parseFloat(v) || 0))
                             }}
                             placeholder="0"
-                            className="w-24 px-2 py-1 border border-gray-300 rounded text-right"
+                            className="w-full min-w-[4rem] px-2 py-1.5 border-2 border-gray-400 rounded text-right focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-none"
+                            aria-label="Received qty in box"
                           />
                         </td>
+                        <td className="py-2 pl-2">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={row.received_qty_piece === 0 ? '' : String(row.received_qty_piece)}
+                            onChange={(e) => {
+                              const v = e.target.value.replace(/[^0-9.]/g, '')
+                              updateReceiveQty(index, 'received_qty_piece', v === '' ? 0 : Math.max(0, parseFloat(v) || 0))
+                            }}
+                            placeholder="0"
+                            className="w-full min-w-[4rem] px-2 py-1.5 border-2 border-gray-400 rounded text-right focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-none"
+                            aria-label="Received qty in piece"
+                          />
+                        </td>
+                        <td className="py-2 text-right font-medium text-gray-700">{row.received_qty_box * row.received_qty_piece}</td>
                         <td className="py-2 text-right">{row.unit_price.toFixed(2)}</td>
                       </tr>
                     ))}

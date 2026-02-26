@@ -32,14 +32,22 @@ export const purchaseReorderService = {
    */
   async markReceived(
     reorderId: number,
-    itemsWithReceivedQty: { id?: number; product_id: number; received_qty: number; unit_price?: number; product_name?: string; hsn_code?: string; gst_rate?: number }[]
+    itemsWithReceivedQty: { id?: number; product_id: number; received_qty: number; received_qty_box?: number; received_qty_piece?: number; unit_price?: number; product_name?: string; hsn_code?: string; gst_rate?: number }[]
   ): Promise<{ purchase: GSTPurchase | SimplePurchase; reorder: PurchaseReorder } | null> {
     const reorder = await cloudPurchaseReorderService.getById(reorderId)
     if (!reorder || !reorder.items || reorder.items.length === 0) return null
     if (reorder.status === 'cancelled') return null
 
     const receivedMap = new Map(
-      itemsWithReceivedQty.map(it => [`${it.product_id}`, { received_qty: it.received_qty, unit_price: it.unit_price, product_name: it.product_name, hsn_code: it.hsn_code, gst_rate: it.gst_rate }])
+      itemsWithReceivedQty.map(it => [`${it.product_id}`, {
+        received_qty: it.received_qty,
+        received_qty_box: it.received_qty_box ?? 0,
+        received_qty_piece: it.received_qty_piece ?? 0,
+        unit_price: it.unit_price,
+        product_name: it.product_name,
+        hsn_code: it.hsn_code,
+        gst_rate: it.gst_rate,
+      }])
     )
     const purchaseItems: PurchaseItem[] = []
     const updatedReorderItems: PurchaseReorderItem[] = []
@@ -47,10 +55,14 @@ export const purchaseReorderService = {
     for (const line of reorder.items) {
       const rec = receivedMap.get(String(line.product_id))
       const receivedQty = rec ? rec.received_qty : (line.received_qty ?? 0)
+      const receivedBox = rec ? rec.received_qty_box : (line.received_qty_box ?? 0)
+      const receivedPiece = rec ? rec.received_qty_piece : (line.received_qty_piece ?? 0)
       const unitPrice = rec?.unit_price ?? line.unit_price
       updatedReorderItems.push({
         ...line,
         received_qty: receivedQty,
+        received_qty_box: receivedBox,
+        received_qty_piece: receivedPiece,
         unit_price: unitPrice,
         total: Math.round(receivedQty * unitPrice * 100) / 100,
       })

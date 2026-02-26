@@ -3,9 +3,9 @@ import { useAuth } from '../context/AuthContext'
 import { usePlanUpgrade } from '../context/PlanUpgradeContext'
 import { useToast } from '../context/ToastContext'
 import { useNavigate } from 'react-router-dom'
-import { purchaseService } from '../services/purchaseService'
+import { purchaseService, supplierService } from '../services/purchaseService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
-import { Purchase, PurchaseType } from '../types/purchase'
+import { Purchase, PurchaseType, Supplier } from '../types/purchase'
 import { Plus, Eye, Edit, Filter, FileText, TrendingUp, Home, FileSpreadsheet, Search, X, Trash2, AlertCircle, CalendarClock, Package, Columns3 } from 'lucide-react'
 import { LockIcon } from '../components/icons/LockIcon'
 import { exportToExcel as exportExcel } from '../utils/exportUtils'
@@ -31,16 +31,17 @@ const COLUMN_KEYS = [
   { key: 'status', label: 'Status' },
   { key: 'last_modified', label: 'Last Modified' },
 ] as const
-const DEFAULT_VISIBLE_COLUMNS = ['date', 'purchase_id', 'invoice', 'supplier', 'product_name', 'article', 'qty', 'remaining', 'purchase_price', 'sale_price', 'mrp', 'item_total', 'status']
+const DEFAULT_VISIBLE_COLUMNS = ['date', 'purchase_id', 'invoice', 'supplier', 'product_name', 'article', 'barcode', 'qty', 'remaining', 'purchase_price', 'sale_price', 'mrp', 'item_total', 'status']
 const COLUMNS_STORAGE_KEY = 'purchaseHistory_visibleColumns'
 
 const PurchaseHistory = () => {
-  const { hasPermission, hasPlanFeature, getCurrentCompanyId } = useAuth()
+  const { hasPermission, hasPlanFeature, getCurrentCompanyId, currentCompanyId, user } = useAuth()
   const { showPlanUpgrade } = usePlanUpgrade()
   const { toast } = useToast()
   const navigate = useNavigate()
   const [purchases, setPurchases] = useState<Purchase[]>([])
   const [allPurchases, setAllPurchases] = useState<Purchase[]>([]) // Store all purchases for filtering
+  const [suppliersList, setSuppliersList] = useState<Supplier[]>([])
   const [filterType, setFilterType] = useState<PurchaseType | 'all'>('all')
   const [loading, setLoading] = useState(true)
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('all')
@@ -85,17 +86,19 @@ const PurchaseHistory = () => {
     simple: { count: 0, total: 0 },
   })
 
-  const loadPurchases = async () => {
-    setLoading(true)
+  const loadPurchases = async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const companyId = getCurrentCompanyId()
-      console.log('[PurchaseHistory] Loading purchases, companyId:', companyId, 'type:', typeof companyId)
+      if (!silent) console.log('[PurchaseHistory] Loading purchases, companyId:', companyId, 'type:', typeof companyId)
       // Pass companyId directly - services will handle null by returning empty array for data isolation
       // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
-      const [allPurchasesResult, statistics] = await Promise.all([
+      const [allPurchasesResult, statistics, suppliersData] = await Promise.all([
         purchaseService.getAll(undefined, companyId),
-        purchaseService.getStats(companyId)
+        purchaseService.getStats(companyId),
+        supplierService.getAll(companyId ?? undefined).catch(() => [] as Supplier[])
       ])
+      setSuppliersList(suppliersData || [])
       console.log('[PurchaseHistory] Loaded purchases:', allPurchasesResult.length)
       console.log('[PurchaseHistory] Purchase company_ids:', allPurchasesResult.map(p => ({ id: p.id, company_id: p.company_id })))
       
@@ -107,15 +110,16 @@ const PurchaseHistory = () => {
       setAllPurchases(sortedPurchases)
       setStats(statistics)
     } catch (error) {
-      console.error('Error loading purchases:', error)
+      if (!silent) console.error('Error loading purchases:', error)
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
+  // Reload when selected company changes (admin switches company) or user changes
   useEffect(() => {
     loadPurchases()
-  }, [])
+  }, [currentCompanyId, user?.company_id])
 
   // Clear selections when purchases change
   useEffect(() => {
@@ -337,15 +341,18 @@ const PurchaseHistory = () => {
     return Math.max(0, quantity - soldQty)
   }
 
-  // Supplier display: highlight unknown supplier
+  // Supplier display: use supplier_name from purchase, else resolve by supplier_id from loaded suppliers list
   const getSupplierDisplayName = (purchase: Purchase): string => {
     const name = (purchase as any).supplier_name
-    return name && String(name).trim() !== '' ? String(name).trim() : 'Unknown supplier'
+    if (name && String(name).trim() !== '') return String(name).trim()
+    const sid = (purchase as any).supplier_id
+    if (sid != null && suppliersList.length > 0) {
+      const s = suppliersList.find((x: Supplier) => x.id === sid)
+      if (s?.name && String(s.name).trim() !== '') return String(s.name).trim()
+    }
+    return 'Unknown supplier'
   }
-  const isUnknownSupplier = (purchase: Purchase): boolean => {
-    const name = (purchase as any).supplier_name
-    return !name || String(name).trim() === '' || name === 'N/A'
-  }
+  const isUnknownSupplier = (purchase: Purchase): boolean => getSupplierDisplayName(purchase) === 'Unknown supplier'
 
   // Same product from other suppliers: for each product name, which other suppliers have it (so we can show "Also from: X" per item)
   const productNameToOtherSuppliersMap = useMemo(() => {
@@ -364,7 +371,7 @@ const PurchaseHistory = () => {
       })
     })
     return productToSuppliers
-  }, [allPurchases])
+  }, [allPurchases, suppliersList])
 
   const getOtherSuppliersForProduct = (productName: string | undefined, currentSupplierName: string): string[] => {
     if (!productName?.trim()) return []
@@ -382,7 +389,7 @@ const PurchaseHistory = () => {
     if (debouncedSearchQuery.trim()) {
       const query = debouncedSearchQuery.toLowerCase().trim()
       filtered = filtered.filter(purchase => {
-        const supplierName = (purchase as any).supplier_name?.toLowerCase() || ''
+        const supplierName = getSupplierDisplayName(purchase).toLowerCase()
         const invoiceNumber = (purchase as any).invoice_number?.toLowerCase() || ''
         const items = purchase.items || []
         
@@ -448,7 +455,7 @@ const PurchaseHistory = () => {
     )
     
     return filtered
-  }, [allPurchases, debouncedSearchQuery, selectedSupplier, selectedProduct, filterType, timePeriod, customStartDate, customEndDate, selectedDate])
+  }, [allPurchases, debouncedSearchQuery, selectedSupplier, selectedProduct, filterType, timePeriod, customStartDate, customEndDate, selectedDate, suppliersList])
   
   // Due for payment / Overdue (bills with due_date set and not paid)
   const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
@@ -480,7 +487,7 @@ const PurchaseHistory = () => {
     const groups: Record<string, Purchase[]> = {}
     
     purchases.forEach(purchase => {
-      const supplierName = (purchase as any).supplier_name || 'Unknown Supplier'
+      const supplierName = getSupplierDisplayName(purchase)
       if (!groups[supplierName]) {
         groups[supplierName] = []
       }
@@ -501,38 +508,22 @@ const PurchaseHistory = () => {
     })
     
     return sortedGroups
-  }, [purchases, groupBySupplier])
+  }, [purchases, groupBySupplier, suppliersList])
   
   // Update purchases state only when filteredPurchases changes
   useEffect(() => {
     setPurchases(filteredPurchases)
   }, [filteredPurchases])
 
-  // Reload when navigating back to this page or when window gains focus
+  // Reload only when user switches back to this tab (no focus listener – it fires too often and blanks the page)
   useEffect(() => {
-    const handleFocus = () => {
-      loadPurchases()
-    }
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        loadPurchases()
+        loadPurchases(true) // silent refresh so the page doesn't go blank
       }
     }
-    window.addEventListener('focus', handleFocus)
     document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => {
-      window.removeEventListener('focus', handleFocus)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-    }
-  }, [])
-  
-  // Also reload purchases periodically (every 30 seconds) to catch updates from other tabs/windows
-  useEffect(() => {
-    const interval = setInterval(() => {
-      loadPurchases()
-    }, 30000) // Reload every 30 seconds
-    
-    return () => clearInterval(interval)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [])
 
   // Get unique suppliers for filter dropdown (include "Unknown supplier" when present)
@@ -541,11 +532,11 @@ const PurchaseHistory = () => {
     return [...new Set(suppliers)].sort()
   }
 
-  // Get unique products for filter dropdown
+  // Get unique products for filter dropdown (from all purchases, including old records)
   const getUniqueProducts = (): string[] => {
     const products = allPurchases
-      .flatMap(p => p.items.map(item => item.product_name))
-      .filter((name): name is string => !!name && name.trim() !== '')
+      .flatMap(p => (p.items || []).map(item => item.product_name))
+      .filter((name): name is string => !!name && String(name).trim() !== '')
     return [...new Set(products)].sort()
   }
 
@@ -576,7 +567,7 @@ const PurchaseHistory = () => {
         new Date(purchase.purchase_date).toLocaleDateString('en-IN'),
         purchase.type === 'gst' ? 'GST' : 'Simple',
         (purchase as any).invoice_number || 'N/A',
-        (purchase as any).supplier_name || 'N/A',
+        getSupplierDisplayName(purchase),
         purchase.items.length,
         totalAvailable,
         totalQuantity,
@@ -664,7 +655,7 @@ const PurchaseHistory = () => {
                   <td>${new Date(purchase.purchase_date).toLocaleDateString('en-IN')}</td>
                   <td>${purchase.type === 'gst' ? 'GST' : 'Simple'}</td>
                   <td>${(purchase as any).invoice_number || 'N/A'}</td>
-                  <td>${(purchase as any).supplier_name || 'N/A'}</td>
+                  <td>${getSupplierDisplayName(purchase)}</td>
                   <td>${purchase.items.length}</td>
                   <td>${totalAvailable} / ${totalQuantity} (${totalSoldQuantity} sold)</td>
                   <td>${articleString}</td>
@@ -761,7 +752,7 @@ const PurchaseHistory = () => {
                   PDF
                 </button>
                 <button
-                  onClick={loadPurchases}
+                  onClick={() => loadPurchases()}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-semibold"
                   title="Refresh Purchases"
                 >
@@ -824,7 +815,7 @@ const PurchaseHistory = () => {
                     return (
                       <li key={p.id} className="flex items-center justify-between text-sm">
                         <span className="text-gray-700">
-                          {(p as any).supplier_name || 'N/A'} · {(p as any).invoice_number || `#${p.id}`}
+                          {getSupplierDisplayName(p)} · {(p as any).invoice_number || `#${p.id}`}
                         </span>
                         <div className="flex items-center gap-2">
                           <span className="text-red-600 font-medium">
@@ -871,7 +862,7 @@ const PurchaseHistory = () => {
                     return (
                       <li key={p.id} className="flex items-center justify-between text-sm">
                         <span className="text-gray-700">
-                          {(p as any).supplier_name || 'N/A'} · {(p as any).invoice_number || `#${p.id}`}
+                          {getSupplierDisplayName(p)} · {(p as any).invoice_number || `#${p.id}`}
                         </span>
                         <div className="flex items-center gap-2">
                           <span className="text-amber-700 font-medium">
@@ -1002,6 +993,19 @@ const PurchaseHistory = () => {
                     Simple Purchases
                   </button>
                 </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowColumnSettings(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 transition-colors"
+                  title="Choose which columns to show in the table"
+                >
+                  <Columns3 className="w-4 h-4" />
+                  Columns
+                </button>
+                <span className="text-xs text-gray-500">({COLUMN_KEYS.filter(c => visibleColumns.has(c.key)).length} of {COLUMN_KEYS.length} visible)</span>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-4 pt-4 border-t border-gray-200">
@@ -1170,20 +1174,11 @@ const PurchaseHistory = () => {
           {/* Column visibility + Results Count and Bulk Actions */}
           <div className="mb-4 space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => setShowColumnSettings(true)}
-                className="inline-flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 transition-colors"
-                title="Choose which columns to show"
-              >
-                <Columns3 className="w-4 h-4" />
-                Columns
-              </button>
               {showColumnSettings && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowColumnSettings(false)}>
                   <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                     <h3 className="text-lg font-bold text-gray-900 mb-2">Show / Hide Columns</h3>
-                    <p className="text-sm text-gray-500 mb-4">Select which columns to display in the purchase history grid.</p>
+                    <p className="text-sm text-gray-500 mb-4">Choose which columns to show in the purchase history table. All possible columns are listed below; check or uncheck to show or hide.</p>
                     <div className="grid grid-cols-2 gap-2">
                       {COLUMN_KEYS.map(({ key, label }) => (
                         <label key={key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
@@ -1230,14 +1225,32 @@ const PurchaseHistory = () => {
                 </div>
               )}
             </div>
-            {(searchQuery || selectedSupplier !== 'all' || selectedProduct !== 'all' || filterType !== 'all' || timePeriod !== 'all') && (
-              <div className="px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+            {(searchQuery || selectedSupplier !== 'all' || selectedProduct !== 'all' || filterType !== 'all' || timePeriod !== 'all' || selectedDate || customStartDate || customEndDate) && (
+              <div className="px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm text-blue-900">
                   Showing <span className="font-bold">{purchases.length}</span> of <span className="font-bold">{allPurchases.length}</span> purchases
                   {searchQuery && <span> matching "{searchQuery}"</span>}
                   {selectedSupplier !== 'all' && <span> from {selectedSupplier}</span>}
                   {selectedProduct !== 'all' && <span> for {selectedProduct}</span>}
+                  {timePeriod !== 'all' && <span> (period: {timePeriod})</span>}
+                  {selectedDate && <span> (date: {selectedDate})</span>}
                 </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('')
+                    setSelectedSupplier('all')
+                    setSelectedProduct('all')
+                    setFilterType('all')
+                    setTimePeriod('all')
+                    setSelectedDate('')
+                    setCustomStartDate('')
+                    setCustomEndDate('')
+                  }}
+                  className="text-sm font-medium text-blue-700 hover:text-blue-900 underline"
+                >
+                  Show all
+                </button>
               </div>
             )}
             
@@ -1279,12 +1292,14 @@ const PurchaseHistory = () => {
               <div className="p-12 text-center">
                 <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">No purchases found</h3>
-                  <p className="text-gray-600 mb-6">
-                  {searchQuery || selectedSupplier !== 'all' || selectedProduct !== 'all' || filterType !== 'all' || timePeriod !== 'all'
-                    ? 'Try adjusting your search or filters'
-                    : 'Get started by creating your first purchase'}
+                <p className="text-gray-600 mb-6">
+                  {allPurchases.length > 0
+                    ? `${allPurchases.length} purchase(s) are hidden by the current filters. Click "Show all" to display them.`
+                    : searchQuery || selectedSupplier !== 'all' || selectedProduct !== 'all' || filterType !== 'all' || timePeriod !== 'all' || selectedDate || customStartDate || customEndDate
+                      ? 'Try "Show all" to clear filters and load purchases.'
+                      : 'Get started by creating your first purchase'}
                 </p>
-                {(searchQuery || selectedSupplier !== 'all' || selectedProduct !== 'all') && (
+                {(searchQuery || selectedSupplier !== 'all' || selectedProduct !== 'all' || filterType !== 'all' || timePeriod !== 'all' || selectedDate || customStartDate || customEndDate) && (
                   <button
                     onClick={() => {
                       setSearchQuery('')
@@ -1292,10 +1307,21 @@ const PurchaseHistory = () => {
                       setSelectedProduct('all')
                       setFilterType('all')
                       setTimePeriod('all')
+                      setSelectedDate('')
+                      setCustomStartDate('')
+                      setCustomEndDate('')
                     }}
-                    className="mt-4 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                    className="mt-4 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
                   >
-                    Clear All Filters
+                    Show all
+                  </button>
+                )}
+                {allPurchases.length === 0 && !loading && (
+                  <button
+                    onClick={() => loadPurchases()}
+                    className="mt-4 ml-2 px-5 py-2.5 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium"
+                  >
+                    Reload purchases
                   </button>
                 )}
                 {hasPermission('purchases:create') && (
@@ -1375,8 +1401,43 @@ const PurchaseHistory = () => {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200 bg-white">
-                          {supplierPurchases.flatMap((purchase) =>
-                            (purchase.items || []).map((item, itemIdx) => (
+                          {supplierPurchases.flatMap((purchase) => {
+                            const items = purchase.items || []
+                            if (items.length === 0) {
+                              return [(
+                            <tr key={`${purchase.id}-empty`} className={`hover:bg-gray-50 transition-colors ${selectedPurchaseIds.has(purchase.id) ? 'bg-blue-50' : ''} bg-amber-50/50`}>
+                              {hasPermission('purchases:delete') && (
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
+                                  <input type="checkbox" checked={selectedPurchaseIds.has(purchase.id)} onChange={(e) => handleSelectPurchase(purchase.id, e.target.checked)} className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 cursor-pointer" onClick={(e) => e.stopPropagation()} />
+                                </td>
+                              )}
+                              {isColumnVisible('date') && <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm text-gray-900">{new Date(purchase.purchase_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>}
+                              {isColumnVisible('purchase_id') && <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-semibold text-gray-700">#{purchase.id}</td>}
+                              {isColumnVisible('type') && <td className="px-2 sm:px-4 py-2 whitespace-nowrap"><span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${purchase.type === 'gst' ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-700'}`}>{purchase.type === 'gst' ? 'GST' : 'Simple'}</span></td>}
+                              {isColumnVisible('invoice') && <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{(purchase as any).invoice_number || 'N/A'}</td>}
+                              {isColumnVisible('product_name') && <td className="px-2 sm:px-4 py-2 text-sm text-amber-700 italic">No line items</td>}
+                              {isColumnVisible('article') && <td className="px-2 sm:px-4 py-2">—</td>}
+                              {isColumnVisible('barcode') && <td className="px-2 sm:px-4 py-2">—</td>}
+                              {isColumnVisible('qty') && <td className="px-2 sm:px-4 py-2">—</td>}
+                              {isColumnVisible('remaining') && <td className="px-2 sm:px-4 py-2">—</td>}
+                              {isColumnVisible('purchase_price') && <td className="px-2 sm:px-4 py-2">—</td>}
+                              {isColumnVisible('sale_price') && <td className="px-2 sm:px-4 py-2">—</td>}
+                              {isColumnVisible('mrp') && <td className="px-2 sm:px-4 py-2">—</td>}
+                              {isColumnVisible('item_total') && <td className="px-2 sm:px-4 py-2">—</td>}
+                              {isColumnVisible('tax') && <td className="px-2 sm:px-4 py-2">—</td>}
+                              {isColumnVisible('status') && <td className="px-2 sm:px-4 py-2 whitespace-nowrap"><span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${purchase.payment_status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{purchase.payment_status.charAt(0).toUpperCase() + purchase.payment_status.slice(1)}</span></td>}
+                              {isColumnVisible('last_modified') && <td className="px-2 sm:px-4 py-2 text-xs text-gray-600">—</td>}
+                              <td className="px-2 sm:px-4 py-2 text-right whitespace-nowrap">
+                                <div className="flex items-center justify-end gap-1">
+                                  {hasPermission('purchases:update') && <button onClick={() => navigate(purchase.type === 'gst' ? `/purchases/${purchase.id}/edit-gst` : `/purchases/${purchase.id}/edit-simple`)} className="p-1.5 text-green-600 hover:bg-green-50 rounded" title="Edit"><Edit className="w-4 h-4" /></button>}
+                                  {hasPermission('purchases:delete') && <button onClick={async (e) => { e.stopPropagation(); if (window.confirm('Delete this purchase?')) { try { await purchaseService.delete(purchase.id); toast.success('Purchase deleted'); await loadPurchases(); } catch (err) { toast.error('Failed to delete'); } } }} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Delete"><Trash2 className="w-4 h-4" /></button>}
+                                  <button onClick={() => navigate(purchase.type === 'gst' ? `/purchases/${purchase.id}/edit-gst` : `/purchases/${purchase.id}/edit-simple`)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="View"><Eye className="w-4 h-4" /></button>
+                                </div>
+                              </td>
+                            </tr>
+                              )]
+                            }
+                            return items.map((item, itemIdx) => (
                             <tr key={`${purchase.id}-${itemIdx}`} className={`hover:bg-gray-50 transition-colors ${selectedPurchaseIds.has(purchase.id) ? 'bg-blue-50' : ''}`}>
                               {hasPermission('purchases:delete') && (
                                 <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
@@ -1449,7 +1510,7 @@ const PurchaseHistory = () => {
                                 <td className="px-2 sm:px-4 py-2 whitespace-nowrap"><span className="inline-flex px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 text-xs font-medium">₹{(item.mrp ?? 0).toFixed(2)}</span></td>
                               )}
                               {isColumnVisible('item_total') && (
-                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-semibold">₹{(item.total ?? 0).toFixed(2)}</td>
+                                <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-semibold">₹{((item.total != null && item.total > 0) ? item.total : (item.quantity ?? 0) * (item.unit_price ?? (item as any).purchase_price ?? 0)).toFixed(2)}</td>
                               )}
                               {isColumnVisible('tax') && (
                                 <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm text-gray-600">{(item.tax_amount != null && item.tax_amount > 0) ? `₹${(item.tax_amount ?? 0).toFixed(2)}` : '—'}</td>
@@ -1496,7 +1557,8 @@ const PurchaseHistory = () => {
                                 ) : null}
                               </td>
                             </tr>
-                          )))}
+                          ))
+                        })}
                         </tbody>
                         <tfoot className="bg-gray-100 border-t-2 border-gray-300">
                           <tr>
@@ -1508,8 +1570,8 @@ const PurchaseHistory = () => {
                                 <span>{supplierPurchases.length} purchase{supplierPurchases.length !== 1 ? 's' : ''}</span>
                                 <span>
                                   {(() => {
-                                    const totQty = supplierPurchases.reduce((s, p) => s + p.items.reduce((a, i) => a + (i.quantity ?? 0), 0), 0)
-                                    const totSold = supplierPurchases.reduce((s, p) => s + p.items.reduce((a, i) => a + getSoldQuantity(i), 0), 0)
+                                    const totQty = supplierPurchases.reduce((s, p) => s + (p.items || []).reduce((a, i) => a + (i.quantity ?? 0), 0), 0)
+                                    const totSold = supplierPurchases.reduce((s, p) => s + (p.items || []).reduce((a, i) => a + getSoldQuantity(i), 0), 0)
                                     return `Qty: ${totQty - totSold} / ${totQty}`
                                   })()}
                                 </span>
@@ -1562,8 +1624,40 @@ const PurchaseHistory = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {purchases.flatMap((purchase) =>
-                        (purchase.items || []).map((item, itemIdx) => (
+                      {purchases.flatMap((purchase) => {
+                        const items = purchase.items || []
+                        if (items.length === 0) {
+                          return [(
+                      <tr key={`${purchase.id}-empty`} className={`hover:bg-gray-50 transition-colors ${selectedPurchaseIds.has(purchase.id) ? 'bg-blue-50' : ''} bg-amber-50/50`}>
+                        {hasPermission('purchases:delete') && <td className="px-2 sm:px-4 py-2 whitespace-nowrap"><input type="checkbox" checked={selectedPurchaseIds.has(purchase.id)} onChange={(e) => handleSelectPurchase(purchase.id, e.target.checked)} className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 cursor-pointer" onClick={(e) => e.stopPropagation()} /></td>}
+                        {isColumnVisible('date') && <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm text-gray-900">{new Date(purchase.purchase_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>}
+                        {isColumnVisible('purchase_id') && <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-semibold text-gray-700">#{purchase.id}</td>}
+                        {isColumnVisible('type') && <td className="px-2 sm:px-4 py-2 whitespace-nowrap"><span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${purchase.type === 'gst' ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-700'}`}>{purchase.type === 'gst' ? 'GST' : 'Simple'}</span></td>}
+                        {isColumnVisible('invoice') && <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{(purchase as any).invoice_number || 'N/A'}</td>}
+                        {isColumnVisible('supplier') && <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm text-gray-700">{getSupplierDisplayName(purchase)}</td>}
+                        {isColumnVisible('product_name') && <td className="px-2 sm:px-4 py-2 text-sm text-amber-700 italic">No line items</td>}
+                        {isColumnVisible('article') && <td className="px-2 sm:px-4 py-2">—</td>}
+                        {isColumnVisible('barcode') && <td className="px-2 sm:px-4 py-2">—</td>}
+                        {isColumnVisible('qty') && <td className="px-2 sm:px-4 py-2">—</td>}
+                        {isColumnVisible('remaining') && <td className="px-2 sm:px-4 py-2">—</td>}
+                        {isColumnVisible('purchase_price') && <td className="px-2 sm:px-4 py-2">—</td>}
+                        {isColumnVisible('sale_price') && <td className="px-2 sm:px-4 py-2">—</td>}
+                        {isColumnVisible('mrp') && <td className="px-2 sm:px-4 py-2">—</td>}
+                        {isColumnVisible('item_total') && <td className="px-2 sm:px-4 py-2">—</td>}
+                        {isColumnVisible('tax') && <td className="px-2 sm:px-4 py-2">—</td>}
+                        {isColumnVisible('status') && <td className="px-2 sm:px-4 py-2 whitespace-nowrap"><span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${purchase.payment_status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{purchase.payment_status.charAt(0).toUpperCase() + purchase.payment_status.slice(1)}</span></td>}
+                        {isColumnVisible('last_modified') && <td className="px-2 sm:px-4 py-2 text-xs text-gray-600">—</td>}
+                        <td className="px-2 sm:px-4 py-2 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1">
+                            {hasPermission('purchases:update') && <button onClick={() => navigate(purchase.type === 'gst' ? `/purchases/${purchase.id}/edit-gst` : `/purchases/${purchase.id}/edit-simple`)} className="p-1.5 text-green-600 hover:bg-green-50 rounded" title="Edit"><Edit className="w-4 h-4" /></button>}
+                            {hasPermission('purchases:delete') && <button onClick={async (e) => { e.stopPropagation(); if (window.confirm('Delete this purchase?')) { try { await purchaseService.delete(purchase.id); toast.success('Purchase deleted'); await loadPurchases(); } catch (err) { toast.error('Failed to delete'); } } }} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Delete"><Trash2 className="w-4 h-4" /></button>}
+                            <button onClick={() => navigate(purchase.type === 'gst' ? `/purchases/${purchase.id}/edit-gst` : `/purchases/${purchase.id}/edit-simple`)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="View"><Eye className="w-4 h-4" /></button>
+                          </div>
+                        </td>
+                      </tr>
+                          )]
+                        }
+                        return items.map((item, itemIdx) => (
                       <tr key={`${purchase.id}-${itemIdx}`} className={`hover:bg-gray-50 transition-colors ${selectedPurchaseIds.has(purchase.id) ? 'bg-blue-50' : ''}`}>
                         {hasPermission('purchases:delete') && (
                           <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
@@ -1643,7 +1737,7 @@ const PurchaseHistory = () => {
                           <td className="px-2 sm:px-4 py-2 whitespace-nowrap"><span className="inline-flex px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 text-xs font-medium">₹{(item.mrp ?? 0).toFixed(2)}</span></td>
                         )}
                         {isColumnVisible('item_total') && (
-                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-semibold">₹{(item.total ?? 0).toFixed(2)}</td>
+                          <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm font-semibold">₹{((item.total != null && item.total > 0) ? item.total : (item.quantity ?? 0) * (item.unit_price ?? (item as any).purchase_price ?? 0)).toFixed(2)}</td>
                         )}
                         {isColumnVisible('tax') && (
                           <td className="px-2 sm:px-4 py-2 whitespace-nowrap text-sm text-gray-600">{(item.tax_amount != null && item.tax_amount > 0) ? `₹${(item.tax_amount ?? 0).toFixed(2)}` : '—'}</td>
@@ -1691,7 +1785,8 @@ const PurchaseHistory = () => {
                         </td>
                       </tr>
                         ))
-                      )}
+                        })
+                      }
                     </tbody>
                 </table>
                   </div>

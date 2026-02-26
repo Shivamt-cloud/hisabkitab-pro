@@ -17,16 +17,57 @@ import {
   Home,
   Download,
   Printer,
-  MessageCircle
+  MessageCircle,
+  Save
 } from 'lucide-react'
+import { useToast } from '../context/ToastContext'
 import { getSingleDateForPreset } from '../utils/datePresets'
+import { POWERED_BY_TEXT, POWERED_BY_CONTACT } from '../utils/exportUtils'
 import { Sale } from '../types/sale'
 import { Purchase } from '../types/purchase'
 import { Expense } from '../types/expense'
 import { SalesPerson } from '../types/salesperson'
 
+const CUSTOMER_DETAILS_STORAGE_KEY = 'daily_report_customer'
+
+export interface DailyCustomerDetails {
+  customers_purchased: number
+  customers_returned: number
+  return_remark: string
+  expectation: string
+  remark: string
+}
+
+const defaultCustomerDetails: DailyCustomerDetails = {
+  customers_purchased: 0,
+  customers_returned: 0,
+  return_remark: '',
+  expectation: '',
+  remark: '',
+}
+
+function loadCustomerDetailsFromStorage(companyId: number | undefined, date: string): DailyCustomerDetails {
+  try {
+    const key = `${CUSTOMER_DETAILS_STORAGE_KEY}_${companyId ?? 'default'}_${date}`
+    const raw = localStorage.getItem(key)
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<DailyCustomerDetails>
+      return { ...defaultCustomerDetails, ...parsed }
+    }
+  } catch (_) {}
+  return { ...defaultCustomerDetails }
+}
+
+function saveCustomerDetailsToStorage(companyId: number | undefined, date: string, data: DailyCustomerDetails) {
+  try {
+    const key = `${CUSTOMER_DETAILS_STORAGE_KEY}_${companyId ?? 'default'}_${date}`
+    localStorage.setItem(key, JSON.stringify(data))
+  } catch (_) {}
+}
+
 const DailyReport = () => {
   const { getCurrentCompanyId, hasPermission } = useAuth()
+  const { toast } = useToast()
   const companyId = getCurrentCompanyId()
   
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0])
@@ -37,10 +78,25 @@ const DailyReport = () => {
   const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([])
   const [users, setUsers] = useState<Array<{ id: string; name: string }>>([])
   const [loading, setLoading] = useState(true)
+  const [customerDetails, setCustomerDetails] = useState<DailyCustomerDetails>(() => defaultCustomerDetails)
 
   useEffect(() => {
     loadData()
   }, [selectedDate, companyId])
+
+  useEffect(() => {
+    setCustomerDetails(loadCustomerDetailsFromStorage(companyId ?? undefined, selectedDate))
+  }, [selectedDate, companyId])
+
+  const saveCustomerDetails = (next: DailyCustomerDetails) => {
+    setCustomerDetails(next)
+    saveCustomerDetailsToStorage(companyId ?? undefined, selectedDate, next)
+  }
+
+  const handleSaveCustomerDetails = () => {
+    saveCustomerDetailsToStorage(companyId ?? undefined, selectedDate, customerDetails)
+    toast.success('Customer details saved')
+  }
 
   const loadData = async () => {
     setLoading(true)
@@ -582,6 +638,16 @@ const DailyReport = () => {
   }, [sales, purchases, allPurchases, expenses])
 
   const handlePrint = () => {
+    const prevTitle = document.title
+    const reportDatePart = selectedDate.replace(/-/g, '')
+    const now = new Date()
+    const timePart = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
+    document.title = `HisabKitabPro_Daily_Report_${reportDatePart}_${timePart}`
+    const restoreTitle = () => {
+      document.title = prevTitle
+      window.removeEventListener('afterprint', restoreTitle)
+    }
+    window.addEventListener('afterprint', restoreTitle)
     window.print()
   }
 
@@ -651,6 +717,25 @@ const DailyReport = () => {
             </div>
           </div>
         </div>
+
+        ${(customerDetails.customers_purchased > 0 || customerDetails.customers_returned > 0 || customerDetails.return_remark.trim() || customerDetails.expectation.trim() || customerDetails.remark.trim()) ? `
+        <div class="summary-section" style="margin-top: 24px;">
+          <h2>Customer details</h2>
+          <div class="summary-grid" style="grid-template-columns: repeat(2, 1fr);">
+            <div class="summary-card">
+              <h3>Customers purchased</h3>
+              <p class="amount">${customerDetails.customers_purchased}</p>
+            </div>
+            <div class="summary-card">
+              <h3>Customers returned</h3>
+              <p class="amount">${customerDetails.customers_returned}</p>
+            </div>
+          </div>
+          ${customerDetails.return_remark.trim() ? `<p style="margin-top: 12px;"><strong>Return reason:</strong> ${String(customerDetails.return_remark).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}</p>` : ''}
+          ${customerDetails.expectation.trim() ? `<p style="margin-top: 8px;"><strong>Expectation:</strong> ${String(customerDetails.expectation).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}</p>` : ''}
+          ${customerDetails.remark.trim() ? `<p style="margin-top: 8px;"><strong>Remark:</strong> ${String(customerDetails.remark).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}</p>` : ''}
+        </div>
+        ` : ''}
 
         ${cashFlow.openingAmount > 0 || cashFlow.closingAmount > 0 ? `
         <div class="cash-section">
@@ -831,7 +916,8 @@ const DailyReport = () => {
         <div class="footer">
           <p>Generated on ${new Date().toLocaleString('en-IN')}</p>
           <p>HisabKitab-Pro - Daily Business Report</p>
-          <p style="margin-top: 8px; font-weight: 600; color: #4f46e5;">Powered by HisabKitab Pro · hisabkitabpro.com</p>
+          <p style="margin-top: 8px; font-weight: 600; color: #4f46e5;">${POWERED_BY_TEXT}</p>
+          <p style="margin-top: 4px; font-size: 11px;">${POWERED_BY_CONTACT}</p>
         </div>
       </div>
     `
@@ -843,11 +929,16 @@ const DailyReport = () => {
     const printWindow = window.open('', '_blank')
     if (!printWindow) return
 
+    const now = new Date()
+    const reportDatePart = selectedDate.replace(/-/g, '')
+    const timePart = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
+    const filenameTitle = `HisabKitabPro_Daily_Report_${reportDatePart}_${timePart}`
+
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Daily Report - ${selectedDate}</title>
+          <title>${filenameTitle}</title>
           <meta charset="UTF-8">
           <style>
             @media print {
@@ -1119,7 +1210,8 @@ ${expensesPersonText}
 
 ---
 Generated by HisabKitab-Pro
-Powered by HisabKitab Pro · hisabkitabpro.com`
+${POWERED_BY_TEXT}
+${POWERED_BY_CONTACT}`
 
     const encodedMessage = encodeURIComponent(message)
     const whatsappUrl = `https://wa.me/?text=${encodedMessage}`
@@ -1274,6 +1366,81 @@ Powered by HisabKitab Pro · hisabkitabpro.com`
                   <TrendingDown className="w-10 h-10 opacity-80" />
                 )}
               </div>
+            </div>
+          </div>
+
+          {/* Customer details */}
+          <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6 border border-white/50 mb-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <User className="w-5 h-5 text-indigo-600" />
+              Customer details
+            </h2>
+            <p className="text-sm text-gray-600 mb-4">Track how many customers purchased, returned, and add expectations or remarks for the day.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Customers purchased</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={customerDetails.customers_purchased === 0 ? '' : customerDetails.customers_purchased}
+                  onChange={(e) => saveCustomerDetails({ ...customerDetails, customers_purchased: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                  placeholder="0"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Customers returned</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={customerDetails.customers_returned === 0 ? '' : customerDetails.customers_returned}
+                  onChange={(e) => saveCustomerDetails({ ...customerDetails, customers_returned: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                  placeholder="0"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Return reason / Why returned</label>
+                <textarea
+                  value={customerDetails.return_remark}
+                  onChange={(e) => saveCustomerDetails({ ...customerDetails, return_remark: e.target.value })}
+                  placeholder="e.g. Size issue, quality, wrong item..."
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Expectation</label>
+                <input
+                  type="text"
+                  value={customerDetails.expectation}
+                  onChange={(e) => saveCustomerDetails({ ...customerDetails, expectation: e.target.value })}
+                  placeholder="e.g. Expected 50 customers, target ₹50,000..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Remark</label>
+                <textarea
+                  value={customerDetails.remark}
+                  onChange={(e) => saveCustomerDetails({ ...customerDetails, remark: e.target.value })}
+                  placeholder="Any other notes for the day..."
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                />
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={handleSaveCustomerDetails}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+              >
+                <Save className="w-4 h-4" />
+                Save customer details
+              </button>
             </div>
           </div>
 

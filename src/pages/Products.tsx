@@ -12,18 +12,24 @@ import {
   Filter,
   X,
   Home,
-  Layers
+  Layers,
+  Save
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useToast } from '../context/ToastContext'
 
 const Products = () => {
   const { hasPermission, getCurrentCompanyId } = useAuth()
+  const { toast } = useToast()
   const navigate = useNavigate()
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null)
+  const [selectedStatus, setSelectedStatus] = useState<string>('') // '' = All, 'active' | 'sold' | 'archived'
+  const [selectedStockStatus, setSelectedStockStatus] = useState<string>('') // '' = All, 'in_stock' | 'low_stock' | 'out_of_stock'
   const [loading, setLoading] = useState(true)
+  const [savingId, setSavingId] = useState<number | null>(null)
 
   useEffect(() => {
     loadData()
@@ -50,6 +56,24 @@ const Products = () => {
     }
   }
 
+  const handleSaveRow = async (product: Product) => {
+    if (!hasPermission('products:update')) return
+    setSavingId(product.id)
+    try {
+      await productService.update(product.id, {
+        hsn_code: product.hsn_code?.trim() || undefined,
+        gst_rate: product.gst_rate ?? 0,
+      })
+      toast.success('Product updated')
+      loadData()
+    } catch (error) {
+      console.error('Error updating product:', error)
+      toast.error('Failed to update product')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
   const handleDelete = async (id: number) => {
     if (window.confirm('Are you sure you want to delete this product?')) {
       if (hasPermission('products:delete')) {
@@ -66,6 +90,12 @@ const Products = () => {
     }
   }
 
+  const getStockStatusKey = (product: Product): 'out_of_stock' | 'low_stock' | 'in_stock' => {
+    if (product.stock_quantity <= 0) return 'out_of_stock'
+    if (product.min_stock_level && product.stock_quantity <= product.min_stock_level) return 'low_stock'
+    return 'in_stock'
+  }
+
   const filteredProducts = products.filter(product => {
     const matchesSearch = !searchQuery || 
       product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -74,18 +104,20 @@ const Products = () => {
 
     const matchesCategory = !selectedCategory || product.category_id === selectedCategory
 
-    return matchesSearch && matchesCategory
+    const matchesStatus = !selectedStatus || product.status === selectedStatus
+
+    const matchesStockStatus = !selectedStockStatus || getStockStatusKey(product) === selectedStockStatus
+
+    return matchesSearch && matchesCategory && matchesStatus && matchesStockStatus
   })
 
   const getStockStatus = (product: Product) => {
-    if (product.stock_quantity <= 0) {
-      return { label: 'Out of Stock', color: 'bg-red-100 text-red-700 border-red-200' }
-    }
-    if (product.min_stock_level && product.stock_quantity <= product.min_stock_level) {
-      return { label: 'Low Stock', color: 'bg-orange-100 text-orange-700 border-orange-200' }
-    }
+    const key = getStockStatusKey(product)
+    if (key === 'out_of_stock') return { label: 'Out of Stock', color: 'bg-red-100 text-red-700 border-red-200' }
+    if (key === 'low_stock') return { label: 'Low Stock', color: 'bg-orange-100 text-orange-700 border-orange-200' }
     return { label: 'In Stock', color: 'bg-green-100 text-green-700 border-green-200' }
   }
+
 
   return (
     <ProtectedRoute requiredPermission="products:read">
@@ -135,7 +167,7 @@ const Products = () => {
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Filters */}
           <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6 mb-8 border border-white/50">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Search */}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -164,6 +196,52 @@ const Products = () => {
                 {selectedCategory && (
                   <button
                     onClick={() => setSelectedCategory(null)}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Status Filter */}
+              <div className="relative">
+                <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <select
+                  value={selectedStatus}
+                  onChange={(e) => setSelectedStatus(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none appearance-none bg-white"
+                >
+                  <option value="">All Status</option>
+                  <option value="active">Active</option>
+                  <option value="sold">Sold</option>
+                  <option value="archived">Archived</option>
+                </select>
+                {selectedStatus && (
+                  <button
+                    onClick={() => setSelectedStatus('')}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Stock Status Filter */}
+              <div className="relative">
+                <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <select
+                  value={selectedStockStatus}
+                  onChange={(e) => setSelectedStockStatus(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none appearance-none bg-white"
+                >
+                  <option value="">All Stock</option>
+                  <option value="in_stock">In Stock</option>
+                  <option value="low_stock">Low Stock</option>
+                  <option value="out_of_stock">Out of Stock</option>
+                </select>
+                {selectedStockStatus && (
+                  <button
+                    onClick={() => setSelectedStockStatus('')}
                     className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                   >
                     <X className="w-4 h-4" />
@@ -206,6 +284,8 @@ const Products = () => {
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Product</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">SKU/Barcode</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Category</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">HSN</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">GST %</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Price</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Stock</th>
                       <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Status</th>
@@ -259,6 +339,27 @@ const Products = () => {
                             </span>
                           </td>
                           <td className="px-6 py-4">
+                            <input
+                              type="text"
+                              value={product.hsn_code ?? ''}
+                              onChange={(e) => setProducts(prev => prev.map(p => p.id === product.id ? { ...p, hsn_code: e.target.value } : p))}
+                              placeholder="HSN"
+                              className="w-24 px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            />
+                          </td>
+                          <td className="px-6 py-4">
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              step="any"
+                              value={product.gst_rate ?? ''}
+                              onChange={(e) => setProducts(prev => prev.map(p => p.id === product.id ? { ...p, gst_rate: e.target.value === '' ? 0 : parseFloat(e.target.value) || 0 } : p))}
+                              placeholder="0"
+                              className="w-20 px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            />
+                          </td>
+                          <td className="px-6 py-4">
                             <div className="text-sm">
                               <div className="font-semibold text-gray-900">
                                 {product.selling_price ? `₹${product.selling_price.toFixed(2)}` : 'Not set'}
@@ -285,13 +386,27 @@ const Products = () => {
                           <td className="px-6 py-4 text-right">
                             <div className="flex items-center justify-end gap-2">
                               {hasPermission('products:update') && (
-                                <button
-                                  onClick={() => navigate(`/products/${product.id}/edit`)}
-                                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                  title="Edit"
-                                >
-                                  <Edit className="w-4 h-4" />
-                                </button>
+                                <>
+                                  <button
+                                    onClick={() => handleSaveRow(product)}
+                                    disabled={savingId === product.id}
+                                    className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors disabled:opacity-50"
+                                    title="Save HSN & GST"
+                                  >
+                                    {savingId === product.id ? (
+                                      <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+                                    ) : (
+                                      <Save className="w-4 h-4" />
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={() => navigate(`/products/${product.id}/edit`)}
+                                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                    title="Edit"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                </>
                               )}
                               {hasPermission('products:delete') && (
                                 <button

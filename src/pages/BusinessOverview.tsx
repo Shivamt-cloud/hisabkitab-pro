@@ -10,6 +10,7 @@ import { ExpenseType, Expense } from '../types/expense'
 import { Sale } from '../types/sale'
 import { User } from '../types/auth'
 import jsPDF from 'jspdf'
+import { POWERED_BY_TEXT, POWERED_BY_CONTACT } from '../utils/exportUtils'
 import {
   Home,
   Users,
@@ -414,7 +415,8 @@ const BusinessOverview = () => {
     pdf.text('Business Overview – HisabKitab Pro', margin, y)
     pdf.text(`Period: ${periodLabel}`, pageWidth - margin, y, { align: 'right' })
     const pageHeight = pdf.internal.pageSize.height
-    pdf.text('Powered by HisabKitab Pro · hisabkitabpro.com', pageWidth / 2, pageHeight - 10, { align: 'center' })
+    pdf.text(POWERED_BY_TEXT, pageWidth / 2, pageHeight - 10, { align: 'center' })
+    pdf.text(POWERED_BY_CONTACT, pageWidth / 2, pageHeight - 5, { align: 'center' })
 
     const safeLabel = periodLabel.replace(/[^a-zA-Z0-9\-]/g, '-').slice(0, 50)
     pdf.save(`Business-Overview-${safeLabel || 'report'}.pdf`)
@@ -553,7 +555,8 @@ const BusinessOverview = () => {
 
     pdf.setFontSize(8)
     pdf.setTextColor(100, 100, 100)
-    pdf.text('Powered by HisabKitab Pro · hisabkitabpro.com', pageWidth / 2, pageH - 10, { align: 'center' })
+    pdf.text(POWERED_BY_TEXT, pageWidth / 2, pageH - 10, { align: 'center' })
+    pdf.text(POWERED_BY_CONTACT, pageWidth / 2, pageH - 5, { align: 'center' })
 
     const safeTitle = title.replace(/[^a-zA-Z0-9\-]/g, '-').slice(0, 40)
     pdf.save(`${safeTitle}-${periodLabel.replace(/[^a-zA-Z0-9\-]/g, '-').slice(0, 20)}.pdf`)
