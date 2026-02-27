@@ -78,6 +78,13 @@ export const saleService = {
     const updatedSaleItems: SaleItem[] = []
     
     for (const item of sale.items) {
+      // Manual product (product_id 0): not in product list, no inventory tracking
+      const isManualProduct = !item.product_id || item.product_id === 0
+      if (isManualProduct) {
+        updatedSaleItems.push({ ...item })
+        continue
+      }
+
       const product = await productService.getById(item.product_id, true)
       if (!product) continue
       
@@ -204,21 +211,23 @@ export const saleService = {
     // Update sale items with purchase item links
     newSale.items = updatedSaleItems
 
-    // Calculate and save commissions if sales person is assigned
+    // Calculate and save commissions if sales person is assigned (skip manual products)
     let totalCommission = 0
     if (sale.sales_person_id) {
       const products = await productService.getAll(true)
-      const itemsWithCategory = newSale.items.map(item => {
-        const product = products.find(p => p.id === item.product_id)
-        return {
-          product_id: item.product_id,
-          product_name: item.product_name || product?.name || '',
-          category_id: product?.category_id,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          subtotal: item.total,
-        }
-      })
+      const itemsWithCategory = newSale.items
+        .filter(item => item.product_id && item.product_id !== 0)
+        .map(item => {
+          const product = products.find(p => p.id === item.product_id)
+          return {
+            product_id: item.product_id,
+            product_name: item.product_name || product?.name || '',
+            category_id: product?.category_id,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            subtotal: item.total,
+          }
+        })
 
       const commissions = await salesCommissionService.calculateCommission(
         sale.sales_person_id,
@@ -282,6 +291,11 @@ export const saleService = {
       const latestPurchases = await purchaseService.getAll(undefined, sale.company_id)
       
       for (const item of savedSale.items) {
+        // Skip manual products (product_id 0) - no inventory tracking
+        if (!item.product_id || item.product_id === 0) {
+          console.log(`[SaleService] Skipping inventory update for manual product: ${item.product_name}`)
+          continue
+        }
         console.log(`[SaleService] Processing inventory update for item: product ${item.product_id}, quantity ${item.quantity}, type ${item.sale_type}`)
         
         if (item.sale_type === 'return') {

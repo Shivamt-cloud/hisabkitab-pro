@@ -12,14 +12,19 @@ import { SalesPerson } from '../types/salesperson'
 import { Customer } from '../types/customer'
 import { Breadcrumbs } from '../components/Breadcrumbs'
 import CustomerModal from '../components/CustomerModal'
-import { X, Plus, Trash2, Search, ShoppingCart, Home, User, Pause, Play, RotateCcw } from 'lucide-react'
+import { usePlanUpgrade } from '../context/PlanUpgradeContext'
+import { LockIcon } from '../components/icons/LockIcon'
+import { X, Plus, Trash2, Search, ShoppingCart, Home, User, Pause, Play, RotateCcw, PenSquare } from 'lucide-react'
 import { SaleItem, Sale } from '../types/sale'
 import { Purchase, PurchaseItem } from '../types/purchase'
 
 const SaleForm = () => {
   const navigate = useNavigate()
   const location = useLocation()
-  const { hasPermission, user, getCurrentCompanyId } = useAuth()
+  const { id } = useParams<{ id: string }>()
+  const isEditing = !!id
+  const { hasPermission, user, getCurrentCompanyId, hasPlanFeature } = useAuth()
+  const { showPlanUpgrade } = usePlanUpgrade()
   const { toast } = useToast()
   const [saleItems, setSaleItems] = useState<SaleItem[]>([])
   const saleItemsRef = useRef<SaleItem[]>(saleItems)
@@ -50,6 +55,19 @@ const SaleForm = () => {
   const [hasHeldCart, setHasHeldCart] = useState(false) // Held cart available to resume (by company)
   const [salesForQuickReorder, setSalesForQuickReorder] = useState<Sale[]>([]) // Recent sales for Last sold / Frequently sold
   const [showCustomerModal, setShowCustomerModal] = useState(false) // Add customer in-place without leaving sale
+  const [showManualEntryModal, setShowManualEntryModal] = useState(false) // Manual product entry (Premium+)
+  const [manualEntryForm, setManualEntryForm] = useState({ barcode: '', productName: '', mrp: '', salePrice: '' })
+  const [editingInvoiceNumber, setEditingInvoiceNumber] = useState<string>('') // Invoice number when editing
+  const originalSaleItemsRef = useRef<SaleItem[]>([]) // Original items when editing, for change detection
+  const originalEditSnapshotRef = useRef<{
+    discount: number
+    discountType: 'percentage' | 'fixed'
+    discountValue: number
+    paymentMethods: Array<{ method: string; amount: number }>
+    customerId: number | ''
+    salesPersonId: number | ''
+    creditApplied: number
+  } | null>(null)
   const [editingQty, setEditingQty] = useState<Record<string, string>>({}) // per-row quantity while user is typing (e.g. ".5")
   const [saleSegmentId, setSaleSegmentId] = useState<number | null>(null) // Price segment for this sale (null = Retail/default)
   const [priceSegments, setPriceSegments] = useState<Array<{ id: number; name: string; description?: string; is_default: boolean }>>([])
@@ -340,6 +358,60 @@ const SaleForm = () => {
     }
     loadData()
   }, [])
+
+  // Load sale for edit mode
+  useEffect(() => {
+    if (!isEditing || !id) return
+    const loadSale = async () => {
+      try {
+        const saleId = parseInt(id, 10)
+        if (isNaN(saleId)) return
+        const sale = await saleService.getById(saleId)
+        if (!sale) {
+          toast.error('Sale not found')
+          navigate('/sales/history')
+          return
+        }
+        setEditingInvoiceNumber(sale.invoice_number || '')
+        const mappedItems = sale.items.map(item => ({ ...item, purchase_item_unique_key: item.purchase_item_unique_key ?? `P${item.purchase_id ?? 0}-I${item.purchase_item_id ?? 0}` }))
+        originalSaleItemsRef.current = mappedItems.map(i => ({ ...i })) // Store original for change detection
+        setSaleItems(mappedItems)
+        setCustomerId(sale.customer_id ?? '')
+        setSalesPersonId(sale.sales_person_id ?? '')
+        const pm = sale.payment_methods?.length
+          ? sale.payment_methods.map(p => ({ method: (p.method as 'cash' | 'card' | 'upi' | 'other' | 'credit') || 'cash', amount: p.amount || 0 }))
+          : [{ method: 'cash' as const, amount: 0 }]
+        setPaymentMethods(pm)
+        const cred = sale.credit_applied ?? 0
+        setCreditApplied(cred)
+        setInternalRemarks(sale.internal_remarks ?? '')
+        const disc = sale.discount ?? 0
+        const sub = sale.subtotal ?? 0
+        let discType: 'percentage' | 'fixed' = 'percentage'
+        let discVal = 0
+        if (sub > 0 && disc > 0) {
+          discType = 'percentage'
+          discVal = Math.round((disc / sub) * 10000) / 100
+          setDiscountType('percentage')
+          setDiscountValue(discVal)
+        }
+        originalEditSnapshotRef.current = {
+          discount: disc,
+          discountType: discType,
+          discountValue: discVal,
+          paymentMethods: pm.map(p => ({ method: p.method, amount: p.amount })),
+          customerId: sale.customer_id ?? '',
+          salesPersonId: sale.sales_person_id ?? '',
+          creditApplied: cred,
+        }
+      } catch (err) {
+        console.error('Error loading sale for edit:', err)
+        toast.error('Failed to load sale')
+        navigate('/sales/history')
+      }
+    }
+    loadSale()
+  }, [isEditing, id, navigate, toast])
 
   // Quick Win #2: Ctrl+S to save
   useEffect(() => {
@@ -1807,6 +1879,10 @@ const SaleForm = () => {
 
   // Get remaining stock for a sale item (from purchase items if available)
   const getRemainingStockForItem = (item: SaleItem): number => {
+    // Manual product (product_id 0) – no stock limit
+    if (!item.product_id || item.product_id === 0) {
+      return Infinity
+    }
     // For returns, use sold_quantity (how many can be returned), not remaining stock
     if (item.sale_type === 'return') {
       return getMaxReturnableQuantity(item)
@@ -2051,6 +2127,133 @@ const SaleForm = () => {
     return rounded - subtotal
   }
 
+  /** Build auto-remark for edit changes: MRP, sale price, qty changes, products added/removed */
+  const buildEditChangeRemark = (original: SaleItem[], current: SaleItem[]): string[] => {
+    const lines: string[] = []
+    const fmt = (n: number) => `₹${n.toFixed(0)}`
+    const usedCurr = new Set<number>()
+
+    // Match original to current: same product_name + (unique_key or article or barcode)
+    const matchOrigToCurr = new Map<number, number>()
+    original.forEach((o, oi) => {
+      const matchIdx = current.findIndex((c, ci) => {
+        if (usedCurr.has(ci)) return false
+        const sameName = (o.product_name || '').trim() === (c.product_name || '').trim()
+        if (!sameName) return false
+        const sameUk = (o.purchase_item_unique_key || '') === (c.purchase_item_unique_key || '')
+        const sameArt = (o.purchase_item_article ?? '').trim() === (c.purchase_item_article ?? '').trim()
+        const sameBar = (o.purchase_item_barcode ?? o.barcode ?? '').trim() === (c.purchase_item_barcode ?? c.barcode ?? '').trim()
+        const sameProduct = o.product_id === c.product_id
+        return sameProduct && (sameUk || sameArt || sameBar || (o.product_id === 0))
+      })
+      if (matchIdx >= 0) {
+        matchOrigToCurr.set(oi, matchIdx)
+        usedCurr.add(matchIdx)
+      }
+    })
+
+    const matchedCurrIdxs = new Set(matchOrigToCurr.values())
+
+    // Removed
+    original.forEach((o, oi) => {
+      if (matchOrigToCurr.has(oi)) return
+      const mrp = o.mrp ?? 0
+      const price = o.unit_price ?? 0
+      const qty = o.quantity ?? 1
+      lines.push(`Product removed: ${o.product_name} (MRP ${fmt(mrp)}, Sale ${fmt(price)}, Qty ${qty})`)
+    })
+
+    // Added
+    current.forEach((c, ci) => {
+      if (matchedCurrIdxs.has(ci)) return
+      const mrp = c.mrp ?? 0
+      const price = c.unit_price ?? 0
+      const qty = c.quantity ?? 1
+      lines.push(`Product added: ${c.product_name} (MRP ${fmt(mrp)}, Sale ${fmt(price)}, Qty ${qty})`)
+    })
+
+    // Changed (MRP, sale price, qty)
+    matchOrigToCurr.forEach((ci, oi) => {
+      const o = original[oi]
+      const c = current[ci]
+      const name = o.product_name || c.product_name
+      const sub: string[] = []
+      if (Math.abs((o.mrp ?? 0) - (c.mrp ?? 0)) > 0.01) {
+        sub.push(`MRP ${fmt(o.mrp ?? 0)}→${fmt(c.mrp ?? 0)}`)
+      }
+      if (Math.abs((o.unit_price ?? 0) - (c.unit_price ?? 0)) > 0.01) {
+        sub.push(`Sale price ${fmt(o.unit_price ?? 0)}→${fmt(c.unit_price ?? 0)}`)
+      }
+      if (Math.abs((o.quantity ?? 0) - (c.quantity ?? 0)) > 0.001) {
+        sub.push(`Qty ${o.quantity ?? 0}→${c.quantity ?? 0}`)
+      }
+      if (sub.length > 0) {
+        lines.push(`Changed: ${name} – ${sub.join(', ')}`)
+      }
+    })
+
+    return lines
+  }
+
+  /** Build audit lines for non-item changes: discount, payment, customer, sales person, credit */
+  const buildEditOtherChanges = (
+    orig: typeof originalEditSnapshotRef.current,
+    curr: { discountAmount: number; paymentMethods: Array<{ method: string; amount: number }>; customerId: number | ''; salesPersonId: number | ''; creditApplied: number }
+  ): string[] => {
+    const lines: string[] = []
+    const fmt = (n: number) => `₹${n.toFixed(0)}`
+    if (!orig) return lines
+
+    if (Math.abs((orig.discount ?? 0) - (curr.discountAmount ?? 0)) > 0.01) {
+      lines.push(`Discount ${fmt(orig.discount ?? 0)}→${fmt(curr.discountAmount ?? 0)}`)
+    }
+    const origPmStr = [...(orig.paymentMethods || [])]
+      .filter(p => (p.amount || 0) > 0)
+      .map(p => `${p.method} ${fmt(p.amount || 0)}`)
+      .sort()
+      .join(', ')
+    const currPmStr = [...(curr.paymentMethods || [])]
+      .filter(p => (p.amount || 0) > 0)
+      .map(p => `${p.method} ${fmt(p.amount || 0)}`)
+      .sort()
+      .join(', ')
+    if (origPmStr !== currPmStr) {
+      lines.push(`Payment: ${origPmStr || 'none'} → ${currPmStr || 'none'}`)
+    }
+    if (String(orig.customerId || '') !== String(curr.customerId || '')) {
+      const origName = orig.customerId ? customers.find(c => c.id === orig.customerId)?.name : 'None'
+      const currName = curr.customerId ? customers.find(c => c.id === curr.customerId)?.name : 'None'
+      lines.push(`Customer: ${origName || orig.customerId} → ${currName || curr.customerId}`)
+    }
+    if (String(orig.salesPersonId || '') !== String(curr.salesPersonId || '')) {
+      const origName = orig.salesPersonId ? salesPersons.find(s => s.id === orig.salesPersonId)?.name : 'None'
+      const currName = curr.salesPersonId ? salesPersons.find(s => s.id === curr.salesPersonId)?.name : 'None'
+      lines.push(`Sales person: ${origName || orig.salesPersonId} → ${currName || curr.salesPersonId}`)
+    }
+    if (Math.abs((orig.creditApplied ?? 0) - (curr.creditApplied ?? 0)) > 0.01) {
+      lines.push(`Credit applied: ${fmt(orig.creditApplied ?? 0)}→${fmt(curr.creditApplied ?? 0)}`)
+    }
+    return lines
+  }
+
+  /** Combine all edit changes into audit remark */
+  const buildFullEditChangeRemark = (): string => {
+    const itemLines = buildEditChangeRemark(originalSaleItemsRef.current, saleItems)
+    const discountAmount = getDiscountAmount()
+    const pm = paymentMethods.filter(p => (p.amount || 0) > 0)
+    const otherLines = buildEditOtherChanges(originalEditSnapshotRef.current, {
+      discountAmount,
+      paymentMethods: pm.map(p => ({ method: p.method, amount: p.amount })),
+      customerId,
+      salesPersonId,
+      creditApplied,
+    })
+    const all = [...itemLines, ...otherLines]
+    if (all.length === 0) return ''
+    const timestamp = new Date().toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })
+    return `\n\n[Edit ${timestamp}]: ${all.join('; ')}`
+  }
+
   // Get rounding adjustment for grand total
   const getGrandTotalRounding = () => {
     const beforeRounding = getGrandTotalBeforeRounding()
@@ -2094,14 +2297,16 @@ const SaleForm = () => {
     }
     setErrors({}) // Clear errors if validation passes
 
-    // Check stock availability (only for sale items, not returns)
-    for (const item of saleItems) {
-      if (item.sale_type === 'sale') {
-        const product = availableProducts.find(p => p.id === item.product_id)
-        if (!product || product.stock_quantity < item.quantity) {
-          setIsSubmitting(false)
-          alert(`Insufficient stock for ${item.product_name}`)
-          return
+    // Check stock availability (only for sale items, not returns; skip in edit mode)
+    if (!isEditing) {
+      for (const item of saleItems) {
+        if (item.sale_type === 'sale' && item.product_id && item.product_id !== 0) {
+          const product = availableProducts.find(p => p.id === item.product_id)
+          if (!product || product.stock_quantity < item.quantity) {
+            setIsSubmitting(false)
+            alert(`Insufficient stock for ${item.product_name}`)
+            return
+          }
         }
       }
     }
@@ -2118,12 +2323,29 @@ const SaleForm = () => {
 
     const selectedCustomer = customerId ? customers.find(c => c.id === customerId) : null
 
+    // Auto-append edit change audit remark when editing (user cannot edit internal remarks - audit only)
+    let finalInternalRemarks = internalRemarks.trim() || ''
+    if (isEditing) {
+      const changeRemark = buildFullEditChangeRemark()
+      if (changeRemark) {
+        finalInternalRemarks = (finalInternalRemarks ? finalInternalRemarks + changeRemark : changeRemark.trim())
+      }
+    }
+
+    // Manual Sale marker – immutable system stamp when sale includes manually entered product(s)
+    const hasManualProducts = saleItems.some(item => !item.product_id || item.product_id === 0)
+    if (hasManualProducts) {
+      const manualStamp = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+      const manualRemark = `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📋 MANUAL SALE – SYSTEM RECORD (IMMUTABLE)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nThis transaction includes product(s) entered manually by the user (not from the product list).\nCompleted: ${manualStamp}\nNote: This marker is permanent and cannot be modified or removed.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+      finalInternalRemarks = finalInternalRemarks ? finalInternalRemarks + manualRemark : manualRemark.trim()
+    }
+
     const sale = {
       customer_id: customerId ? customerId as number : undefined,
       customer_name: selectedCustomer?.name || 'Walk-in Customer',
       sales_person_id: salesPersonId ? salesPersonId as number : undefined,
       sales_person_name: selectedSalesPerson?.name,
-      invoice_number: '', // Will be auto-generated by service
+      invoice_number: isEditing ? editingInvoiceNumber : '', // Keep existing when editing, auto-generate when creating
       items: saleItems.map(item => ({
         product_id: item.product_id,
         product_name: item.product_name,
@@ -2154,7 +2376,7 @@ const SaleForm = () => {
       payment_methods: finalPaymentMethods.map(p => ({ method: p.method, amount: p.amount })), // Multiple payment methods (including credit)
       return_amount: returnAmount > 0 ? returnAmount : undefined, // Store return amount if any
       credit_applied: creditApplied > 0 ? creditApplied : undefined, // Store credit applied if any
-      internal_remarks: internalRemarks.trim() || undefined, // Internal remarks (not shown to customers)
+      internal_remarks: finalInternalRemarks || undefined, // Internal remarks + auto edit change log
       sale_date: new Date().toISOString(),
       company_id: getCurrentCompanyId() || undefined,
       created_by: parseInt(user?.id || '1')
@@ -2162,12 +2384,23 @@ const SaleForm = () => {
 
     const handleSubmitAsync = async () => {
       try {
-        const createdSale = await saleService.create(sale)
-        toast.success('Sale created!')
-        navigate(`/invoice/${createdSale.id}`)
+        if (isEditing && id) {
+          const saleId = parseInt(id, 10)
+          const updated = await saleService.update(saleId, sale)
+          if (updated) {
+            toast.success('Sale updated!')
+            navigate(`/invoice/${updated.id}`)
+          } else {
+            toast.error('Failed to update sale')
+          }
+        } else {
+          const createdSale = await saleService.create(sale)
+          toast.success('Sale created!')
+          navigate(`/invoice/${createdSale.id}`)
+        }
       } catch (error) {
         setIsSubmitting(false)
-        toast.error('Error creating sale: ' + (error as Error).message)
+        toast.error(isEditing ? 'Error updating sale: ' + (error as Error).message : 'Error creating sale: ' + (error as Error).message)
       }
     }
     handleSubmitAsync()
@@ -2191,12 +2424,12 @@ const SaleForm = () => {
                 <Breadcrumbs
                   items={[
                     { label: 'Dashboard', path: '/' },
-                    { label: 'New Sale' },
+                    { label: isEditing ? 'Edit Sale' : 'New Sale' },
                   ]}
                   className="mb-1"
                 />
-                <h1 className="text-3xl font-bold text-gray-900">New Sale</h1>
-                <p className="text-sm text-gray-600 mt-1">Create a new sales transaction</p>
+                <h1 className="text-3xl font-bold text-gray-900">{isEditing ? 'Edit Sale' : 'New Sale'}</h1>
+                <p className="text-sm text-gray-600 mt-1">{isEditing ? 'Update sale details' : 'Create a new sales transaction'}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -2251,15 +2484,31 @@ const SaleForm = () => {
               {/* Product Search */}
               <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6 border border-white/50">
                 <h2 className="text-xl font-bold text-gray-900 mb-4">Add Products</h2>
-                <div className="relative mb-4">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search by product name, article, or barcode from purchase history..."
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                  />
+                <div className="flex gap-2 mb-4">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search by product name, article, or barcode from purchase history..."
+                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => hasPlanFeature('sales_manual_product') ? setShowManualEntryModal(true) : showPlanUpgrade('sales_manual_product')}
+                    className={`flex items-center gap-2 px-4 py-3 rounded-xl font-medium whitespace-nowrap ${
+                      hasPlanFeature('sales_manual_product')
+                        ? 'border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                        : 'border border-gray-300 bg-gray-100 text-gray-500 hover:bg-gray-200 cursor-pointer'
+                    }`}
+                    title={hasPlanFeature('sales_manual_product') ? 'Add product not in your list' : 'Upgrade to Premium to add manual products'}
+                  >
+                    {!hasPlanFeature('sales_manual_product') && <LockIcon className="w-4 h-4 opacity-70" />}
+                    <PenSquare className="w-5 h-5" />
+                    Manual Entry
+                  </button>
                 </div>
                 
                 {/* Quick reorder: Last sold / Frequently sold (when search empty) */}
@@ -2315,7 +2564,21 @@ const SaleForm = () => {
                     <div className="text-center py-8">
                       <p className="text-gray-500 mb-2">No items found matching "{searchQuery}"</p>
                       <p className="text-xs text-gray-400">Try searching by product name, article, or barcode from purchase history</p>
-                      <p className="text-xs text-gray-400 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => hasPlanFeature('sales_manual_product') ? setShowManualEntryModal(true) : showPlanUpgrade('sales_manual_product')}
+                        className={`mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl font-medium ${
+                          hasPlanFeature('sales_manual_product')
+                            ? 'border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                            : 'border border-gray-300 bg-gray-100 text-gray-500 hover:bg-gray-200 cursor-pointer'
+                        }`}
+                        title={hasPlanFeature('sales_manual_product') ? undefined : 'Upgrade to Premium to add manual products'}
+                      >
+                        {!hasPlanFeature('sales_manual_product') && <LockIcon className="w-4 h-4 opacity-70" />}
+                        <PenSquare className="w-4 h-4" />
+                        Unable to find? Add manually
+                      </button>
+                      <p className="text-xs text-gray-400 mt-4">
                         Total purchases: {purchases.length} | 
                         Total purchase items: {purchases.reduce((sum, p) => sum + p.items.length, 0)}
                       </p>
@@ -3228,20 +3491,27 @@ const SaleForm = () => {
                   <p className="text-red-200 text-sm mt-2 bg-red-500/20 p-2 rounded">{errors.payment}</p>
                 )}
                 
-                {/* Internal Remarks - Not shown to customers */}
+                {/* Internal Remarks - Not shown to customers (read-only when editing - audit trail) */}
                 <div className="mt-6 p-4 bg-gray-50 rounded-xl border border-gray-300">
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     Internal Remarks <span className="text-xs text-gray-500 font-normal">(Not visible to customers)</span>
+                    {isEditing && <span className="ml-2 text-amber-600 text-xs font-medium">(Read-only – changes are auto-recorded)</span>}
                   </label>
                   <textarea
                     value={internalRemarks}
-                    onChange={(e) => setInternalRemarks(e.target.value)}
+                    onChange={(e) => !isEditing && setInternalRemarks(e.target.value)}
+                    readOnly={isEditing}
+                    disabled={isEditing}
                     rows={3}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none bg-white text-gray-900 placeholder:text-gray-400"
-                    placeholder="Add internal notes, comments, or remarks for this sale (only visible in reports, not shown to customers)..."
+                    className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none text-gray-900 placeholder:text-gray-400 ${
+                      isEditing ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+                    }`}
+                    placeholder={isEditing ? 'Existing remarks shown. All edit changes are auto-recorded on save.' : 'Add internal notes, comments, or remarks for this sale (only visible in reports, not shown to customers)...'}
                   />
                   <p className="text-xs text-gray-500 mt-2">
-                    These remarks are for internal use only and will not appear on invoices or customer-facing documents.
+                    {isEditing
+                      ? 'Internal remarks are read-only during edit. All changes (products, MRP, sale price, discount, payment, etc.) are automatically recorded in the audit log on save.'
+                      : 'These remarks are for internal use only and will not appear on invoices or customer-facing documents.'}
                   </p>
                 </div>
                 
@@ -3266,7 +3536,7 @@ const SaleForm = () => {
                   })()}
                   className="w-full mt-6 py-3 bg-white text-blue-600 font-bold rounded-xl hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isSubmitting ? 'Processing…' : 'Complete Sale'}
+                  {isSubmitting ? 'Processing…' : (isEditing ? 'Update Sale' : 'Complete Sale')}
                 </button>
               </div>
             </div>
@@ -3284,6 +3554,115 @@ const SaleForm = () => {
           setShowCustomerModal(false)
         }}
       />
+
+      {/* Manual product entry modal (Premium & Premium Plus) */}
+      {showManualEntryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">Manual Product Entry</h3>
+            <p className="text-sm text-gray-500 mb-4">Add a product not in your list. No inventory tracking.</p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Product Name *</label>
+                <input
+                  type="text"
+                  value={manualEntryForm.productName}
+                  onChange={e => setManualEntryForm(f => ({ ...f, productName: e.target.value }))}
+                  placeholder="Enter product name"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Barcode (optional)</label>
+                <input
+                  type="text"
+                  value={manualEntryForm.barcode}
+                  onChange={e => setManualEntryForm(f => ({ ...f, barcode: e.target.value }))}
+                  placeholder="Enter barcode"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">MRP *</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={manualEntryForm.mrp}
+                  onChange={e => setManualEntryForm(f => ({ ...f, mrp: e.target.value }))}
+                  placeholder="0"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Sale Price *</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={manualEntryForm.salePrice}
+                  onChange={e => setManualEntryForm(f => ({ ...f, salePrice: e.target.value }))}
+                  placeholder="0"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowManualEntryModal(false)
+                  setManualEntryForm({ barcode: '', productName: '', mrp: '', salePrice: '' })
+                }}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const name = manualEntryForm.productName.trim()
+                  const mrp = parseFloat(manualEntryForm.mrp)
+                  const salePrice = parseFloat(manualEntryForm.salePrice)
+                  if (!name) {
+                    toast.error('Product name is required')
+                    return
+                  }
+                  if (isNaN(mrp) || mrp < 0) {
+                    toast.error('Please enter valid MRP')
+                    return
+                  }
+                  if (isNaN(salePrice) || salePrice < 0) {
+                    toast.error('Please enter valid sale price')
+                    return
+                  }
+                  const unitPrice = salePrice
+                  const newItem: SaleItem = {
+                    product_id: 0,
+                    product_name: name,
+                    barcode: manualEntryForm.barcode.trim(),
+                    quantity: 1,
+                    mrp: mrp,
+                    unit_price: unitPrice,
+                    discount: 0,
+                    discount_percentage: 0,
+                    sale_type: 'sale',
+                    total: unitPrice,
+                  }
+                  setSaleItems(prev => [...prev, newItem])
+                  setShowManualEntryModal(false)
+                  setManualEntryForm({ barcode: '', productName: '', mrp: '', salePrice: '' })
+                  toast.success('Manual product added')
+                }}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+              >
+                Add to Cart
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

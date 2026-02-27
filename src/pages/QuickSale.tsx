@@ -11,13 +11,16 @@ import { useToast } from '../context/ToastContext'
 import { productService, Product } from '../services/productService'
 import { saleService } from '../services/saleService'
 import { purchaseService } from '../services/purchaseService'
-import { Home, Barcode, Trash2, CreditCard, Printer, RotateCcw } from 'lucide-react'
+import { Home, Barcode, Trash2, CreditCard, Printer, RotateCcw, PenSquare } from 'lucide-react'
+import { usePlanUpgrade } from '../context/PlanUpgradeContext'
+import { LockIcon } from '../components/icons/LockIcon'
 import { SaleItem } from '../types/sale'
 import { Purchase, PurchaseItem } from '../types/purchase'
 
 const QuickSale = () => {
   const navigate = useNavigate()
-  const { user, getCurrentCompanyId } = useAuth()
+  const { user, getCurrentCompanyId, hasPlanFeature } = useAuth()
+  const { showPlanUpgrade } = usePlanUpgrade()
   const { toast } = useToast()
   const barcodeInputRef = useRef<HTMLInputElement>(null)
 
@@ -29,6 +32,8 @@ const QuickSale = () => {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [lastSaleId, setLastSaleId] = useState<number | null>(null)
+  const [showManualEntryModal, setShowManualEntryModal] = useState(false)
+  const [manualEntryForm, setManualEntryForm] = useState({ barcode: '', productName: '', mrp: '', salePrice: '' })
 
   // Load products and purchases, build barcode map
   useEffect(() => {
@@ -113,7 +118,7 @@ const QuickSale = () => {
     }
 
     if (!product) {
-      toast.error(`No product found for barcode: ${trimmed}`)
+      toast.error(`No product found for barcode: ${trimmed} – use Manual Entry to add`)
       setBarcodeInput('')
       return
     }
@@ -215,12 +220,19 @@ const QuickSale = () => {
     }
     setSaving(true)
     try {
+      const hasManualProducts = saleItems.some(item => !item.product_id || item.product_id === 0)
+      let internalRemarks = ''
+      if (hasManualProducts) {
+        const manualStamp = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+        internalRemarks = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📋 MANUAL SALE – SYSTEM RECORD (IMMUTABLE)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nThis transaction includes product(s) entered manually by the user (not from the product list).\nCompleted: ${manualStamp}\nNote: This marker is permanent and cannot be modified or removed.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+      }
       const sale = {
         customer_id: undefined,
         customer_name: 'Walk-in Customer',
         sales_person_id: undefined,
         sales_person_name: undefined,
         invoice_number: '',
+        ...(internalRemarks && { internal_remarks: internalRemarks }),
         items: saleItems.map(item => ({
           product_id: item.product_id,
           product_name: item.product_name,
@@ -310,7 +322,23 @@ const QuickSale = () => {
             className="w-full px-4 py-4 text-lg border-2 border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
             autoComplete="off"
           />
-          <p className="text-xs text-gray-500 mt-2">Product is added automatically. Press Enter after each scan.</p>
+          <div className="flex items-center justify-between mt-2">
+            <p className="text-xs text-gray-500">Product is added automatically. Press Enter after each scan.</p>
+            <button
+              type="button"
+              onClick={() => hasPlanFeature('sales_manual_product') ? setShowManualEntryModal(true) : showPlanUpgrade('sales_manual_product')}
+              className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg font-medium ${
+                hasPlanFeature('sales_manual_product')
+                  ? 'border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                  : 'border border-gray-300 bg-gray-100 text-gray-500 hover:bg-gray-200 cursor-pointer'
+              }`}
+              title={hasPlanFeature('sales_manual_product') ? 'Add product not in your list' : 'Upgrade to Premium to add manual products'}
+            >
+              {!hasPlanFeature('sales_manual_product') && <LockIcon className="w-3.5 h-3.5 opacity-70" />}
+              <PenSquare className="w-4 h-4" />
+              Manual Entry
+            </button>
+          </div>
         </div>
 
         {/* Cart */}
@@ -405,6 +433,115 @@ const QuickSale = () => {
           </button>
         </p>
       </main>
+
+      {/* Manual product entry modal (Premium & Premium Plus) */}
+      {showManualEntryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">Manual Product Entry</h3>
+            <p className="text-sm text-gray-500 mb-4">Add a product not in your list. No inventory tracking.</p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Product Name *</label>
+                <input
+                  type="text"
+                  value={manualEntryForm.productName}
+                  onChange={e => setManualEntryForm(f => ({ ...f, productName: e.target.value }))}
+                  placeholder="Enter product name"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Barcode (optional)</label>
+                <input
+                  type="text"
+                  value={manualEntryForm.barcode}
+                  onChange={e => setManualEntryForm(f => ({ ...f, barcode: e.target.value }))}
+                  placeholder="Enter barcode"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">MRP *</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={manualEntryForm.mrp}
+                  onChange={e => setManualEntryForm(f => ({ ...f, mrp: e.target.value }))}
+                  placeholder="0"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Sale Price *</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={manualEntryForm.salePrice}
+                  onChange={e => setManualEntryForm(f => ({ ...f, salePrice: e.target.value }))}
+                  placeholder="0"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowManualEntryModal(false)
+                  setManualEntryForm({ barcode: '', productName: '', mrp: '', salePrice: '' })
+                }}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const name = manualEntryForm.productName.trim()
+                  const mrp = parseFloat(manualEntryForm.mrp)
+                  const salePrice = parseFloat(manualEntryForm.salePrice)
+                  if (!name) {
+                    toast.error('Product name is required')
+                    return
+                  }
+                  if (isNaN(mrp) || mrp < 0) {
+                    toast.error('Please enter valid MRP')
+                    return
+                  }
+                  if (isNaN(salePrice) || salePrice < 0) {
+                    toast.error('Please enter valid sale price')
+                    return
+                  }
+                  const unitPrice = salePrice
+                  const newItem: SaleItem = {
+                    product_id: 0,
+                    product_name: name,
+                    barcode: manualEntryForm.barcode.trim(),
+                    quantity: 1,
+                    mrp: mrp,
+                    unit_price: unitPrice,
+                    discount: 0,
+                    discount_percentage: 0,
+                    sale_type: 'sale',
+                    total: unitPrice,
+                  }
+                  setSaleItems(prev => [...prev, newItem])
+                  setShowManualEntryModal(false)
+                  setManualEntryForm({ barcode: '', productName: '', mrp: '', salePrice: '' })
+                  toast.success('Manual product added')
+                }}
+                className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium"
+              >
+                Add to Cart
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,17 +1,20 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { usePlanUpgrade } from '../context/PlanUpgradeContext'
 import { useToast } from '../context/ToastContext'
 import { useNavigate } from 'react-router-dom'
 import { saleService } from '../services/saleService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Sale } from '../types/sale'
-import { Eye, ShoppingCart, TrendingUp, DollarSign, Archive, Home, FileSpreadsheet, FileText, Trash2 } from 'lucide-react'
+import { Eye, ShoppingCart, TrendingUp, DollarSign, Archive, Home, FileSpreadsheet, FileText, Trash2, Pencil } from 'lucide-react'
 import { exportToExcel as exportExcel, exportDataToPDF } from '../utils/exportUtils'
+import { LockIcon } from '../components/icons/LockIcon'
 
 type TimePeriod = 'all' | 'today' | 'yesterday' | 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom'
 
 const SalesHistory = () => {
-  const { user, hasPermission, getCurrentCompanyId } = useAuth()
+  const { user, hasPermission, getCurrentCompanyId, hasPlanFeature } = useAuth()
+  const { showPlanUpgrade } = usePlanUpgrade()
   const { toast } = useToast()
   const navigate = useNavigate()
   const [sales, setSales] = useState<Sale[]>([])
@@ -644,6 +647,23 @@ const SalesHistory = () => {
                         </td>
                         <td className="px-6 py-4 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-2">
+                            {hasPlanFeature('sales_edit') ? (
+                              <button
+                                onClick={() => navigate(`/sales/${sale.id}/edit`)}
+                                className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                                title="Edit Sale"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => showPlanUpgrade('sales_edit')}
+                                className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors"
+                                title="Upgrade to Premium to edit sale"
+                              >
+                                <LockIcon className="w-4 h-4" />
+                              </button>
+                            )}
                             {hasPermission('sales:delete') && (
                               <button
                                 onClick={async () => {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { usePlanUpgrade } from '../context/PlanUpgradeContext'
 import { useToast } from '../context/ToastContext'
 import { reportService } from '../services/reportService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
@@ -11,7 +12,7 @@ import {
   SalesBySalesPersonReport,
   ReportTimePeriod,
 } from '../types/reports'
-import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText, Eye, ShoppingCart, Search, X, Columns3 } from 'lucide-react'
+import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText, Eye, ShoppingCart, Search, X, Columns3, Pencil } from 'lucide-react'
 import { saleService } from '../services/saleService'
 import { Sale } from '../types/sale'
 import { exportToExcel as exportExcel, exportDataToPDF } from '../utils/exportUtils'
@@ -28,6 +29,7 @@ import {
   getStorageKey,
   type SalesReportView,
 } from '../utils/salesReportColumns'
+import { LockIcon } from '../components/icons/LockIcon'
 
 type ReportView = SalesReportView
 
@@ -42,7 +44,8 @@ function formatRecordTime(dateStr: string, createdAt?: string | null): string {
 }
 
 const SalesReports = () => {
-  const { hasPermission, getCurrentCompanyId } = useAuth()
+  const { hasPermission, getCurrentCompanyId, hasPlanFeature } = useAuth()
+  const { showPlanUpgrade } = usePlanUpgrade()
   const { toast } = useToast()
   const navigate = useNavigate()
   const [activeView, setActiveView] = useState<ReportView>('product')
@@ -709,7 +712,14 @@ const SalesReports = () => {
                   {isColumnVisible('sales', 'internal_remarks') && <td className="px-4 py-3 text-xs text-gray-600 max-w-[150px] truncate" title={sale.internal_remarks}>{sale.internal_remarks || '—'}</td>}
                   {isColumnVisible('sales', 'notes') && <td className="px-4 py-3 text-xs text-gray-600 max-w-[150px] truncate" title={sale.notes}>{sale.notes || '—'}</td>}
                   <td className="px-4 py-3 text-right whitespace-nowrap">
-                    <button onClick={() => navigate(`/invoice/${sale.id}`)} className="p-2 text-blue-600 hover:bg-blue-50 rounded" title="View Receipt"><Eye className="w-4 h-4" /></button>
+                    <div className="flex items-center justify-end gap-1">
+                      {hasPlanFeature('sales_edit') ? (
+                        <button onClick={() => navigate(`/sales/${sale.id}/edit`)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded" title="Edit Sale"><Pencil className="w-4 h-4" /></button>
+                      ) : (
+                        <button onClick={() => showPlanUpgrade('sales_edit')} className="p-2 text-gray-400 hover:bg-gray-100 rounded" title="Upgrade to Premium to edit sale"><LockIcon className="w-4 h-4" /></button>
+                      )}
+                      <button onClick={() => navigate(`/invoice/${sale.id}`)} className="p-2 text-blue-600 hover:bg-blue-50 rounded" title="View Receipt"><Eye className="w-4 h-4" /></button>
+                    </div>
                   </td>
                 </tr>
               ))}

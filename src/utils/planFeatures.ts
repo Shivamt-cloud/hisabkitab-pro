@@ -65,6 +65,10 @@ export type PlanFeature =
   // Services: all 4 (Bike, Car, E-bike, E-car) = premium (Premium, Premium Plus, Premium Plus Plus)
   | 'services_bike_car_ebike'
   | 'services_ebike_ecar'
+  // Manual product entry during sale (for products not in product list) = Premium & above
+  | 'sales_manual_product'
+  // Edit sale from Sales Reports / Sales History = Premium & above
+  | 'sales_edit'
   // Premium Plus only: Services export & upcoming widget
   | 'services_export'
   | 'services_upcoming_widget'
@@ -128,6 +132,8 @@ export const PLAN_FEATURE_MAP: Record<PlanFeature, PlanTier | 'admin'> = {
   services_export: 'premium_plus', // Premium Plus & above – Export service report to Excel
   services_upcoming_widget: 'premium_plus', // Premium Plus & above – Upcoming services on Dashboard
   services_customer_notify: 'premium_plus', // Premium Plus & above – Notify customer via WhatsApp & Email
+  sales_manual_product: 'premium', // Premium & above – Manual product entry during sale (unlisted products)
+  sales_edit: 'premium', // Premium & above – Edit sale from Sales Reports / Sales History
 }
 
 /** Human-readable labels for upgrade modal (only for plan-gated features we show in UI) */
@@ -177,6 +183,8 @@ export const PLAN_FEATURE_LABELS: Partial<Record<PlanFeature, string>> = {
   services_export: 'Export service report to Excel',
   services_upcoming_widget: 'Upcoming services on Dashboard',
   services_customer_notify: 'Notify customer via WhatsApp & Email',
+  sales_manual_product: 'Manual product entry during sale',
+  sales_edit: 'Edit sale from Sales Reports',
 }
 
 export const PLAN_TIER_LABELS: Record<PlanTier, string> = {

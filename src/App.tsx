@@ -296,6 +296,14 @@ function App() {
             }
           />
           <Route
+            path="/sales/:id/edit"
+            element={
+              <ProtectedRoute requiredPermission="sales:update" requiredPlanFeature="sales_edit">
+                <SaleForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/sales/returns"
             element={
               <ProtectedRoute requiredPermission="sales:update">
