@@ -6,7 +6,8 @@ import { productService, Product } from '../services/productService'
 import { saleService } from '../services/saleService'
 import { salesPersonService } from '../services/salespersonService'
 import { customerService } from '../services/customerService'
-import { purchaseService } from '../services/purchaseService'
+import { purchaseService, supplierService } from '../services/purchaseService'
+import { isOnline, isSupabaseAvailable } from '../services/supabaseClient'
 import { priceSegmentService, productSegmentPriceService } from '../services/priceListService'
 import { SalesPerson } from '../types/salesperson'
 import { Customer } from '../types/customer'
@@ -34,7 +35,11 @@ const SaleForm = () => {
   const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [purchases, setPurchases] = useState<Purchase[]>([]) // Store purchases for purchase item lookup
+  const [suppliers, setSuppliers] = useState<Array<{ id: number; name: string }>>([]) // For supplier name lookup when purchase.supplier_name is empty
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('') // Debounced for search - avoids lag when typing
+  const [searchPurchasesFromApi, setSearchPurchasesFromApi] = useState<Purchase[]>([]) // When online: Supabase RPC results (fast)
+  const [searchingApi, setSearchingApi] = useState(false)
   const [productArticleMap, setProductArticleMap] = useState<Map<number, string[]>>(new Map())
   const [productBarcodeMap, setProductBarcodeMap] = useState<Map<number, string[]>>(new Map())
   const [barcodeToPurchaseItemMap, setBarcodeToPurchaseItemMap] = useState<Map<string, any>>(new Map())
@@ -78,6 +83,37 @@ const SaleForm = () => {
 
   const HELD_CART_KEY = () => `hisabkitab_held_cart_${getCurrentCompanyId() ?? 'default'}`
 
+  // Debounce search to avoid expensive filter on every keystroke (300ms)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  // When online: search in Supabase (server-side, fast). When offline: skip (client search uses IndexedDB)
+  useEffect(() => {
+    const q = debouncedSearchQuery.trim()
+    if (!q) {
+      setSearchPurchasesFromApi([])
+      return
+    }
+    if (!isSupabaseAvailable() || !isOnline()) {
+      setSearchPurchasesFromApi([]) // Offline: use client-side search on purchases
+      return
+    }
+    let cancelled = false
+    setSearchingApi(true)
+    purchaseService.searchPurchasesForSale(q, getCurrentCompanyId()).then((purchases) => {
+      if (!cancelled) {
+        setSearchPurchasesFromApi(purchases || [])
+      }
+    }).catch(() => {
+      if (!cancelled) setSearchPurchasesFromApi([])
+    }).finally(() => {
+      if (!cancelled) setSearchingApi(false)
+    })
+    return () => { cancelled = true }
+  }, [debouncedSearchQuery, getCurrentCompanyId])
+
   // Separate function to load customers (can be called independently)
   const loadCustomers = async () => {
     try {
@@ -100,10 +136,12 @@ const SaleForm = () => {
     try {
       const companyId = getCurrentCompanyId()
       
-      // Load products and purchases in parallel (use getAllFast for purchases - skips IndexedDB merge, much faster)
+      // Load products and purchases in parallel
+      // Online + Supabase: getAllFast (fast) – search uses Supabase RPC. Offline: getAll (full IndexedDB) – search uses local.
+      const useFastLoad = isSupabaseAvailable() && isOnline()
       const [allProducts, allPurchases] = await Promise.all([
-        productService.getAll(false, companyId),
-        purchaseService.getAllFast(undefined, companyId),
+        productService.getAllFast(false, companyId),
+        useFastLoad ? purchaseService.getAllFast(undefined, companyId) : purchaseService.getAll(undefined, companyId),
       ])
       const products = allProducts.filter(p => p.status === 'active')
       
@@ -242,8 +280,12 @@ const SaleForm = () => {
           }
         } catch (_) {}
 
-        // Load recent sales for Quick reorder (Last sold / Frequently sold) - use getAllFast for speed
+        // Load suppliers (for search by supplier name when purchase.supplier_name is empty)
         const companyId = getCurrentCompanyId()
+        const allSuppliers = await supplierService.getAll(companyId ?? undefined)
+        setSuppliers(allSuppliers.map(s => ({ id: s.id, name: s.name })))
+
+        // Load recent sales for Quick reorder (Last sold / Frequently sold) - use getAllFast for speed
         const allSales = await saleService.getAllFast(true, companyId ?? undefined)
         // Sort by date descending and take last 100
         const sorted = [...allSales].sort((a, b) => new Date(b.sale_date).getTime() - new Date(a.sale_date).getTime())
@@ -530,15 +572,20 @@ const SaleForm = () => {
       .filter((p): p is Product => !!p)
   }, [salesForQuickReorder, availableProducts])
 
-  // NEW SIMPLIFIED SEARCH: Direct search in purchase history by article/barcode/product name
-  // This searches purchases directly - simple, fast, and accurate
+  // Search: Online = Supabase RPC (fast, server-side). Offline = IndexedDB (client-side).
+  const purchasesToSearch = (isSupabaseAvailable() && isOnline() && debouncedSearchQuery.trim())
+    ? searchPurchasesFromApi  // Online: use API results (small subset)
+    : purchases               // Offline: use full IndexedDB data
+
   const searchPurchaseItems = useMemo(() => {
-    if (!searchQuery.trim()) {
+    if (!debouncedSearchQuery.trim()) {
       return []
     }
+    if (searchingApi) return [] // While fetching from Supabase, show empty (or could show loading)
     
-    const query = searchQuery.trim()
+    const query = debouncedSearchQuery.trim()
     const queryLower = query.toLowerCase()
+    const queryNorm = queryLower.replace(/\s+/g, '') // "old recon product" -> "oldreconproduct"
     
     // Strip prefixes (Article_, Barcode_, Product_, etc.)
     const prefixPattern = /^(article|barcode|product)[_:\s-]+/i
@@ -550,19 +597,57 @@ const SaleForm = () => {
       item: PurchaseItem
       product: Product | undefined
       availableStock: number
-      matchType: 'article' | 'barcode' | 'product' | 'both' | 'all'
+      matchType: 'article' | 'barcode' | 'product' | 'supplier' | 'both' | 'all'
       isExactMatch: boolean
     }> = []
     
-    // Search purchases directly - simple loop through all purchases
-    for (const purchase of purchases) {
+    // Fast path: barcode exact match (O(1) lookup) – only when we have the purchase
+    const barcodeItem = barcodeToPurchaseItemMap.get(query)
+    if (barcodeItem) {
+      const purchase = purchasesToSearch.find(p => p.id === barcodeItem.purchase_id) || purchases.find(p => p.id === barcodeItem.purchase_id)
+      if (purchase) {
+        const item = purchase.items.find(pi => pi.barcode && String(pi.barcode).trim() === query && pi.product_id === barcodeItem.product_id) || barcodeItem
+        const product = availableProducts.find(p => p.id === item.product_id)
+        const soldQty = (item as PurchaseItem).sold_quantity || 0
+        const availableStock = (item as PurchaseItem).quantity - soldQty
+        matchingItems.push({ purchase, item: item as PurchaseItem, product, availableStock, matchType: 'barcode', isExactMatch: true })
+        return matchingItems
+      }
+    }
+    
+    // Fast path: article exact match (O(1) lookup)
+    const articleItem = articleToPurchaseItemMap.get(query) || articleToPurchaseItemMap.get(query.toLowerCase())
+    if (articleItem && articleItem.purchase_id) {
+      const purchase = purchasesToSearch.find(p => p.id === articleItem.purchase_id) || purchases.find(p => p.id === articleItem.purchase_id)
+      if (purchase) {
+        const item = purchase.items.find(pi => pi.product_id === articleItem.product_id && pi.article && String(pi.article).trim().toLowerCase() === query.toLowerCase()) || articleItem
+        const product = availableProducts.find(p => p.id === item.product_id)
+        const soldQty = (item as PurchaseItem).sold_quantity || 0
+        const availableStock = (item as PurchaseItem).quantity - soldQty
+        matchingItems.push({ purchase, item: item as PurchaseItem, product, availableStock, matchType: 'article', isExactMatch: true })
+        return matchingItems
+      }
+    }
+    
+    // Full search: iterate purchases for product name, supplier, partial barcode/article
+    for (const purchase of purchasesToSearch) {
       for (const item of purchase.items) {
         if (!item.product_id) continue
         
         let matchesArticle = false
         let matchesBarcode = false
         let matchesProduct = false
+        let matchesSupplier = false
         let isExactMatch = false
+        
+        // Check supplier name (e.g. "Nikhil" finds purchases from that supplier)
+        const supplierName = purchase.supplier_name || (purchase.supplier_id ? suppliers.find(s => s.id === purchase.supplier_id)?.name : null) || ''
+        if (supplierName) {
+          const supplierLower = supplierName.toLowerCase()
+          if (supplierLower.includes(queryLower) || queryLower.includes(supplierLower)) {
+            matchesSupplier = true
+          }
+        }
         
         // Find product first (needed for product name matching)
         const product = availableProducts.find(p => p.id === item.product_id)
@@ -571,15 +656,19 @@ const SaleForm = () => {
         
         // Check product name
         if (productName) {
+          const productNorm = productNameLower.replace(/\s+/g, '')
           // Exact match
           if (productNameLower === queryLower || 
-              productName === query) {
+              productName === query ||
+              productNorm === queryNorm) {
             matchesProduct = true
             isExactMatch = true
           }
-          // Contains match
+          // Contains match (including space-normalized: "OLDReconProduct" matches "Old Recon Product")
           else if (productNameLower.includes(queryLower) || 
-                   queryLower.includes(productNameLower)) {
+                   queryLower.includes(productNameLower) ||
+                   productNorm.includes(queryNorm) ||
+                   queryNorm.includes(productNorm)) {
             matchesProduct = true
           }
         }
@@ -629,29 +718,35 @@ const SaleForm = () => {
           }
         }
         
-        if (matchesArticle || matchesBarcode || matchesProduct) {
+        if (matchesArticle || matchesBarcode || matchesProduct || matchesSupplier) {
           // Calculate available stock
           const soldQty = item.sold_quantity || 0
           const availableStock = item.quantity - soldQty
           
           // Determine match type
-          let matchType: 'article' | 'barcode' | 'product' | 'both' | 'all'
-          const matchCount = [matchesArticle, matchesBarcode, matchesProduct].filter(Boolean).length
-          if (matchCount === 3) {
+          let matchType: 'article' | 'barcode' | 'product' | 'supplier' | 'both' | 'all'
+          const matchCount = [matchesArticle, matchesBarcode, matchesProduct, matchesSupplier].filter(Boolean).length
+          if (matchCount >= 3) {
             matchType = 'all'
           } else if (matchCount === 2) {
             if (matchesArticle && matchesBarcode) {
               matchType = 'both'
             } else if (matchesArticle && matchesProduct) {
-              matchType = 'article' // Prioritize article over product
+              matchType = 'article'
+            } else if (matchesBarcode && matchesProduct) {
+              matchType = 'barcode'
+            } else if (matchesSupplier) {
+              matchType = 'supplier'
             } else {
-              matchType = 'barcode' // Prioritize barcode over product
+              matchType = 'product'
             }
           } else {
             if (matchesArticle) {
               matchType = 'article'
             } else if (matchesBarcode) {
               matchType = 'barcode'
+            } else if (matchesSupplier) {
+              matchType = 'supplier'
             } else {
               matchType = 'product'
             }
@@ -664,6 +759,41 @@ const SaleForm = () => {
             availableStock,
             matchType,
             isExactMatch
+          })
+        }
+      }
+    }
+    
+    // Product-centric pass: find products by name (catches Frequently sold products when purchase item has different/empty product_name)
+    const seenKeys = new Set(matchingItems.map(m => `${m.purchase.id}-${m.item.id}`))
+    for (const product of availableProducts) {
+      const productName = product?.name || ''
+      const productNameLower = productName.toLowerCase()
+      const productNorm = productNameLower.replace(/\s+/g, '')
+      if (!productName) continue
+      const nameMatches = productNameLower === queryLower ||
+        productName === query ||
+        productNorm === queryNorm ||
+        productNameLower.includes(queryLower) ||
+        queryLower.includes(productNameLower) ||
+        productNorm.includes(queryNorm) ||
+        queryNorm.includes(productNorm)
+      if (!nameMatches) continue
+      for (const purchase of purchasesToSearch) {
+        for (const item of purchase.items) {
+          if (item.product_id !== product.id) continue
+          const key = `${purchase.id}-${item.id}`
+          if (seenKeys.has(key)) continue
+          seenKeys.add(key)
+          const soldQty = item.sold_quantity || 0
+          const availableStock = item.quantity - soldQty
+          matchingItems.push({
+            purchase,
+            item,
+            product,
+            availableStock,
+            matchType: 'product' as const,
+            isExactMatch: productNameLower === queryLower || productName === query
           })
         }
       }
@@ -687,7 +817,7 @@ const SaleForm = () => {
     })
     
     return matchingItems
-  }, [searchQuery, purchases, availableProducts])
+  }, [debouncedSearchQuery, purchases, purchasesToSearch, availableProducts, suppliers, barcodeToPurchaseItemMap, articleToPurchaseItemMap, searchingApi])
 
   const searchPurchaseItemsRef = useRef<Array<{ purchase: Purchase; item: PurchaseItem; product: Product | undefined; availableStock: number; matchType: string; isExactMatch: boolean }>>([])
   searchPurchaseItemsRef.current = searchPurchaseItems
@@ -2199,7 +2329,7 @@ const SaleForm = () => {
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search by product name, article, or barcode from purchase history..."
+                      placeholder="Search by product name, barcode, article, or supplier..."
                       className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     />
                   </div>
@@ -2266,12 +2396,17 @@ const SaleForm = () => {
                       <p className="text-gray-500 mb-2 font-medium">Search purchase history to add items to sale</p>
                       <p className="text-xs text-gray-400">Search by product name, article, or barcode from purchase history</p>
                     </div>
+                  ) : searchingApi ? (
+                    <div className="text-center py-12">
+                      <div className="animate-spin w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-4" />
+                      <p className="text-gray-500">Searching in Supabase...</p>
+                    </div>
                   ) : purchases.length === 0 ? (
                     <p className="text-center text-gray-500 py-8">No purchases found. Please add purchases first.</p>
                   ) : searchPurchaseItems.length === 0 ? (
                     <div className="text-center py-8">
-                      <p className="text-gray-500 mb-2">No items found matching "{searchQuery}"</p>
-                      <p className="text-xs text-gray-400">Try searching by product name, article, or barcode from purchase history</p>
+                      <p className="text-gray-500 mb-2">No items found matching "{debouncedSearchQuery}"</p>
+                      <p className="text-xs text-gray-400">Try searching by product name, barcode, article, or supplier name</p>
                       <button
                         type="button"
                         onClick={() => hasPlanFeature('sales_manual_product') ? setShowManualEntryModal(true) : showPlanUpgrade('sales_manual_product')}
@@ -2287,14 +2422,15 @@ const SaleForm = () => {
                         Unable to find? Add manually
                       </button>
                       <p className="text-xs text-gray-400 mt-4">
-                        Total purchases: {purchases.length} | 
-                        Total purchase items: {purchases.reduce((sum, p) => sum + p.items.length, 0)}
+                        {isSupabaseAvailable() && isOnline()
+                          ? 'Search runs in Supabase (online).'
+                          : `Total purchases: ${purchases.length} | Total purchase items: ${purchases.reduce((sum, p) => sum + p.items.length, 0)}`}
                       </p>
                     </div>
                   ) : (
                     <>
                       <p className="text-xs text-gray-500 mb-2">
-                        Found {searchPurchaseItems.length} item{searchPurchaseItems.length !== 1 ? 's' : ''} matching "{searchQuery}"
+                        Found {searchPurchaseItems.length} item{searchPurchaseItems.length !== 1 ? 's' : ''} matching "{debouncedSearchQuery}"
                       </p>
                       {searchPurchaseItems.map(({ purchase, item, product, availableStock, matchType, isExactMatch }, rowIndex) => {
                         if (!product) {

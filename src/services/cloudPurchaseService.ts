@@ -66,6 +66,34 @@ export const cloudPurchaseService = {
   },
 
   /**
+   * Search purchases in Supabase (server-side, fast when online).
+   * Used by Sale form when online - avoids loading full purchase history.
+   * Returns only matching purchases (max 500).
+   * When offline, returns [] – caller should use client-side search on IndexedDB.
+   */
+  searchPurchasesForSale: async (query: string, companyId?: number | null): Promise<Purchase[]> => {
+    const q = (query || '').trim()
+    if (!q || !isSupabaseAvailable() || !isOnline()) return []
+    try {
+      const { data, error } = await supabase!.rpc('search_purchases_for_sale', {
+        search_query: q,
+        p_company_id: companyId ?? undefined
+      })
+      if (error) {
+        console.warn('[cloudPurchaseService] search_purchases_for_sale RPC failed:', error)
+        return []
+      }
+      const rows = (data || []) as Purchase[]
+      return rows.map((p: Purchase) => ({
+        ...p,
+        items: normalizePurchaseItems(p.items, p.id)
+      }))
+    } catch (_) {
+      return []
+    }
+  },
+
+  /**
    * Get all purchases from cloud
    */
   getAll: async (type?: PurchaseType, companyId?: number | null): Promise<Purchase[]> => {

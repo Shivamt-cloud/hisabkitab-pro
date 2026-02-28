@@ -754,5 +754,71 @@ ALTER TABLE purchase_reorder_items
 
 
 -- =====================================================
+-- PART 8: RPC – search_purchases_for_sale (online search)
+-- =====================================================
+-- When online: Sale form calls this RPC to search in Supabase (fast, indexed).
+-- When offline: Search uses IndexedDB locally.
+-- Usage: SELECT * FROM search_purchases_for_sale('barcode_or_name', company_id);
+
+CREATE OR REPLACE FUNCTION search_purchases_for_sale(
+  search_query text,
+  p_company_id int DEFAULT NULL
+)
+RETURNS SETOF purchases AS $$
+DECLARE
+  q text;
+BEGIN
+  q := trim(search_query);
+  IF q = '' OR q IS NULL THEN
+    RETURN;
+  END IF;
+
+  RETURN QUERY
+  SELECT p.*
+  FROM purchases p
+  WHERE (p_company_id IS NULL OR p.company_id = p_company_id)
+  AND (
+    -- Supplier name match (indexed via ilike pattern)
+    (p.supplier_name IS NOT NULL AND p.supplier_name ILIKE '%' || q || '%')
+    OR
+    -- Barcode in purchase items (JSONB) – exact OR prefix/partial (e.g. "89" matches "8903657644837")
+    EXISTS (
+      SELECT 1 FROM jsonb_array_elements(p.items) AS elem
+      WHERE elem->>'barcode' IS NOT NULL
+        AND (trim(elem->>'barcode') = q
+             OR trim(elem->>'barcode') LIKE q || '%'
+             OR trim(elem->>'barcode') ILIKE '%' || q || '%')
+    )
+    OR
+    -- Article in purchase items (JSONB)
+    EXISTS (
+      SELECT 1 FROM jsonb_array_elements(p.items) AS elem
+      WHERE elem->>'article' IS NOT NULL AND trim(lower(elem->>'article')) = lower(q)
+    )
+    OR
+    -- Product name in items (item.product_name)
+    EXISTS (
+      SELECT 1 FROM jsonb_array_elements(p.items) AS elem
+      WHERE elem->>'product_name' IS NOT NULL AND trim(lower(elem->>'product_name')) LIKE '%' || lower(q) || '%'
+    )
+    OR
+    -- Product name or barcode from products table (join via product_id in items)
+    -- Barcode: exact, prefix, or partial (e.g. "89" matches "8903657644837")
+    EXISTS (
+      SELECT 1 FROM jsonb_array_elements(p.items) AS elem
+      JOIN products pr ON pr.id = ((elem->>'product_id')::int)
+      WHERE (pr.name ILIKE '%' || q || '%'
+             OR (pr.barcode IS NOT NULL AND (trim(pr.barcode) = q
+                 OR trim(pr.barcode) LIKE q || '%'
+                 OR trim(pr.barcode) ILIKE '%' || q || '%')))
+    )
+  )
+  ORDER BY p.purchase_date DESC
+  LIMIT 500;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+
+-- =====================================================
 -- END – HISABKITAB PRO FINAL SUPABASE SCRIPT
 -- =====================================================

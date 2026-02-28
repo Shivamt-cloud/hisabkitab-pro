@@ -100,6 +100,96 @@ export const cloudProductService = {
   },
 
   /**
+   * Fast fetch: Supabase only, no IndexedDB sync. Use for Sale/QuickSale initial load.
+   */
+  getAllFast: async (includeArchived: boolean = false, companyId?: number | null): Promise<Product[]> => {
+    const effectiveId = companyId ?? undefined
+    if (!isSupabaseAvailable() || !isOnline()) {
+      let products = await getAll<Product>(STORES.PRODUCTS)
+      if (effectiveId !== undefined) {
+        products = products.filter(p => p.company_id === effectiveId || p.company_id === null || p.company_id === undefined)
+      }
+      if (!includeArchived) products = products.filter(p => p.status === 'active')
+      const categories = await categoryService.getAll()
+      return products.map(p => ({
+        ...p,
+        category_name: p.category_id ? categories.find(c => c.id === p.category_id)?.name : undefined,
+        status: p.status || 'active',
+        barcode_status: p.barcode_status || (p.barcode ? 'active' : 'inactive'),
+      }))
+    }
+    try {
+      let query = supabase!.from('products').select('*')
+      if (effectiveId !== undefined) query = query.eq('company_id', effectiveId)
+      if (!includeArchived) query = query.eq('status', 'active')
+      const { data, error } = await query.order('created_at', { ascending: false })
+      if (error) throw error
+      const categories = await categoryService.getAll()
+      return ((data || []) as Product[]).map(p => ({
+        ...p,
+        category_name: p.category_id ? categories.find(c => c.id === p.category_id)?.name : undefined,
+        status: p.status || 'active',
+        barcode_status: p.barcode_status || (p.barcode ? 'active' : 'inactive'),
+      }))
+    } catch {
+      let products = await getAll<Product>(STORES.PRODUCTS)
+      if (effectiveId !== undefined) products = products.filter(p => p.company_id === effectiveId || p.company_id === null || p.company_id === undefined)
+      if (!includeArchived) products = products.filter(p => p.status === 'active')
+      const categories = await categoryService.getAll()
+      return products.map(p => ({
+        ...p,
+        category_name: p.category_id ? categories.find(c => c.id === p.category_id)?.name : undefined,
+        status: p.status || 'active',
+        barcode_status: p.barcode_status || (p.barcode ? 'active' : 'inactive'),
+      }))
+    }
+  },
+
+  /**
+   * Get product by barcode – single indexed query, fast for large catalogs
+   */
+  getByBarcode: async (barcode: string, companyId?: number | null): Promise<Product | undefined> => {
+    const trimmed = barcode?.trim()
+    if (!trimmed) return undefined
+    if (!isSupabaseAvailable() || !isOnline()) {
+      const products = await getAll<Product>(STORES.PRODUCTS)
+      const product = products.find(p => p.barcode && String(p.barcode).trim() === trimmed && (!companyId || p.company_id === companyId))
+      if (!product) return undefined
+      const categories = await categoryService.getAll()
+      return {
+        ...product,
+        category_name: product.category_id ? categories.find(c => c.id === product.category_id)?.name : undefined,
+        status: product.status || 'active',
+        barcode_status: product.barcode_status || (product.barcode ? 'active' : 'inactive'),
+      }
+    }
+    try {
+      let query = supabase!.from('products').select('*').eq('barcode', trimmed)
+      if (companyId !== undefined && companyId !== null) query = query.eq('company_id', companyId)
+      const { data, error } = await query.maybeSingle()
+      if (error || !data) return undefined
+      const categories = await categoryService.getAll()
+      return {
+        ...(data as Product),
+        category_name: (data as Product).category_id ? categories.find(c => c.id === (data as Product).category_id)?.name : undefined,
+        status: (data as Product).status || 'active',
+        barcode_status: (data as Product).barcode_status || ((data as Product).barcode ? 'active' : 'inactive'),
+      }
+    } catch {
+      const products = await getAll<Product>(STORES.PRODUCTS)
+      const product = products.find(p => p.barcode && String(p.barcode).trim() === trimmed && (!companyId || p.company_id === companyId))
+      if (!product) return undefined
+      const categories = await categoryService.getAll()
+      return {
+        ...product,
+        category_name: product.category_id ? categories.find(c => c.id === product.category_id)?.name : undefined,
+        status: product.status || 'active',
+        barcode_status: product.barcode_status || (product.barcode ? 'active' : 'inactive'),
+      }
+    }
+  },
+
+  /**
    * Get product by SKU from cloud
    */
   getBySku: async (sku: string, companyId?: number | null): Promise<Product | undefined> => {

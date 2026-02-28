@@ -97,10 +97,19 @@ const Products = () => {
   }
 
   const filteredProducts = products.filter(product => {
-    const matchesSearch = !searchQuery || 
-      product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      product.sku?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      product.barcode?.toLowerCase().includes(searchQuery.toLowerCase())
+    const q = searchQuery.trim()
+    const matchesSearch = !q || (() => {
+      const qLower = q.toLowerCase()
+      const qNorm = qLower.replace(/\s+/g, '')
+      const name = (product.name || '').toLowerCase()
+      const nameNorm = name.replace(/\s+/g, '')
+      return name.includes(qLower) ||
+        nameNorm.includes(qNorm) ||
+        qNorm.includes(nameNorm) ||
+        (product.sku && product.sku.toLowerCase().includes(qLower)) ||
+        (product.barcode && product.barcode.toLowerCase().includes(qLower)) ||
+        (product.description && product.description.toLowerCase().includes(qLower))
+    })()
 
     const matchesCategory = !selectedCategory || product.category_id === selectedCategory
 

@@ -47,6 +47,11 @@ export const purchaseService = {
     return await cloudPurchaseService.getAll(type, companyId)
   },
 
+  /** Search purchases in Supabase (server-side). Fast when online. Returns [] when offline. */
+  searchPurchasesForSale: async (query: string, companyId?: number | null): Promise<Purchase[]> => {
+    return await cloudPurchaseService.searchPurchasesForSale(query, companyId)
+  },
+
   // Get purchase by ID (from cloud, with local fallback)
   getById: async (id: number): Promise<Purchase | undefined> => {
     return await cloudPurchaseService.getById(id)

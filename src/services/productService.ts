@@ -140,6 +140,17 @@ export const productService = {
     return await cloudProductService.getAll(includeArchived, companyId)
   },
 
+  /** Fast fetch: Supabase only, no IndexedDB sync. Use for Sale/QuickSale. */
+  getAllFast: async (includeArchived: boolean = false, companyId?: number | null): Promise<Product[]> => {
+    await initializeDefaultCategories()
+    return await cloudProductService.getAllFast(includeArchived, companyId)
+  },
+
+  /** Get product by barcode – single indexed query, fast for large catalogs */
+  getByBarcode: async (barcode: string, companyId?: number | null): Promise<Product | undefined> => {
+    return await cloudProductService.getByBarcode(barcode, companyId)
+  },
+
   // Get product by ID (from cloud, with local fallback)
   getById: async (id: number, includeArchived: boolean = false): Promise<Product | undefined> => {
     return await cloudProductService.getById(id, includeArchived)

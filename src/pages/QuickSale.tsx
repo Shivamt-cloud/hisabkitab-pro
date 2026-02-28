@@ -27,6 +27,7 @@ const QuickSale = () => {
   const [availableProducts, setAvailableProducts] = useState<Product[]>([])
   const [purchases, setPurchases] = useState<Purchase[]>([])
   const [barcodeToPurchaseItemMap, setBarcodeToPurchaseItemMap] = useState<Map<string, PurchaseItem & { purchase_id?: number }>>(new Map())
+  const [articleToPurchaseItemMap, setArticleToPurchaseItemMap] = useState<Map<string, PurchaseItem & { purchase_id?: number }>>(new Map())
   const [saleItems, setSaleItems] = useState<SaleItem[]>([])
   const [barcodeInput, setBarcodeInput] = useState('')
   const [loading, setLoading] = useState(true)
@@ -42,14 +43,15 @@ const QuickSale = () => {
       const companyId = getCurrentCompanyId()
       try {
         const [products, purchs] = await Promise.all([
-          productService.getAll(false, companyId),
-          purchaseService.getAllFast(undefined, companyId),
+          productService.getAllFast(false, companyId),
+          purchaseService.getAll(undefined, companyId),
         ])
         const activeProducts = products.filter(p => p.status === 'active')
         setAvailableProducts(activeProducts)
         setPurchases(purchs)
 
         const barcodeMap = new Map<string, PurchaseItem & { purchase_id?: number; purchase_date?: string }>()
+        const articleMap = new Map<string, PurchaseItem & { purchase_id?: number; purchase_date?: string }>()
         purchs.forEach(purchase => {
           purchase.items.forEach(item => {
             const barcodeValue = item.barcode
@@ -60,6 +62,17 @@ const QuickSale = () => {
                   (purchase.purchase_date && existing?.purchase_date &&
                    new Date(purchase.purchase_date) > new Date(existing.purchase_date))) {
                 barcodeMap.set(barcodeStr, { ...item, purchase_id: purchase.id, purchase_date: purchase.purchase_date })
+              }
+            }
+            const articleValue = item.article
+            if (articleValue != null && String(articleValue).trim()) {
+              const articleStr = String(articleValue).trim()
+              const articleKey = articleStr.toLowerCase()
+              const existing = articleMap.get(articleKey)
+              if (!articleMap.has(articleKey) ||
+                  (purchase.purchase_date && existing?.purchase_date &&
+                   new Date(purchase.purchase_date) > new Date(existing.purchase_date))) {
+                articleMap.set(articleKey, { ...item, purchase_id: purchase.id, purchase_date: purchase.purchase_date })
               }
             }
           })
@@ -80,6 +93,7 @@ const QuickSale = () => {
           }
         })
         setBarcodeToPurchaseItemMap(barcodeMap)
+        setArticleToPurchaseItemMap(articleMap)
       } catch (e) {
         console.error('QuickSale load error:', e)
         toast.error('Failed to load products')
@@ -94,31 +108,76 @@ const QuickSale = () => {
     barcodeInputRef.current?.focus()
   }, [saleItems, lastSaleId])
 
-  const addByBarcode = (query: string) => {
-    const trimmed = query.trim()
-    if (!trimmed) return
+  // Normalize search: strip article/barcode prefix for flexible input
+  const normalizeSearch = (q: string) => {
+    let s = q.trim()
+    const prefixPattern = /^(article|barcode)[_:\s-]+/i
+    if (prefixPattern.test(s)) s = s.replace(prefixPattern, '').trim()
+    return s
+  }
+
+  const addByBarcode = async (query: string) => {
+    const raw = query.trim()
+    if (!raw) return
+    const trimmed = normalizeSearch(raw)
 
     let product: Product | undefined
     let purchaseItem: (PurchaseItem & { purchase_id?: number; purchase_date?: string }) | undefined
 
-    // 1. Look up by barcode in purchase items
+    // 1. Look up by barcode in purchase items (from preloaded map)
     if (barcodeToPurchaseItemMap.has(trimmed)) {
       purchaseItem = barcodeToPurchaseItemMap.get(trimmed)!
       product = availableProducts.find(p => p.id === purchaseItem!.product_id)
     }
 
-    // 2. Fallback: product barcode
-    if (!product) {
-      product = availableProducts.find(p => p.barcode && p.barcode.trim() === trimmed)
-    }
-
-    // 3. Fallback: try numeric match on product barcode
-    if (!product) {
+    // 2. Fallback: product barcode (from preloaded list)
+    if (!product && availableProducts.some(p => p.barcode && String(p.barcode).trim() === trimmed)) {
       product = availableProducts.find(p => p.barcode && String(p.barcode).trim() === trimmed)
     }
 
+    // 3. On-demand lookup: if not in preloaded data, try indexed barcode query (fast for huge catalogs)
     if (!product) {
-      toast.error(`No product found for barcode: ${trimmed} – use Manual Entry to add`)
+      try {
+        product = await productService.getByBarcode(trimmed, getCurrentCompanyId())
+      } catch {
+        /* ignore */
+      }
+    }
+
+    // 4. Fallback: article number (case-insensitive)
+    if (!product && articleToPurchaseItemMap.has(trimmed.toLowerCase())) {
+      purchaseItem = articleToPurchaseItemMap.get(trimmed.toLowerCase())!
+      product = availableProducts.find(p => p.id === purchaseItem!.product_id)
+      if (!product) {
+        try {
+          product = await productService.getById(purchaseItem!.product_id, true)
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    // 5. Try article prefix/suffix match (e.g. "ART-001" matches "ART-001-X" or "X-ART-001")
+    if (!product && trimmed.length >= 2) {
+      const articleLower = trimmed.toLowerCase()
+      for (const [key, item] of articleToPurchaseItemMap) {
+        if (key === articleLower || key.startsWith(articleLower) || articleLower.startsWith(key)) {
+          purchaseItem = item
+          product = availableProducts.find(p => p.id === purchaseItem!.product_id)
+          if (!product) {
+            try {
+              product = await productService.getById(purchaseItem!.product_id, true)
+            } catch {
+              /* ignore */
+            }
+          }
+          if (product) break
+        }
+      }
+    }
+
+    if (!product) {
+      toast.error(`No product found for "${raw}" – try barcode, article, or Manual Entry`)
       setBarcodeInput('')
       return
     }
@@ -133,7 +192,13 @@ const QuickSale = () => {
     if (purchaseItem && purchaseItem.purchase_id) {
       purchaseId = purchaseItem.purchase_id
       const purchase = purchases.find(p => p.id === purchaseId)
-      const item = purchase?.items.find(pi => pi.barcode === trimmed && pi.product_id === product!.id)
+      const item = purchase?.items.find(pi => {
+        if (pi.product_id !== product!.id) return false
+        if (pi.barcode && String(pi.barcode).trim() === trimmed) return true
+        if (pi.article && String(pi.article).trim().toLowerCase() === trimmed.toLowerCase()) return true
+        if (purchaseItem!.id && pi.id === purchaseItem!.id) return true
+        return false
+      })
       if (item) purchaseItemId = item.id
     } else if (purchaseItem && !purchaseItem.purchase_id && purchases.length > 0) {
       // Product-level barcode - use FIFO
@@ -310,7 +375,7 @@ const QuickSale = () => {
         <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
           <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
             <Barcode className="w-5 h-5 text-emerald-600" />
-            Scan or enter barcode
+            Scan barcode or enter article number
           </label>
           <input
             ref={barcodeInputRef}
@@ -318,12 +383,12 @@ const QuickSale = () => {
             value={barcodeInput}
             onChange={e => setBarcodeInput(e.target.value)}
             onKeyDown={handleBarcodeKeyDown}
-            placeholder="Scan barcode, then press Enter"
+            placeholder="Scan barcode / enter article, then press Enter"
             className="w-full px-4 py-4 text-lg border-2 border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
             autoComplete="off"
           />
           <div className="flex items-center justify-between mt-2">
-            <p className="text-xs text-gray-500">Product is added automatically. Press Enter after each scan.</p>
+            <p className="text-xs text-gray-500">Works with barcode or article number. Press Enter after each.</p>
             <button
               type="button"
               onClick={() => hasPlanFeature('sales_manual_product') ? setShowManualEntryModal(true) : showPlanUpgrade('sales_manual_product')}
@@ -349,7 +414,7 @@ const QuickSale = () => {
           <div className="max-h-64 overflow-y-auto">
             {saleItems.length === 0 ? (
               <div className="p-8 text-center text-gray-500">
-                Scan barcodes to add products
+                Scan barcode or enter article to add products
               </div>
             ) : (
               <ul className="divide-y divide-gray-100">
