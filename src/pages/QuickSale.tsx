@@ -43,7 +43,7 @@ const QuickSale = () => {
       try {
         const [products, purchs] = await Promise.all([
           productService.getAll(false, companyId),
-          purchaseService.getAll(undefined, companyId),
+          purchaseService.getAllFast(undefined, companyId),
         ])
         const activeProducts = products.filter(p => p.status === 'active')
         setAvailableProducts(activeProducts)
@@ -276,7 +276,7 @@ const QuickSale = () => {
   }
 
   const handlePrintInvoice = () => {
-    if (lastSaleId) navigate(`/invoice/${lastSaleId}`)
+    if (lastSaleId) navigate(`/invoice/${lastSaleId}?print=1`)
   }
 
   if (loading) {
@@ -528,6 +528,7 @@ const QuickSale = () => {
                     discount_percentage: 0,
                     sale_type: 'sale',
                     total: unitPrice,
+                    purchase_item_unique_key: `MANUAL-${Date.now()}-${Math.random().toString(36).slice(2)}`,
                   }
                   setSaleItems(prev => [...prev, newItem])
                   setShowManualEntryModal(false)

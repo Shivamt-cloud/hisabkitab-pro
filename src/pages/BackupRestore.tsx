@@ -938,15 +938,26 @@ const BackupRestore = () => {
                       {isWarning ? 'No data rows found' : importResult.success ? 'File Converted Successfully' : 'Import Failed'}
                     </p>
                     {importResult.success && importResult.stats && !noDataRows && (
-                      <p className="text-sm font-semibold text-green-800 mb-2">
-                        Summary: {[
-                          (importResult.stats.purchases ?? 0) > 0 && `${importResult.stats.purchases} purchases`,
-                          (importResult.stats.products ?? 0) > 0 && `${importResult.stats.products} products`,
-                          (importResult.stats.customers ?? 0) > 0 && `${importResult.stats.customers} customers`,
-                          (importResult.stats.suppliers ?? 0) > 0 && `${importResult.stats.suppliers} suppliers`,
-                          (importResult.stats.categories ?? 0) > 0 && `${importResult.stats.categories} categories`,
-                        ].filter(Boolean).join(' · ')}
-                      </p>
+                      <>
+                        <p className="text-sm font-semibold text-green-800 mb-1">
+                          Summary: {[
+                            (importResult.stats.purchases ?? 0) > 0 && (
+                              (importResult.stats as any).purchaseLineItems > 0 && (importResult.stats as any).purchaseLineItems !== importResult.stats.purchases
+                                ? `${importResult.stats.purchases} purchases (${(importResult.stats as any).purchaseLineItems} line items)`
+                                : `${importResult.stats.purchases} purchases`
+                            ) as string | false,
+                            (importResult.stats.products ?? 0) > 0 && `${importResult.stats.products} products`,
+                            (importResult.stats.customers ?? 0) > 0 && `${importResult.stats.customers} customers`,
+                            (importResult.stats.suppliers ?? 0) > 0 && `${importResult.stats.suppliers} suppliers`,
+                            (importResult.stats.categories ?? 0) > 0 && `${importResult.stats.categories} categories`,
+                          ].filter(Boolean).join(' · ')}
+                        </p>
+                        {(importResult.stats.purchases ?? 0) > 0 && (importResult.stats as any).purchaseLineItems > 0 && (importResult.stats as any).purchaseLineItems !== importResult.stats.purchases && (
+                          <p className="text-xs text-gray-600 mb-2">
+                            💡 <strong>Purchases</strong> = distinct bills (same supplier + bill no + date). <strong>Line items</strong> = total product rows in your file. Rows that share the same bill are grouped into one purchase, so all {((importResult.stats as any).purchaseLineItems as number).toLocaleString()} rows are imported.
+                          </p>
+                        )}
+                      </>
                     )}
                     <p className={`text-sm whitespace-pre-line ${
                       isWarning ? 'text-amber-800' : importResult.success ? 'text-green-700' : 'text-red-700'

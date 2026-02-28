@@ -702,13 +702,22 @@ export const syncService = {
         } else {
           for (const sale of salesToSync) {
             try {
-              await cloudSaleService.create(sale)
+              const oldLocalId = sale.id
+              const created = await cloudSaleService.create(sale)
               result.synced++
               // Add to cloud sets after successful sync
-              if (sale.invoice_number) {
-                cloudInvoiceNumbers.add(sale.invoice_number)
+              if (created?.invoice_number) {
+                cloudInvoiceNumbers.add(created.invoice_number)
               }
-              cloudSaleIds.add(sale.id)
+              if (created?.id != null) {
+                cloudSaleIds.add(created.id)
+              }
+              // Remove old local record if Supabase assigned a different id (prevents duplicates)
+              if (created && created.id !== oldLocalId) {
+                try {
+                  await deleteById(STORES.SALES, oldLocalId)
+                } catch (_) {}
+              }
             } catch (error: any) {
               result.failed++
               result.errors.push(`Sale ${sale.id}: ${error.message}`)

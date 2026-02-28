@@ -99,17 +99,16 @@ const SaleForm = () => {
   const loadProductsAndPurchases = async () => {
     try {
       const companyId = getCurrentCompanyId()
-      console.log('Loading products for sale, companyId:', companyId)
       
-      // Load all active products (include those with 0 stock for returns)
-      const allProducts = await productService.getAll(false, companyId)
+      // Load products and purchases in parallel (use getAllFast for purchases - skips IndexedDB merge, much faster)
+      const [allProducts, allPurchases] = await Promise.all([
+        productService.getAll(false, companyId),
+        purchaseService.getAllFast(undefined, companyId),
+      ])
       const products = allProducts.filter(p => p.status === 'active')
-      console.log('Loaded products for sale:', products.length, products)
       
-      // Load purchase history to map article codes and barcodes to products
-      // Also ensure all products from purchases are included
+      // Build article/barcode maps from purchase history
       try {
-        const allPurchases = await purchaseService.getAll(undefined, companyId)
         setPurchases(allPurchases) // Store purchases in state
         const purchases = allPurchases
         const articleMap = new Map<number, string[]>()
@@ -118,45 +117,21 @@ const SaleForm = () => {
         const articleToItemMap = new Map<string, PurchaseItem & { purchase_date?: string }>()
         const productIdsFromPurchases = new Set<number>()
         
-        console.log(`📊 [DEBUG] Processing ${purchases.length} purchases for article/barcode mapping`)
-        
         purchases.forEach(purchase => {
           purchase.items.forEach(item => {
               // Handle items with product_id 0 or missing - try to find product by name
               let actualProductId = item.product_id
               if (!actualProductId || actualProductId === 0) {
                 if (item.product_name) {
-                  // Try to find product by name
                   const foundProduct = products.find(p => p.name.toLowerCase() === (item.product_name || '').toLowerCase())
                   if (foundProduct) {
                     actualProductId = foundProduct.id
-                    console.log(`⚠️ [DEBUG] Purchase item ${item.id} has product_id 0, found product by name "${item.product_name}": ${actualProductId}`)
-                  } else {
-                    console.warn(`⚠️ [DEBUG] Purchase item ${item.id} has product_id 0 and product_name "${item.product_name}" - product not found, skipping article/barcode mapping`)
-                    // Still continue to process, but we can't map to a product
                   }
-                } else {
-                  console.warn(`⚠️ [DEBUG] Purchase item ${item.id} has no product_id and no product_name - skipping article/barcode mapping`)
                 }
               }
               
               if (actualProductId && actualProductId > 0) {
                 productIdsFromPurchases.add(actualProductId)
-                
-                // Debug: log items with SUIT article or 99000000298 barcode
-                if ((item.article && String(item.article).toLowerCase().includes('suit')) ||
-                    (item.barcode && String(item.barcode).includes('99000000298'))) {
-                  console.log(`🔍 [DEBUG] Found relevant item in purchase ${purchase.id}:`, {
-                    item_id: item.id,
-                    product_id: item.product_id,
-                    actualProductId: actualProductId,
-                    product_name: item.product_name,
-                    article: item.article,
-                    articleType: typeof item.article,
-                    barcode: item.barcode,
-                    barcodeType: typeof item.barcode
-                  })
-                }
                 
                 // Map article codes - use actualProductId instead of item.product_id
                 // Handle both string and number types, and explicitly check for empty strings
@@ -205,59 +180,8 @@ const SaleForm = () => {
                         purchase_date: purchase.purchase_date
                       })
                     }
-                    // Debug: log if we find specific barcodes
-                    if (barcodeStr === '8904201446686' || barcodeStr.includes('8904201446686') || 
-                        barcodeStr === '8905005506422' || barcodeStr.includes('8905005506422') ||
-                        barcodeStr === '99000000298' || barcodeStr.includes('99000000298')) {
-                      console.log(`🎯 Found barcode ${barcodeStr} in purchase ${purchase.id} for product ${item.product_id}:`, {
-                        barcode: barcodeStr,
-                        barcodeOriginal: item.barcode,
-                        barcodeType: typeof item.barcode,
-                        item: item,
-                        mrp: item.mrp,
-                        sale_price: item.sale_price,
-                        quantity: item.quantity,
-                        article: item.article,
-                        purchase_date: purchase.purchase_date
-                      })
-                    }
-                    // Debug for 99000000298
-                    if (barcodeStr === '99000000298') {
-                      console.log(`✅ [DEBUG] Found barcode "99000000298" in purchase ${purchase.id}, item ${item.id}, product ${item.product_id}:`, {
-                        barcode: barcodeStr,
-                        barcodeOriginal: item.barcode,
-                        barcodeType: typeof item.barcode,
-                        item: item
-                      })
-                    }
                   }
                 }
-              }
-            })
-          })
-          
-          console.log('Product article map:', articleMap)
-          console.log('Product barcode map:', barcodeMap)
-          console.log('Total products with barcodes from purchases:', barcodeMap.size)
-          console.log('Product IDs from purchases:', Array.from(productIdsFromPurchases))
-          console.log('Article to purchase item map keys:', Array.from(articleToItemMap.keys()))
-          console.log('Article to purchase item map entries:', Array.from(articleToItemMap.entries()).map(([key, item]) => ({ article: key, product_id: item.product_id })))
-          
-          // Debug: Check for the specific barcode
-          barcodeMap.forEach((barcodes, productId) => {
-            if (barcodes.some(b => b === '8904201446686' || b.includes('8904201446686'))) {
-              console.log(`✅ Found barcode 8904201446686 for product ID ${productId}:`, barcodes)
-              const product = products.find(p => p.id === productId)
-              console.log(`   Product details:`, product)
-            }
-          })
-          
-          // Also check all purchase items directly
-          console.log('Checking all purchase items for barcode 8904201446686:')
-          purchases.forEach(purchase => {
-            purchase.items.forEach(item => {
-              if (item.barcode && (item.barcode === '8904201446686' || item.barcode.includes('8904201446686'))) {
-                console.log(`   Found in purchase ${purchase.id}, item:`, item)
               }
             })
           })
@@ -267,16 +191,13 @@ const SaleForm = () => {
             !products.find(p => p.id === id)
           )
           if (missingProductIds.length > 0) {
-            console.warn('Products in purchases but not in products list:', missingProductIds)
             // Try to load these products with includeArchived=true
             // IMPORTANT: Include products from purchases even if inactive, so they can be sold
             for (const productId of missingProductIds) {
               try {
                 const product = await productService.getById(productId, true)
                 if (product) {
-                  // Include product even if inactive - it has purchase history so should be sellable
                   products.push(product)
-                  console.log(`✅ Added missing product from purchase: ${product.id} (${product.name}), status: ${product.status}`)
                 }
               } catch (err) {
                 console.error(`Error loading product ${productId}:`, err)
@@ -289,30 +210,6 @@ const SaleForm = () => {
           setBarcodeToPurchaseItemMap(barcodeToItemMap)
           setArticleToPurchaseItemMap(articleToItemMap)
           setAvailableProducts(products)
-          
-          console.log('Barcode to purchase item map size:', barcodeToItemMap.size)
-          console.log('Article to purchase item map size:', articleToItemMap.size)
-          console.log('📋 [DEBUG] All articles in articleToItemMap:', Array.from(articleToItemMap.keys()))
-          console.log('📋 [DEBUG] Article to product mappings:', Array.from(articleToItemMap.entries()).map(([article, item]) => ({ article, product_id: item.product_id })))
-          console.log('📋 [DEBUG] Product article map entries:', Array.from(articleMap.entries()).map(([productId, articles]) => ({ product_id: productId, articles })))
-          if (barcodeToItemMap.has('8904201446686')) {
-            console.log('✅ Purchase item for barcode 8904201446686:', barcodeToItemMap.get('8904201446686'))
-          }
-          // Check for SUIT article
-          const suitArticles = Array.from(articleToItemMap.keys()).filter(k => k.toLowerCase().includes('suit'))
-          if (suitArticles.length > 0) {
-            console.log('✅ [DEBUG] Found SUIT articles in map:', suitArticles)
-            suitArticles.forEach(article => {
-              const item = articleToItemMap.get(article)
-              console.log(`  - Article "${article}" maps to product_id: ${item?.product_id}`)
-            })
-          }
-          // Debug: Check for article "money"
-          articleToItemMap.forEach((item, article) => {
-            if (article.toLowerCase().includes('money')) {
-              console.log(`✅ Purchase item for article "${article}":`, item)
-            }
-          })
         } catch (err) {
           console.error('Error loading purchase history for article codes and barcodes:', err)
           setAvailableProducts(products)
@@ -345,9 +242,9 @@ const SaleForm = () => {
           }
         } catch (_) {}
 
-        // Load recent sales for Quick reorder (Last sold / Frequently sold)
+        // Load recent sales for Quick reorder (Last sold / Frequently sold) - use getAllFast for speed
         const companyId = getCurrentCompanyId()
-        const allSales = await saleService.getAll(true, companyId ?? undefined)
+        const allSales = await saleService.getAllFast(true, companyId ?? undefined)
         // Sort by date descending and take last 100
         const sorted = [...allSales].sort((a, b) => new Date(b.sale_date).getTime() - new Date(a.sale_date).getTime())
         setSalesForQuickReorder(sorted.slice(0, 100))
@@ -805,195 +702,6 @@ const SaleForm = () => {
     return []
   }, [])
   
-  // Debug: Comprehensive search debugging - runs for ALL searches
-  useEffect(() => {
-    const query = searchQuery.trim()
-    if (!query) return
-    
-    console.log(`\n🔍 ========== SEARCH DEBUG: "${searchQuery}" ==========`)
-    console.log(`📦 Total available products: ${availableProducts.length}`)
-    console.log(`✅ Filtered products: ${filteredProducts.length}`)
-    console.log(`🗺️ Maps Status:`)
-    console.log(`   - productArticleMap: ${productArticleMap.size} products with articles`)
-    console.log(`   - productBarcodeMap: ${productBarcodeMap.size} products with barcodes`)
-    console.log(`   - articleToPurchaseItemMap: ${articleToPurchaseItemMap.size} articles`)
-    console.log(`   - barcodeToPurchaseItemMap: ${barcodeToPurchaseItemMap.size} barcodes`)
-    console.log(`   - Total purchases: ${purchases.length}`)
-    
-    // Normalize query (strip prefix if present)
-    const prefixPattern = /^(article|barcode)[_:\s-]+/i
-    const normalizedQuery = prefixPattern.test(query) ? query.replace(prefixPattern, '').trim() : query
-    const queryLower = normalizedQuery.toLowerCase()
-    
-    console.log(`\n🔎 Checking for "${query}" (normalized: "${normalizedQuery}"):`)
-    
-    // Check articleToPurchaseItemMap
-    const articleKeys = Array.from(articleToPurchaseItemMap.keys())
-    const matchingArticles = articleKeys.filter(k => {
-      const kStr = String(k).trim()
-      const kLower = kStr.toLowerCase()
-      return kLower === queryLower || 
-             kLower === normalizedQuery.toLowerCase() ||
-             kStr === query ||
-             kStr === normalizedQuery ||
-             kLower.includes(queryLower) ||
-             queryLower.includes(kLower)
-    })
-    
-    if (matchingArticles.length > 0) {
-      console.log(`✅ Found ${matchingArticles.length} matching article(s) in articleToPurchaseItemMap:`, matchingArticles)
-      matchingArticles.forEach(article => {
-        const item = articleToPurchaseItemMap.get(article)
-        const product = availableProducts.find(p => p.id === item?.product_id)
-        console.log(`   - "${article}" → Product ID: ${item?.product_id} (${product?.name || 'NOT FOUND'}), Item ID: ${item?.id}`)
-      })
-    } else {
-      console.log(`❌ No matching articles found in articleToPurchaseItemMap`)
-      console.log(`   Total articles in map: ${articleKeys.length}`)
-      if (articleKeys.length > 0) {
-        console.log(`   Sample articles (first 20):`, articleKeys.slice(0, 20))
-        // Show ALL articles to help debug
-        console.log(`   ALL articles in database:`, articleKeys.sort())
-        
-        // Check for similar articles
-        const queryParts = queryLower.split(/\s+/).filter(p => p.length > 2)
-        const similarArticles = articleKeys.filter(a => {
-          const aLower = String(a).toLowerCase()
-          const aNormalized = aLower.replace(/^article[_:\s-]+/i, '')
-          return queryParts.some(part => aLower.includes(part) || aNormalized.includes(part)) ||
-                 aLower.includes(queryLower) ||
-                 queryLower.includes(aNormalized) ||
-                 aNormalized.includes(queryLower)
-        })
-        
-        if (similarArticles.length > 0) {
-          console.log(`   Similar articles found (containing parts of "${query}"):`, similarArticles)
-        } else {
-          console.log(`   ❌ No similar articles found. The article "${query}" does not exist.`)
-        }
-      }
-    }
-    
-    // Check productArticleMap
-    let foundInProductMap = false
-    productArticleMap.forEach((articles, productId) => {
-      const matching = articles.filter(a => {
-        const aStr = String(a).trim()
-        const aLower = aStr.toLowerCase()
-        return aLower === queryLower || 
-               aLower === normalizedQuery.toLowerCase() ||
-               aStr === query ||
-               aStr === normalizedQuery ||
-               aLower.includes(queryLower) ||
-               queryLower.includes(aLower)
-      })
-      if (matching.length > 0) {
-        foundInProductMap = true
-        const product = availableProducts.find(p => p.id === productId)
-        console.log(`✅ Found in productArticleMap for Product ${productId} (${product?.name || 'NOT FOUND'}):`, matching)
-      }
-    })
-    if (!foundInProductMap) {
-      console.log(`❌ Not found in productArticleMap`)
-    }
-    
-    // Check purchases directly
-    const foundInPurchases: Array<{
-      purchaseId: number
-      purchaseDate: string
-      itemId: number
-      productId: number
-      productName?: string
-      article: string
-      articleOriginal: any
-      articleType: string
-    }> = []
-    purchases.forEach(purchase => {
-      purchase.items.forEach(item => {
-        if (item.article) {
-          const itemArticle = String(item.article).trim()
-          const itemArticleLower = itemArticle.toLowerCase()
-          if (itemArticleLower === queryLower || 
-              itemArticleLower === normalizedQuery.toLowerCase() ||
-              itemArticle === query ||
-              itemArticle === normalizedQuery ||
-              itemArticleLower.includes(queryLower) ||
-              queryLower.includes(itemArticleLower)) {
-            foundInPurchases.push({
-              purchaseId: purchase.id,
-              purchaseDate: purchase.purchase_date,
-              itemId: item.id || 0,
-              productId: item.product_id || 0,
-              productName: item.product_name,
-              article: itemArticle,
-              articleOriginal: item.article,
-              articleType: typeof item.article
-            })
-          }
-        }
-      })
-    })
-    
-    if (foundInPurchases.length > 0) {
-      console.log(`✅ Found ${foundInPurchases.length} matching item(s) in purchases directly:`)
-      foundInPurchases.forEach(found => {
-        const product = availableProducts.find(p => p.id === found.productId)
-        console.log(`   - Purchase ${found.purchaseId} (${new Date(found.purchaseDate).toLocaleDateString()})`)
-        console.log(`     Item ID: ${found.itemId}, Product ID: ${found.productId} (${found.productName})`)
-        console.log(`     Article: "${found.article}" (original: ${found.articleOriginal}, type: ${found.articleType})`)
-        console.log(`     Product exists: ${product ? 'YES' : 'NO'}, Status: ${product?.status || 'N/A'}`)
-      })
-    } else {
-      console.log(`❌ Not found in purchases directly`)
-      
-      // Show all articles from purchases if no match
-      if (purchases.length > 0) {
-        const allPurchaseArticles = new Set<string>()
-        purchases.forEach(purchase => {
-          purchase.items.forEach(item => {
-            if (item.article) {
-              allPurchaseArticles.add(String(item.article).trim())
-            }
-          })
-        })
-        const allArticlesArray = Array.from(allPurchaseArticles).sort()
-        console.log(`\n   All articles in purchases (${allArticlesArray.length}):`, allArticlesArray)
-        
-        // Check for similar
-        const queryParts = queryLower.split(/\s+/).filter(p => p.length > 2)
-        const similarInPurchases = allArticlesArray.filter(a => {
-          const aLower = String(a).toLowerCase()
-          const aNormalized = aLower.replace(/^article[_:\s-]+/i, '')
-          return queryParts.some(part => aLower.includes(part) || aNormalized.includes(part)) ||
-                 aLower.includes(queryLower) ||
-                 queryLower.includes(aNormalized) ||
-                 aNormalized.includes(queryLower)
-        })
-        
-        if (similarInPurchases.length > 0) {
-          console.log(`   Similar articles in purchases:`, similarInPurchases)
-        }
-      }
-    }
-    
-    // Debug: Show search results from purchase items
-    if (searchPurchaseItems.length > 0) {
-      console.log(`\n📋 Found ${searchPurchaseItems.length} purchase item(s):`)
-      searchPurchaseItems.forEach(({ purchase, item, product, availableStock, matchType, isExactMatch }) => {
-        console.log(`   - Purchase #${purchase.id}, Item #${item.id}`)
-        console.log(`     Product: ${product?.name || item.product_name || 'Unknown'} (ID: ${item.product_id})`)
-        if (item.article) console.log(`     Article: ${item.article}`)
-        if (item.barcode) console.log(`     Barcode: ${item.barcode}`)
-        console.log(`     Stock: ${availableStock} / ${item.quantity}`)
-        console.log(`     Match: ${matchType}${isExactMatch ? ' (exact)' : ' (partial)'}`)
-      })
-    } else {
-      console.log(`\n❌ No purchase items matched the search query`)
-    }
-    
-    console.log(`🔍 ========== END SEARCH DEBUG ==========\n`)
-  }, [searchQuery, availableProducts.length, searchPurchaseItems.length, productBarcodeMap.size, productArticleMap.size, barcodeToPurchaseItemMap, articleToPurchaseItemMap, purchases])
-
   // Generate unique key for a purchase item
   // Format: "P{purchase_id}-I{purchase_item_id}" or "PROD-{product_id}" if no purchase item
   // This ensures each purchase item is treated uniquely, even if same product+article
@@ -2396,7 +2104,7 @@ const SaleForm = () => {
         } else {
           const createdSale = await saleService.create(sale)
           toast.success('Sale created!')
-          navigate(`/invoice/${createdSale.id}`)
+          navigate(`/invoice/${createdSale.id}?print=1`)
         }
       } catch (error) {
         setIsSubmitting(false)
@@ -2734,10 +2442,10 @@ const SaleForm = () => {
                         ? ((item.mrp - item.unit_price) / item.mrp * 100).toFixed(1)
                         : '0'
                       
-                      // Use unique key for React key to ensure items with same product but different purchase items are separate
+                      // Use unique key for React key - must be stable per item (Date.now() caused duplicates for manual products)
                       const itemKey = item.purchase_item_unique_key || 
                                      (item.purchase_id && item.purchase_item_id ? `P${item.purchase_id}-I${item.purchase_item_id}` : 
-                                     `PROD-${item.product_id}-${item.purchase_item_article || 'no-article'}-${Date.now()}`)
+                                     `PROD-${item.product_id}-${item.purchase_item_article || 'no-article'}-${itemIndex}`)
                       
                       const remainingStock = item.sale_type === 'return' ? getMaxReturnableQuantity(item) : getRemainingStockForItem(item)
                       const stockLabel = item.sale_type === 'return' ? 'Max return' : 'Stock'
@@ -3649,6 +3357,7 @@ const SaleForm = () => {
                     discount_percentage: 0,
                     sale_type: 'sale',
                     total: unitPrice,
+                    purchase_item_unique_key: `MANUAL-${Date.now()}-${Math.random().toString(36).slice(2)}`,
                   }
                   setSaleItems(prev => [...prev, newItem])
                   setShowManualEntryModal(false)

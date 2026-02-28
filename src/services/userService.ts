@@ -39,6 +39,15 @@ async function initializeUsers(): Promise<void> {
   }
 }
 
+// Dedupe: avoid repeated initializeUsers during login (getByEmail + verifyLogin both call it)
+let initUsersPromise: Promise<void> | null = null
+async function ensureUsersInitialized(): Promise<void> {
+  if (!initUsersPromise) {
+    initUsersPromise = initializeUsers()
+  }
+  await initUsersPromise
+}
+
 export interface UserWithPassword extends User {
   password: string
   phone?: string
@@ -50,7 +59,7 @@ export const userService = {
     // First sync from cloud (if available)
     const users = await cloudUserService.getAll()
     // Then ensure admin user exists (after sync, so it doesn't get overwritten)
-    await initializeUsers()
+    await ensureUsersInitialized()
     // Return users (admin will be included now)
     return await cloudUserService.getAll()
   },
@@ -62,8 +71,8 @@ export const userService = {
 
   // Get user by email (from cloud, with local fallback)
   getByEmail: async (email: string): Promise<UserWithPassword | undefined> => {
-    // Ensure admin user exists first
-    await initializeUsers()
+    // Ensure admin user exists first (deduped to avoid repeated calls during login)
+    await ensureUsersInitialized()
     return await cloudUserService.getByEmail(email)
   },
 
@@ -123,8 +132,8 @@ export const userService = {
 
   // Verify login credentials
   verifyLogin: async (email: string, password: string): Promise<User | null> => {
-    // Ensure admin user exists (this will create/update it after any Supabase sync)
-    await initializeUsers()
+    // Ensure admin user exists (deduped - same promise as getByEmail)
+    await ensureUsersInitialized()
     // Get user (will check cloud first, then local)
     const user = await userService.getByEmail(email)
     

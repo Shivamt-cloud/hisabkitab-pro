@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { saleService } from '../services/saleService'
 import { customerService } from '../services/customerService'
 import { productService } from '../services/productService'
@@ -15,6 +15,8 @@ import { Home } from 'lucide-react'
 const InvoiceView = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const autoPrint = searchParams.get('print') === '1'
   const [invoiceData, setInvoiceData] = useState<InvoiceData | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -234,11 +236,12 @@ const InvoiceView = () => {
           </div>
         </div>
 
-        {/* Invoice Component */}
+        {/* Invoice Component - autoPrint triggers receipt when navigated from Complete Sale */}
         <Invoice 
           invoiceData={invoiceData} 
           showActions={true}
           onNewSale={() => navigate('/sales/new')}
+          autoPrint={autoPrint}
         />
       </div>
     </ProtectedRoute>

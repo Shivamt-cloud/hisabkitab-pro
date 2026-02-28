@@ -8,7 +8,6 @@ import { purchaseService } from './purchaseService'
 import { salesCommissionService } from './salespersonService'
 import { customerService } from './customerService'
 import { cloudSaleService } from './cloudSaleService'
-import { getAll, getById, put, deleteById, getByIndex, STORES } from '../database/db'
 
 // Sales
 export const saleService = {
@@ -32,7 +31,7 @@ export const saleService = {
     let invoiceNumber = sale.invoice_number
     if (!invoiceNumber) {
       const { generateInvoiceNumber } = await import('../utils/companyCodeHelper')
-      const allSales = await saleService.getAll(true, sale.company_id)
+      const allSales = await saleService.getAllFast(true, sale.company_id)
       const existingInvoiceNumbers = allSales.map(s => s.invoice_number)
       invoiceNumber = await generateInvoiceNumber(sale.company_id, existingInvoiceNumbers)
     }
@@ -50,28 +49,9 @@ export const saleService = {
       updated_at: new Date().toISOString(),
     }
     
-    // Load all purchases for this company to track purchase item inventory
-    const allPurchases = await purchaseService.getAll(undefined, sale.company_id)
-    
-    // Ensure all purchase items have sold_quantity and unique id (normalization usually does this on read)
-    for (const purchase of allPurchases) {
-      let needsUpdate = false
-      for (let i = 0; i < (purchase.items || []).length; i++) {
-        const purchaseItem = purchase.items![i]
-        if (purchaseItem.sold_quantity === undefined) {
-          purchaseItem.sold_quantity = 0
-          needsUpdate = true
-        }
-        if (typeof purchaseItem.id !== 'number' || purchaseItem.id <= 0) {
-          purchaseItem.id = purchase.id * 1000000 + i
-          needsUpdate = true
-        }
-      }
-      if (needsUpdate) {
-        purchase.updated_at = new Date().toISOString()
-        await put(STORES.PURCHASES, purchase)
-      }
-    }
+    // Load purchases (use getAllFast - skips IndexedDB merge for much faster completion)
+    const allPurchases = await purchaseService.getAllFast(undefined, sale.company_id)
+    // Normalize in memory only - use ?? 0 for sold_quantity when reading
     
     // Process each item: ONLY link to purchase items, DON'T update inventory yet
     // We'll update inventory AFTER the sale is successfully saved
@@ -138,9 +118,6 @@ export const saleService = {
         }
       } else {
         // For sales: Just link to purchase items (inventory update happens after sale is saved)
-        console.log(`[SaleService] Processing sale for product ${item.product_id}, quantity: ${item.quantity}`)
-        console.log(`[SaleService] Purchase item info: purchase_id=${item.purchase_id}, purchase_item_id=${item.purchase_item_id}, article=${item.purchase_item_article}`)
-        
         // If we have specific purchase item info, use it
         if (item.purchase_id && item.purchase_item_id) {
           const purchase = allPurchases.find(p => p.id === item.purchase_id)
@@ -152,7 +129,6 @@ export const saleService = {
               updatedItem.purchase_item_id = purchaseItem.id
               updatedItem.purchase_item_article = purchaseItem.article
               updatedItem.purchase_item_barcode = purchaseItem.barcode
-              console.log(`[SaleService] Linked to specific purchase item (ID: ${purchaseItem.id}, Article: ${purchaseItem.article})`)
             }
           }
         }
@@ -162,8 +138,6 @@ export const saleService = {
           const productPurchases = allPurchases
             .filter(p => p.items.some(pi => pi.product_id === item.product_id))
             .sort((a, b) => new Date(a.purchase_date).getTime() - new Date(b.purchase_date).getTime()) // FIFO: oldest first
-          
-          console.log(`[SaleService] Using FIFO to find purchase item. Found ${productPurchases.length} purchases with this product`)
           
           for (const purchase of productPurchases) {
             // Get purchase items for this product with available quantity
@@ -197,7 +171,6 @@ export const saleService = {
                 updatedItem.purchase_item_id = actualItem.id
                 updatedItem.purchase_item_article = actualItem.article
                 updatedItem.purchase_item_barcode = actualItem.barcode
-                console.log(`[SaleService] Linked to purchase item (ID: ${actualItem.id}, Article: ${actualItem.article}) via FIFO`)
                 break
               }
             }
@@ -278,7 +251,6 @@ export const saleService = {
     let savedSale: Sale
     try {
       savedSale = await cloudSaleService.create(newSale)
-      console.log(`[SaleService] ✅ Sale ${savedSale.id} created successfully`)
     } catch (error: any) {
       console.error(`[SaleService] ❌ Error creating sale:`, error)
       // No inventory changes were made yet, so no rollback needed
@@ -287,16 +259,11 @@ export const saleService = {
     
     // Now that sale is saved, apply inventory updates
     try {
-      // Reload purchases to get latest state
-      const latestPurchases = await purchaseService.getAll(undefined, sale.company_id)
+      const latestPurchases = await purchaseService.getAllFast(undefined, sale.company_id)
       
       for (const item of savedSale.items) {
         // Skip manual products (product_id 0) - no inventory tracking
-        if (!item.product_id || item.product_id === 0) {
-          console.log(`[SaleService] Skipping inventory update for manual product: ${item.product_name}`)
-          continue
-        }
-        console.log(`[SaleService] Processing inventory update for item: product ${item.product_id}, quantity ${item.quantity}, type ${item.sale_type}`)
+        if (!item.product_id || item.product_id === 0) continue
         
         if (item.sale_type === 'return') {
           // For returns: add back to purchase items and product stock
@@ -323,15 +290,13 @@ export const saleService = {
                 
                 // Use purchaseService.update to ensure sync to cloud
                 // Extract only the fields that changed (items and updated_at)
-                const { id, ...purchaseUpdateData } = updatedPurchase
-                await purchaseService.update(purchase.id, purchaseUpdateData)
-                console.log(`[SaleService] Updated purchase item ${purchaseItem.id} sold_quantity: ${currentSoldQty} -> ${updatedItems[purchaseItemIndex].sold_quantity}`)
-              }
+              const { id, ...purchaseUpdateData } = updatedPurchase
+              await purchaseService.update(purchase.id, purchaseUpdateData)
+            }
             }
           }
           // Add back to product stock
           await productService.updateStock(item.product_id, item.quantity, 'add')
-          console.log(`[SaleService] Added ${item.quantity} back to product ${item.product_id} stock`)
         } else {
         // For sales: deduct from purchase items and product stock
         let remainingQty = item.quantity
@@ -347,16 +312,7 @@ export const saleService = {
               const availableQty = purchaseItem.quantity - soldQty
               const qtyToSell = Math.min(remainingQty, availableQty)
               
-              console.log(`[SaleService] BEFORE UPDATE - Purchase ${purchase.id}, Item ${purchaseItem.id}:`, {
-                barcode: purchaseItem.barcode,
-                article: purchaseItem.article,
-                quantity: purchaseItem.quantity,
-                sold_quantity: purchaseItem.sold_quantity,
-                availableQty,
-                qtyToSell
-              })
-              
-              // Create a NEW purchase object with updated items array to ensure IndexedDB detects the change
+              // Create a NEW purchase object with updated items array
               const updatedItems = [...purchase.items]
               updatedItems[purchaseItemIndex] = {
                 ...purchaseItem,
@@ -371,51 +327,11 @@ export const saleService = {
               
               remainingQty -= qtyToSell
               
-              const updatedItem = updatedItems[purchaseItemIndex]
-              if (updatedItem) {
-                console.log(`[SaleService] AFTER UPDATE (before save) - Purchase ${updatedPurchase.id}, Item ${updatedItem.id}:`, {
-                  barcode: updatedItem.barcode,
-                  article: updatedItem.article,
-                  quantity: updatedItem.quantity,
-                  sold_quantity: updatedItem.sold_quantity,
-                  remaining: updatedItem.quantity - (updatedItem.sold_quantity || 0)
-                })
-              }
-              
-              // Save the updated purchase using purchaseService.update to ensure sync to cloud
+              // Save the updated purchase
               // Extract only the fields that changed (items and updated_at)
               const { id, ...purchaseUpdateData } = updatedPurchase
               await purchaseService.update(purchase.id, purchaseUpdateData)
-              console.log(`[SaleService] 💾 Saved purchase ${updatedPurchase.id} to IndexedDB and cloud`)
-              
-              // Verify the save worked by reading it back
-              const verifyPurchase = await purchaseService.getById(purchase.id)
-              if (verifyPurchase) {
-                const verifyItem = verifyPurchase.items.find(pi => pi.id === item.purchase_item_id)
-                console.log(`[SaleService] VERIFIED - Purchase ${purchase.id}, Item ${item.purchase_item_id}:`, {
-                  barcode: verifyItem?.barcode,
-                  article: verifyItem?.article,
-                  quantity: verifyItem?.quantity,
-                  sold_quantity: verifyItem?.sold_quantity,
-                  remaining: verifyItem ? verifyItem.quantity - (verifyItem.sold_quantity || 0) : 'N/A',
-                  match: verifyItem?.sold_quantity === (soldQty + qtyToSell) ? '✅ MATCH' : '❌ MISMATCH'
-                })
-                
-                if (verifyItem?.sold_quantity !== (soldQty + qtyToSell)) {
-                  console.error(`[SaleService] ❌ CRITICAL: sold_quantity mismatch! Expected ${soldQty + qtyToSell}, got ${verifyItem?.sold_quantity}`)
-                }
-              } else {
-                console.error(`[SaleService] ❌ CRITICAL: Could not verify purchase ${purchase.id} after save!`)
-              }
-              
-              if (updatedItem) {
-                console.log(`[SaleService] ✅ Updated purchase item ${updatedItem.id} sold_quantity: ${soldQty} -> ${updatedItem.sold_quantity}`)
-              }
-            } else {
-              console.warn(`[SaleService] ⚠️ Purchase item not found: purchase_id=${item.purchase_id}, purchase_item_id=${item.purchase_item_id}, product_id=${item.product_id}`)
             }
-          } else {
-            console.warn(`[SaleService] ⚠️ Purchase not found: purchase_id=${item.purchase_id}`)
           }
         }
           
@@ -449,7 +365,6 @@ export const saleService = {
                   }
                   remainingQty -= qtyToSell
                   purchaseUpdated = true
-                  console.log(`[SaleService] Updated purchase item ${purchaseItem.id} sold_quantity: ${soldQty} -> ${updatedItems[i].sold_quantity} (FIFO)`)
                 }
               }
               
@@ -464,7 +379,6 @@ export const saleService = {
                 // Extract only the fields that changed (items and updated_at)
                 const { id, ...purchaseUpdateData } = updatedPurchase
                 await purchaseService.update(purchase.id, purchaseUpdateData)
-                console.log(`[SaleService] 💾 Saved purchase ${updatedPurchase.id} to IndexedDB and cloud (FIFO)`)
               }
             }
           }
@@ -475,7 +389,6 @@ export const saleService = {
           await productService.updateStock(item.product_id, item.quantity, 'subtract')
           const productAfter = await productService.getById(item.product_id, true)
           const stockAfter = productAfter?.stock_quantity || 0
-          console.log(`[SaleService] Updated product ${item.product_id} stock: ${stockBefore} -> ${stockAfter} (deducted ${item.quantity})`)
           
           // If stock reaches zero, mark as sold/archived
           if (stockAfter <= 0) {

@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { User, AuthContextType, RolePermissions } from '../types/auth'
 import { PermissionModule, PermissionAction } from '../types/permissions'
-import { userService } from '../services/userService'
+import { userService, type UserWithPassword } from '../services/userService'
 import { auditService } from '../services/auditService'
 import { permissionService } from '../services/permissionService'
 import { companyService } from '../services/companyService'
@@ -94,11 +94,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     setIsLoading(true)
     
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 500))
-    
     // First, check if user exists (before password check)
-    let userExists: { password?: string } | undefined
+    let userExists: UserWithPassword | undefined
     try {
       userExists = await userService.getByEmail(email)
     } catch (error) {
@@ -137,22 +134,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: false, error: 'Invalid password. Please check your password and try again.' }
     }
     
-    // Password is correct, verify login
-    const foundUser = await userService.verifyLogin(email, password)
-    
-    if (!foundUser) {
-      // This shouldn't happen if password matched, but handle it anyway
-      setIsLoading(false)
-      return { success: false, error: 'Login verification failed. Please try again.' }
-    }
+    // Password verified — use userExists directly (skip redundant verifyLogin call)
+    const { password: _pw, ...foundUser } = userExists
 
     if (foundUser) {
-      // Check subscription expiry FIRST (before device limit check)
+      // Fetch company once for subscription + device checks (avoids duplicate API call)
+      let company = null
       if (foundUser.role !== 'admin' && foundUser.company_id) {
         try {
-          const company = await companyService.getById(foundUser.company_id)
+          company = await companyService.getById(foundUser.company_id)
+          // Check subscription expiry FIRST (before device limit check)
           if (company) {
-            // Check if subscription is expired
             const endDate = company.subscription_end_date || company.valid_to
             if (endDate) {
               const today = new Date()
@@ -179,8 +171,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Device registration and limit checking (only for non-admin users with company)
       if (foundUser.role !== 'admin' && foundUser.company_id) {
         try {
-          // Get company to check subscription tier and access type
-          const company = await companyService.getById(foundUser.company_id)
           if (company && company.subscription_tier) {
             // Get device limit for the subscription tier
             const tierPricing = getTierPricing(company.subscription_tier)

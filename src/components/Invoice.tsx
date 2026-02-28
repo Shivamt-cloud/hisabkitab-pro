@@ -12,11 +12,13 @@ interface InvoiceProps {
   onClose?: () => void
   onNewSale?: () => void
   showActions?: boolean
+  /** When true, auto-trigger receipt print (e.g. after Complete Sale) */
+  autoPrint?: boolean
 }
 
 const TZ_INDIA = 'Asia/Kolkata'
 
-const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: InvoiceProps) => {
+const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true, autoPrint = false }: InvoiceProps) => {
   const invoiceRef = useRef<HTMLDivElement>(null)
   const [template, setTemplate] = useState<InvoiceTemplateType>('detailed')
   const [timeFormat12h, setTimeFormat12h] = useState(true)
@@ -144,6 +146,16 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true }: Invoic
     // Browser fallback
     printReceipt(invoiceData)
   }
+
+  // Auto-print receipt when navigated from Complete Sale (?print=1)
+  const autoPrintedRef = useRef(false)
+  useEffect(() => {
+    if (autoPrint && !autoPrintedRef.current) {
+      autoPrintedRef.current = true
+      const timer = setTimeout(() => handlePrintReceipt(), 600)
+      return () => clearTimeout(timer)
+    }
+  }, [autoPrint])
 
   return (
     <div className="invoice-view">

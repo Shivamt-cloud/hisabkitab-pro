@@ -943,19 +943,25 @@ export async function convertXLSXToJSON(file: File): Promise<ConversionResult> {
 
       const sheetNameLower = sheetName.toLowerCase()
 
-      // Process based on sheet name
+      // Process based on sheet name (merge all purchase/bill sheets so no data is lost)
       if (sheetNameLower.includes('purchase') || sheetNameLower.includes('bill')) {
         const result = tryConvertPurchaseSheet(jsonData)
-        purchases = result.purchases
         placeholderChangeCount += result.placeholderChangeCount
-        // Merge suppliers from purchases with existing suppliers
-        const suppliersMap = new Map(suppliers.map(s => [s.name.toUpperCase(), s]))
-        result.suppliers.forEach(s => {
+        const nextId = purchases.length > 0 ? Math.max(...purchases.map((p: any) => p.id)) + 1 : 1
+        const suppliersMap = new Map(suppliers.map((s: any) => [s.name.toUpperCase(), s]))
+        result.suppliers.forEach((s: any) => {
           const key = s.name.toUpperCase()
           if (!suppliersMap.has(key)) {
-            suppliersMap.set(key, s)
-            suppliers.push(s)
+            suppliersMap.set(key, { ...s, id: suppliers.length + 1 })
+            suppliers.push(suppliersMap.get(key))
           }
+        })
+        result.purchases.forEach((p: any, idx: number) => {
+          purchases.push({
+            ...p,
+            id: nextId + idx,
+            supplier_id: suppliersMap.get((p.supplier_name || '').toUpperCase().trim())?.id ?? p.supplier_id,
+          })
         })
       } else if (sheetNameLower.includes('product')) {
         products = convertProductsData(rows, headers)
@@ -979,12 +985,11 @@ export async function convertXLSXToJSON(file: File): Promise<ConversionResult> {
       }
     }
 
-    // If no purchases sheet found, try first sheet then any other sheet with enough rows (backward compatibility)
-    if (purchases.length === 0 && workbook.SheetNames.length > 0) {
-      const sheetsToTry = !firstSheetIsOtherType
-        ? [workbook.SheetNames[0]]
-        : []
-      // Also try any sheet with many rows (e.g. "Sheet 2" with 3400 lines) that wasn't already matched by name
+    // If no purchases sheet found, or to pick up extra data: try first sheet and any sheet with many rows (merge all)
+    if (workbook.SheetNames.length > 0) {
+      const sheetsToTry: string[] = []
+      if (purchases.length === 0 && !firstSheetIsOtherType) sheetsToTry.push(workbook.SheetNames[0])
+      // Also try any sheet with many rows that wasn't already processed as purchase/bill (e.g. "Sheet 2", "Data", "Export")
       for (const name of workbook.SheetNames) {
         const n = name.toLowerCase()
         if (n.includes('purchase') || n.includes('bill')) continue
@@ -999,10 +1004,24 @@ export async function convertXLSXToJSON(file: File): Promise<ConversionResult> {
         if (jsonData.length >= 2) {
           const result = tryConvertPurchaseSheet(jsonData)
           if (result.purchases.length > 0) {
-            purchases = result.purchases
-            suppliers = result.suppliers
             placeholderChangeCount += result.placeholderChangeCount
-            break
+            const nextId = purchases.length > 0 ? Math.max(...purchases.map((p: any) => p.id)) + 1 : 1
+            const suppliersMap = new Map(suppliers.map((s: any) => [s.name.toUpperCase(), s]))
+            result.suppliers.forEach((s: any) => {
+              const key = s.name.toUpperCase()
+              if (!suppliersMap.has(key)) {
+                suppliersMap.set(key, { ...s, id: suppliers.length + 1 })
+                suppliers.push(suppliersMap.get(key))
+              }
+            })
+            result.purchases.forEach((p: any, idx: number) => {
+              purchases.push({
+                ...p,
+                id: nextId + idx,
+                supplier_id: suppliersMap.get((p.supplier_name || '').toUpperCase().trim())?.id ?? p.supplier_id,
+              })
+            })
+            if (purchases.length === result.purchases.length) break
           }
         }
       }
@@ -1031,9 +1050,11 @@ export async function convertXLSXToJSON(file: File): Promise<ConversionResult> {
       },
     }
 
+    const purchaseLineItemCount = purchases.reduce((sum: number, p: any) => sum + (p.items?.length || 0), 0)
     const stats = {
       suppliers: suppliers.length,
       purchases: purchases.length,
+      purchaseLineItems: purchaseLineItemCount,
       products: products.length,
       customers: customers.length,
       categories: categories.length + subCategories.length,
@@ -1044,7 +1065,13 @@ export async function convertXLSXToJSON(file: File): Promise<ConversionResult> {
     if (categories.length > 0 || subCategories.length > 0) messages.push(`${categories.length + subCategories.length} categories`)
     if (suppliers.length > 0) messages.push(`${suppliers.length} suppliers`)
     if (customers.length > 0) messages.push(`${customers.length} customers`)
-    if (purchases.length > 0) messages.push(`${purchases.length} purchases`)
+    if (purchases.length > 0) {
+      if (purchaseLineItemCount > 0 && purchaseLineItemCount !== purchases.length) {
+        messages.push(`${purchases.length} purchases (${purchaseLineItemCount} line items)`)
+      } else {
+        messages.push(`${purchases.length} purchases`)
+      }
+    }
 
     const hasNoData = purchases.length === 0 && products.length === 0 && customers.length === 0 && suppliers.length === 0 && categories.length === 0
     let message: string

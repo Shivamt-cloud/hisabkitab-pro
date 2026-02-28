@@ -219,6 +219,7 @@ export const backupService = {
       }
 
       let importedCount = 0
+      let purchaseImportDetail = '' // Filled after purchase import so user sees imported/skipped/errors
 
       // Clear existing data if not merging
       if (!options.merge) {
@@ -946,6 +947,8 @@ export const backupService = {
               try {
                 const createdPurchase = await purchaseService.createGST({
                   supplier_id: supplierId,
+                  supplier_name: (gstPurchase.supplier_name && String(gstPurchase.supplier_name).trim()) || (allSuppliers.find(s => s.id === supplierId)?.name) || '',
+                  supplier_gstin: gstPurchase.supplier_gstin || undefined,
                   invoice_number: gstPurchase.invoice_number || '',
                   purchase_date: gstPurchase.purchase_date,
                   items: validItems,
@@ -979,6 +982,7 @@ export const backupService = {
               try {
                 const createdPurchase = await purchaseService.createSimple({
                   supplier_id: supplierId,
+                  supplier_name: (simplePurchase.supplier_name && String(simplePurchase.supplier_name).trim()) || (allSuppliers.find(s => s.id === supplierId)?.name) || '',
                   invoice_number: simplePurchase.invoice_number,
                   purchase_date: simplePurchase.purchase_date,
                   items: validItems,
@@ -1033,6 +1037,7 @@ export const backupService = {
         
         console.log(`📊 Purchase Import Summary: Processed: ${processedCount}, Imported: ${purchaseImportedCount}, Skipped: ${skippedCount}, Errors: ${errorCount}`)
         console.log(`📊 Barcode Statistics: Items with barcodes: ${itemsWithBarcodes}, Items with articles: ${itemsWithArticles}, Items without barcodes: ${itemsWithoutBarcodes}`)
+        purchaseImportDetail = ` Purchases: ${purchaseImportedCount} imported, ${skippedCount} skipped (duplicates or already exist), ${errorCount} errors.`
       } else {
         console.log(`⚠️ [Import] Purchase import skipped. Options.importPurchases: ${options.importPurchases}, Backup has purchases: ${!!backup.data.purchases}`)
       }
@@ -1073,15 +1078,18 @@ export const backupService = {
         importedCount++
       }
 
-      // Create detailed import message
+      // Create detailed import message (include purchase breakdown so user knows why count may not increase)
       let message = ''
       if (importedCount > 0) {
         message = `Successfully imported ${importedCount} records.`
-        if (backup.data.purchases && options.importPurchases !== false) {
+        if (purchaseImportDetail) message += purchaseImportDetail
+        if (backup.data.purchases && options.importPurchases !== false && !purchaseImportDetail) {
           message += ` Check browser console (F12) for detailed purchase import logs.`
         }
       } else {
-        message = `No records were imported. Please check browser console (F12) for errors.`
+        message = `No records were imported.`
+        if (purchaseImportDetail) message += purchaseImportDetail
+        message += ` Please check browser console (F12) for errors.`
       }
 
       return {
