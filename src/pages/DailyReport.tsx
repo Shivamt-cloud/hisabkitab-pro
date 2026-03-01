@@ -101,11 +101,11 @@ const DailyReport = () => {
   const loadData = async () => {
     setLoading(true)
     try {
-      // Load all data - we need all purchases to calculate item-wise profit
+      // Load all data – use getAllFast when online (no IndexedDB sync) for faster load
       const [allSales, allPurchases, allExpenses, allSalesPersons, allUsers] = await Promise.all([
-        saleService.getAll(true, companyId),
-        purchaseService.getAll(undefined, companyId), // Load all purchases to lookup purchase items
-        expenseService.getAll(companyId),
+        saleService.getAllFast(true, companyId),
+        purchaseService.getAllFast(undefined, companyId),
+        expenseService.getAllFast(companyId),
         salesPersonService.getAll(false),
         userService.getAll()
       ])

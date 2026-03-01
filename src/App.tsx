@@ -282,7 +282,7 @@ function App() {
           <Route
             path="/sales/history"
             element={
-              <ProtectedRoute requiredPermission="sales:read" requiredRole="admin">
+              <ProtectedRoute requiredPermission="sales:read">
                 <SalesHistory />
               </ProtectedRoute>
             }

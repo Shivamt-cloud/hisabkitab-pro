@@ -95,9 +95,9 @@ const ComparativeReports = () => {
     const companyId = getCurrentCompanyId()
     try {
       const [sales, purchases, expenses] = await Promise.all([
-        saleService.getAll(true, companyId),
-        purchaseService.getAll(undefined, companyId),
-        expenseService.getAll(companyId),
+        saleService.getAllFast(true, companyId),
+        purchaseService.getAllFast(undefined, companyId),
+        expenseService.getAllFast(companyId),
       ])
       setRawData({ sales, purchases, expenses })
     } catch (err) {

@@ -30,11 +30,15 @@ export const cloudSalaryPaymentService = {
         if (companyId !== undefined && companyId !== null) list = list.filter(p => p.company_id === companyId)
         return list.sort((a, b) => (b.payment_date || '').localeCompare(a.payment_date || ''))
       }
-      if (data) {
-        for (const row of data) {
-          const p = { ...row, payment_date: row.payment_date ? String(row.payment_date).slice(0, 10) : (row as any).payment_date }
-          await put(STORES.SALARY_PAYMENTS, p as SalaryPayment)
-        }
+      // Supabase-first: sync to IndexedDB in background (don't block UI)
+      if (data && data.length > 0) {
+        const toSync = (data as any[]).map((row) => ({
+          ...row,
+          payment_date: row.payment_date ? String(row.payment_date).slice(0, 10) : (row as any).payment_date,
+        })) as SalaryPayment[]
+        void Promise.all(toSync.map((p) => put(STORES.SALARY_PAYMENTS, p))).catch((e) =>
+          console.warn('[cloudSalaryPaymentService] Background sync failed:', e)
+        )
       }
       const out = (data || []).map((row: any) => ({
         ...row,
@@ -57,7 +61,9 @@ export const cloudSalaryPaymentService = {
       const { data, error } = await supabase!.from('salary_payments').select('*').eq('id', id).maybeSingle()
       if (error || !data) return await getById<SalaryPayment>(STORES.SALARY_PAYMENTS, id)
       const p = { ...data, payment_date: data.payment_date ? String(data.payment_date).slice(0, 10) : (data as any).payment_date }
-      await put(STORES.SALARY_PAYMENTS, p as SalaryPayment)
+      void put(STORES.SALARY_PAYMENTS, p as SalaryPayment).catch((e) =>
+        console.warn('[cloudSalaryPaymentService] Background sync failed:', e)
+      )
       return p as SalaryPayment
     } catch {
       return await getById<SalaryPayment>(STORES.SALARY_PAYMENTS, id)

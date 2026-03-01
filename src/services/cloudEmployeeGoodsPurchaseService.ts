@@ -26,10 +26,11 @@ export const cloudEmployeeGoodsPurchaseService = {
         if (companyId !== undefined && companyId !== null) list = list.filter(p => p.company_id === companyId)
         return list.sort((a, b) => (b.period || '').localeCompare(a.period || ''))
       }
-      if (data) {
-        for (const row of data) {
-          await put(STORES.EMPLOYEE_GOODS_PURCHASES, row as EmployeeGoodsPurchase)
-        }
+      // Supabase-first: sync to IndexedDB in background (don't block UI)
+      if (data && data.length > 0) {
+        void Promise.all((data as EmployeeGoodsPurchase[]).map((r) => put(STORES.EMPLOYEE_GOODS_PURCHASES, r))).catch((e) =>
+          console.warn('[cloudEmployeeGoodsPurchaseService] Background sync failed:', e)
+        )
       }
       return (data as EmployeeGoodsPurchase[]) || []
     } catch (e) {
@@ -47,7 +48,9 @@ export const cloudEmployeeGoodsPurchaseService = {
     try {
       const { data, error } = await supabase!.from('employee_goods_purchases').select('*').eq('id', id).maybeSingle()
       if (error || !data) return await getById<EmployeeGoodsPurchase>(STORES.EMPLOYEE_GOODS_PURCHASES, id)
-      await put(STORES.EMPLOYEE_GOODS_PURCHASES, data as EmployeeGoodsPurchase)
+      void put(STORES.EMPLOYEE_GOODS_PURCHASES, data as EmployeeGoodsPurchase).catch((e) =>
+        console.warn('[cloudEmployeeGoodsPurchaseService] Background sync failed:', e)
+      )
       return data as EmployeeGoodsPurchase
     } catch {
       return await getById<EmployeeGoodsPurchase>(STORES.EMPLOYEE_GOODS_PURCHASES, id)

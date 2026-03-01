@@ -34,13 +34,12 @@ export const cloudUserService = {
         return await getAll<UserWithPassword>(STORES.USERS)
       }
 
-      // Sync to local storage for offline access
-      if (data) {
-        for (const user of data) {
-          await put(STORES.USERS, user as UserWithPassword)
-        }
+      // Supabase-first: sync to IndexedDB in background (don't block UI)
+      if (data && data.length > 0) {
+        void Promise.all((data as UserWithPassword[]).map((u) => put(STORES.USERS, u))).catch((e) =>
+          console.warn('[cloudUserService] Background sync failed:', e)
+        )
       }
-
       return (data as UserWithPassword[]) || []
     } catch (error) {
       console.error('Error in cloudUserService.getAll:', error)
@@ -71,13 +70,13 @@ export const cloudUserService = {
         return await getById<UserWithPassword>(STORES.USERS, id)
       }
 
-      // Sync to local storage
+      // Supabase-first: sync to IndexedDB in background (don't block UI)
       if (data) {
-        // Remove any Supabase-specific fields that don't exist in User type
         const { created_at, updated_at, ...userData } = data as any
-        await put(STORES.USERS, userData as UserWithPassword)
+        void put(STORES.USERS, userData as UserWithPassword).catch((e) =>
+          console.warn('[cloudUserService] Background sync failed:', e)
+        )
       }
-
       return data as UserWithPassword | undefined
     } catch (error) {
       console.error('Error in cloudUserService.getById:', error)
@@ -110,13 +109,13 @@ export const cloudUserService = {
         return users.find(u => u.email.toLowerCase() === email.toLowerCase())
       }
 
-      // Sync to local storage
+      // Supabase-first: sync to IndexedDB in background (don't block UI)
       if (data) {
-        // Remove any Supabase-specific fields that don't exist in User type
         const { created_at, updated_at, ...userData } = data as any
-        await put(STORES.USERS, userData as UserWithPassword)
+        void put(STORES.USERS, userData as UserWithPassword).catch((e) =>
+          console.warn('[cloudUserService] Background sync failed:', e)
+        )
       }
-
       return data as UserWithPassword | undefined
     } catch (error) {
       console.error('Error in cloudUserService.getByEmail:', error)

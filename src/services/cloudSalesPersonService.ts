@@ -47,12 +47,13 @@ export const cloudSalesPersonService = {
         return persons
       }
 
-      if (data) {
-        for (const row of data) {
-          await put(STORES.SALES_PERSONS, fromDbRow(row))
-        }
+      // Supabase-first: sync to IndexedDB in background (don't block UI)
+      if (data && data.length > 0) {
+        const rows = (data || []).map(fromDbRow)
+        void Promise.all(rows.map((r) => put(STORES.SALES_PERSONS, r))).catch((e) =>
+          console.warn('[cloudSalesPersonService] Background sync failed:', e)
+        )
       }
-
       let out = (data || []).map(fromDbRow)
       if (!includeInactive) {
         out = out.filter((p) => p.is_active)
@@ -84,7 +85,9 @@ export const cloudSalesPersonService = {
       }
 
       const person = fromDbRow(data)
-      await put(STORES.SALES_PERSONS, person)
+      void put(STORES.SALES_PERSONS, person).catch((e) =>
+        console.warn('[cloudSalesPersonService] Background sync failed:', e)
+      )
       return person
     } catch {
       return await getById<SalesPerson>(STORES.SALES_PERSONS, id)

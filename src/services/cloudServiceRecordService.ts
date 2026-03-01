@@ -100,12 +100,13 @@ export const cloudServiceRecordService = {
         return list
       }
 
-      if (data) {
-        for (const row of data) {
-          await put(STORES.SERVICES, fromDbRow(row))
-        }
+      // Supabase-first: sync to IndexedDB in background (don't block UI)
+      if (data && data.length > 0) {
+        const rows = (data || []).map(fromDbRow)
+        void Promise.all(rows.map((r) => put(STORES.SERVICES, r))).catch((e) =>
+          console.warn('[cloudServiceRecordService] Background sync failed:', e)
+        )
       }
-
       const out = (data || []).map(fromDbRow)
       out.sort((a, b) => new Date(b.service_date).getTime() - new Date(a.service_date).getTime())
       return out
@@ -136,7 +137,9 @@ export const cloudServiceRecordService = {
       }
 
       const record = fromDbRow(data)
-      await put(STORES.SERVICES, record)
+      void put(STORES.SERVICES, record).catch((e) =>
+        console.warn('[cloudServiceRecordService] Background sync failed:', e)
+      )
       return record
     } catch {
       return await getById<ServiceRecord>(STORES.SERVICES, id)

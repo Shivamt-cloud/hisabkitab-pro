@@ -83,7 +83,7 @@ const ExpenseReports = () => {
     const companyId = getCurrentCompanyId()
     try {
       const [allExpenses, cats, periods, vsIncome] = await Promise.all([
-        expenseService.getAll(companyId),
+        expenseService.getAllFast(companyId),
         reportService.getExpensesByCategory(startDate, endDate, companyId),
         reportService.getExpensesByPeriod(groupBy, startDate, endDate, companyId),
         reportService.getExpenseVsIncome(groupBy, startDate, endDate, companyId),

@@ -376,7 +376,10 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true, autoPrin
                     ₹{item.unit_price.toFixed(2)}
                     {template !== 'compact' && item.mrp && item.mrp > item.unit_price && (
                       <span className="block text-xs text-green-600 font-medium">
-                        {item.discount_percentage?.toFixed(1)}% OFF
+                        {((item.discount_percentage != null && item.discount_percentage > 0)
+                          ? item.discount_percentage
+                          : ((item.mrp - item.unit_price) / item.mrp) * 100
+                        ).toFixed(1)}% OFF
                       </span>
                     )}
                   </td>

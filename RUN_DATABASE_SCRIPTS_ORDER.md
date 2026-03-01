@@ -89,6 +89,7 @@ These are **not required** if you have run the three steps above (RUN_ALL → AP
 | `ADD_SERVICE_ID_TO_SALES.sql` | Included in APPLY_REMAINING |
 | `ADD_SERVICE_BOOKED_STATUS.sql` | Included in APPLY_REMAINING |
 | `UPDATE_CUSTOMERS_TABLE_ID_PROOF.sql` | Included in APPLY_REMAINING |
+| `ADD_PAYMENT_METHODS_TO_SALES.sql` | Included in RUN_ALL; run if your sales table was created earlier without this column (split payments in reports) |
 | `UPDATE_COMPANIES_TABLE_SCHEMA.sql` | Same columns added by APPLY_MISSING (companies profile: email, phone, address, etc.) |
 
 ---

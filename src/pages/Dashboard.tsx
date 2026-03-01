@@ -445,7 +445,7 @@ const Dashboard = () => {
     // Load expenses separately – failure must not block report summary
     let allExpenses: Expense[] = []
     try {
-      allExpenses = await expenseService.getAll(companyId)
+      allExpenses = await expenseService.getAllFast(companyId)
     } catch (e) {
       console.warn('[Dashboard] Expense load failed, cash flow will show 0 expenses:', e)
     }
@@ -868,8 +868,8 @@ const Dashboard = () => {
     void (async () => {
       try {
         const [sales, purchases] = await Promise.all([
-          saleService.getAll(true, companyId),
-          purchaseService.getAll(undefined, companyId),
+          saleService.getAllFast(true, companyId),
+          purchaseService.getAllFast(undefined, companyId),
         ])
         await paymentService.initializeFromSalesAndPurchases(companyId, { sales, purchases })
       } catch (e) {

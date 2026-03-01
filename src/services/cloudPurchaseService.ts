@@ -165,89 +165,14 @@ export const cloudPurchaseService = {
         items: normalizePurchaseItems(purchase.items, purchase.id)
       }))
 
-      // When IndexedDB is empty (incognito/fresh), skip merge and return immediately
-      let localPurchases: Purchase[] = []
-      try {
-        localPurchases = await getAll<Purchase>(STORES.PURCHASES)
-      } catch (_) {}
-      if (localPurchases.length === 0) {
+      // Supabase-first when online: return immediately, no IndexedDB read/merge (speed).
+      // Sync to IndexedDB in background for offline use.
+      if (normalized.length > 0) {
         void Promise.all(normalized.map((p) => put(STORES.PURCHASES, p))).catch((e) =>
           console.warn('[cloudPurchaseService] Background sync failed:', e)
         )
-        return normalized
       }
-
-      // Merge with local sold_quantity so we never overwrite a valid local inventory update (e.g. after a sale) with stale cloud data.
-      // Also prefer local supplier_name/supplier_id when cloud has none (e.g. after edit that didn't sync or DB returned null).
-      const cloudIds = new Set((data || []).map((p: Purchase) => p.id))
-      const merged = normalized.map((purchase: Purchase) => {
-        const local = localPurchases.find((p: Purchase) => p.id === purchase.id)
-        let out: Purchase = purchase
-        if (local?.items?.length) {
-          const mergedItems = purchase.items.map((pi: PurchaseItem) => {
-            const localItem = local.items!.find((li: PurchaseItem) => li.id === pi.id)
-            const cloudSold = pi.sold_quantity ?? 0
-            const localSold = localItem?.sold_quantity ?? 0
-            const sold = Math.max(cloudSold, localSold)
-            if (sold === cloudSold) return pi
-            return { ...pi, sold_quantity: sold }
-          })
-          out = { ...purchase, items: mergedItems } as Purchase
-        }
-        const cloudName = (out as any).supplier_name
-        const localName = (local as any)?.supplier_name
-        if (localName && String(localName).trim() && (!cloudName || !String(cloudName).trim())) {
-          out = { ...out, supplier_name: String(localName).trim() } as Purchase
-        }
-        const cloudId = (out as any).supplier_id
-        const localId = (local as any)?.supplier_id
-        if (localId != null && (cloudId == null || cloudId === undefined)) {
-          out = { ...out, supplier_id: localId } as Purchase
-        }
-        return out
-      })
-
-      // Include local-only purchases (e.g. from backup import not yet synced, or old inventory) so Purchase History shows them
-      let localOnly: Purchase[] = []
-      if (companyId !== undefined && companyId !== null) {
-        localOnly = localPurchases.filter(
-          (p: Purchase) => !cloudIds.has(p.id) && (p.company_id === companyId || p.company_id == null || p.company_id === undefined)
-        )
-      } else if (companyId !== null) {
-        localOnly = localPurchases.filter((p: Purchase) => !cloudIds.has(p.id))
-      }
-      if (type) localOnly = localOnly.filter((p: Purchase) => p.type === type)
-      localOnly = localOnly.map((p: Purchase) => ({ ...p, items: normalizePurchaseItems(p.items, p.id) }))
-
-      const combined = [...merged, ...localOnly].sort(
-        (a, b) => new Date(b.purchase_date).getTime() - new Date(a.purchase_date).getTime()
-      )
-
-      // Sync to local storage in background (don't block UI – IndexedDB writes are slow with large datasets)
-      if (combined.length > 0) {
-        void Promise.all(combined.map((p) => put(STORES.PURCHASES, p))).catch((e) =>
-          console.warn('[cloudPurchaseService] Background sync failed:', e)
-        )
-      }
-
-      // Push local sold_quantity increases to cloud in background (don't block)
-      void (async () => {
-        for (let i = 0; i < merged.length; i++) {
-          const p = merged[i]
-          const orig = normalized[i]
-          if (!orig || !p.items?.length) continue
-          const hadLocalIncrease = p.items.some((pi: PurchaseItem, idx: number) => (pi.sold_quantity ?? 0) > (orig.items?.[idx]?.sold_quantity ?? 0))
-          if (!hadLocalIncrease) continue
-          try {
-            await supabase!.from('purchases').update({
-              items: p.items,
-              updated_at: p.updated_at,
-            }).eq('id', p.id).select().single()
-          } catch (_) {}
-        }
-      })()
-
-      return combined
+      return normalized
     } catch (error) {
       console.error('Error in cloudPurchaseService.getAll:', error)
       // Fallback to local storage

@@ -103,7 +103,7 @@ export const reportService = {
 
   // Sales by Product
   getSalesByProduct: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<SalesByProductReport[]> => {
-    const allSales = await saleService.getAll(true, companyId)
+    const allSales = await saleService.getAllFast(true, companyId)
     const filteredSales = reportService.filterSalesByDate(allSales, startDate, endDate)
     const productMap = new Map<number, SalesByProductReport>()
 
@@ -152,8 +152,8 @@ export const reportService = {
   // Sales by Category
   getSalesByCategory: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<SalesByCategoryReport[]> => {
     const [allSales, products] = await Promise.all([
-      saleService.getAll(true, companyId),
-      productService.getAll(false, companyId)
+      saleService.getAllFast(true, companyId),
+      productService.getAllFast(false, companyId)
     ])
     const filteredSales = reportService.filterSalesByDate(allSales, startDate, endDate)
     const categoryMap = new Map<string, SalesByCategoryReport>()
@@ -222,7 +222,7 @@ export const reportService = {
 
   // Sales by Customer
   getSalesByCustomer: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<SalesByCustomerReport[]> => {
-    const allSales = await saleService.getAll(true, companyId)
+    const allSales = await saleService.getAllFast(true, companyId)
     const filteredSales = reportService.filterSalesByDate(allSales, startDate, endDate)
     const customerMap = new Map<string, SalesByCustomerReport>()
 
@@ -271,7 +271,7 @@ export const reportService = {
 
   // Sales by Sales Person
   getSalesBySalesPerson: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<SalesBySalesPersonReport[]> => {
-    const allSales = await saleService.getAll(true, companyId)
+    const allSales = await saleService.getAllFast(true, companyId)
     const filteredSales = reportService.filterSalesByDate(allSales, startDate, endDate)
     // Key by id (or 'na') + name so we aggregate by person; use per-item salesperson when available
     const salesPersonMap = new Map<string, SalesBySalesPersonReport>()
@@ -330,8 +330,8 @@ export const reportService = {
   // Product Performance
   getProductPerformance: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<ProductPerformanceReport[]> => {
     const [allSales, products] = await Promise.all([
-      saleService.getAll(true, companyId),
-      productService.getAll(false, companyId)
+      saleService.getAllFast(true, companyId),
+      productService.getAllFast(false, companyId)
     ])
     const filteredSales = reportService.filterSalesByDate(allSales, startDate, endDate)
     const productMap = new Map<number, ProductPerformanceReport>()
@@ -407,7 +407,7 @@ export const reportService = {
 
   // Profit Analysis by Period
   getProfitAnalysis: async (groupBy: 'day' | 'week' | 'month' | 'year', startDate?: string, endDate?: string, companyId?: number | null): Promise<ProfitAnalysisReport[]> => {
-    const allSales = await saleService.getAll(true, companyId)
+    const allSales = await saleService.getAllFast(true, companyId)
     const filteredSales = reportService.filterSalesByDate(allSales, startDate, endDate)
     const periodMap = new Map<string, ProfitAnalysisReport>()
 
@@ -509,7 +509,7 @@ export const reportService = {
 
   getPurchasesBySupplier: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<PurchasesBySupplierReport[]> => {
     const [allPurchases, outstanding] = await Promise.all([
-      purchaseService.getAll(undefined, companyId),
+      purchaseService.getAllFast(undefined, companyId),
       paymentService.getOutstandingPayments('purchase', companyId),
     ])
     const filtered = reportService.filterPurchasesByDate(allPurchases, startDate, endDate)
@@ -561,8 +561,8 @@ export const reportService = {
 
   getPurchasesByProduct: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<PurchasesByProductReport[]> => {
     const [allPurchases, products] = await Promise.all([
-      purchaseService.getAll(undefined, companyId),
-      productService.getAll(false, companyId),
+      purchaseService.getAllFast(undefined, companyId),
+      productService.getAllFast(false, companyId),
     ])
     const filtered = reportService.filterPurchasesByDate(allPurchases, startDate, endDate)
     const productMap = new Map<number, { total_quantity: number; total_amount: number; purchase_count: number; suppliers: Set<string> }>()
@@ -609,8 +609,8 @@ export const reportService = {
 
   getPurchasesByCategory: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<PurchasesByCategoryReport[]> => {
     const [allPurchases, products] = await Promise.all([
-      purchaseService.getAll(undefined, companyId),
-      productService.getAll(false, companyId),
+      purchaseService.getAllFast(undefined, companyId),
+      productService.getAllFast(false, companyId),
     ])
     const filtered = reportService.filterPurchasesByDate(allPurchases, startDate, endDate)
     const categoryMap = new Map<string, PurchasesByCategoryReport & { productIds: Set<number> }>()
@@ -667,7 +667,7 @@ export const reportService = {
 
   /** Sales velocity: units sold per week for each product (last N weeks) */
   getSalesVelocityByProduct: async (weeksLookback: number = 4, companyId?: number | null): Promise<Map<number, { totalSold: number; velocityPerWeek: number }>> => {
-    const allSales = await saleService.getAll(true, companyId)
+    const allSales = await saleService.getAllFast(true, companyId)
     const endDate = new Date()
     const startDate = new Date()
     startDate.setDate(startDate.getDate() - weeksLookback * 7)
@@ -709,7 +709,7 @@ export const reportService = {
   },
 
   getExpensesByCategory: async (startDate?: string, endDate?: string, companyId?: number | null): Promise<ExpensesByCategoryReport[]> => {
-    const all = await expenseService.getAll(companyId)
+    const all = await expenseService.getAllFast(companyId)
     const filtered = reportService.filterExpensesByDate(all, startDate, endDate)
     // Exclude opening/closing (balance entries, not operational expenses)
     const operational = filtered.filter(e => e.expense_type !== 'opening' && e.expense_type !== 'closing')
@@ -743,7 +743,7 @@ export const reportService = {
   },
 
   getExpensesByPeriod: async (groupBy: 'day' | 'week' | 'month', startDate?: string, endDate?: string, companyId?: number | null): Promise<ExpensesByPeriodReport[]> => {
-    const all = await expenseService.getAll(companyId)
+    const all = await expenseService.getAllFast(companyId)
     const filtered = reportService.filterExpensesByDate(all, startDate, endDate)
     const operational = filtered.filter(e => e.expense_type !== 'opening' && e.expense_type !== 'closing')
     const periodMap = new Map<string, { total: number; count: number }>()
@@ -770,8 +770,8 @@ export const reportService = {
 
   getExpenseVsIncome: async (groupBy: 'day' | 'week' | 'month', startDate?: string, endDate?: string, companyId?: number | null): Promise<ExpenseVsIncomeReport[]> => {
     const [allExpenses, allSales] = await Promise.all([
-      expenseService.getAll(companyId),
-      saleService.getAll(true, companyId),
+      expenseService.getAllFast(companyId),
+      saleService.getAllFast(true, companyId),
     ])
     const expensesFiltered = reportService.filterExpensesByDate(allExpenses, startDate, endDate)
     const salesFiltered = reportService.filterSalesByDate(allSales, startDate, endDate)

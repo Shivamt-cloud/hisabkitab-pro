@@ -90,7 +90,7 @@ const PurchaseReports = () => {
     const load = async () => {
       try {
         const [prods, cats, sups] = await Promise.all([
-          productService.getAll(true, companyId),
+          productService.getAllFast(true, companyId),
           categoryService.getAll(),
           supplierService.getAll(companyId),
         ])
@@ -113,7 +113,7 @@ const PurchaseReports = () => {
       const { startDate, endDate } = reportService.getDateRange(timePeriod, customStartDate, customEndDate)
       const companyId = getCurrentCompanyId()
       try {
-        const all = await purchaseService.getAll(undefined, companyId)
+        const all = await purchaseService.getAllFast(undefined, companyId)
         let filtered = all
         if (startDate || endDate) {
           filtered = reportService.filterPurchasesByDate(all, startDate, endDate)
@@ -145,7 +145,7 @@ const PurchaseReports = () => {
           setCategoryReports(cReports)
           break
         case 'purchases':
-          const all = await purchaseService.getAll(undefined, companyId)
+          const all = await purchaseService.getAllFast(undefined, companyId)
           const filtered = reportService.filterPurchasesByDate(all, startDate, endDate)
           setPurchases(filtered)
           break

@@ -59,6 +59,11 @@ async function syncExpenseToGoodsPurchase(created: Expense): Promise<void> {
 }
 
 export const expenseService = {
+  /** Fast fetch: Supabase only, no IndexedDB sync. Use for Daily Report, Expenses page. */
+  getAllFast: async (companyId?: number | null): Promise<Expense[]> => {
+    return await cloudExpenseService.getAllFast(companyId)
+  },
+
   // Get all expenses (from cloud, with local fallback)
   getAll: async (companyId?: number | null): Promise<Expense[]> => {
     return await cloudExpenseService.getAll(companyId)

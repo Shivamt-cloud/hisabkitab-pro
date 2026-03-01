@@ -88,11 +88,12 @@ export const cloudSupplierService = {
         return undefined
       }
 
-      // Sync to local storage
+      // Supabase-first: sync to IndexedDB in background (don't block UI)
       if (data) {
-        await put(STORES.SUPPLIERS, data as Supplier)
+        void put(STORES.SUPPLIERS, data as Supplier).catch((e) =>
+          console.warn('[cloudSupplierService] Background sync failed:', e)
+        )
       }
-
       return data as Supplier | undefined
     } catch (error) {
       console.error('Error in cloudSupplierService.getById:', error)

@@ -53,9 +53,9 @@ const CAReports = () => {
       const companyId = getCurrentCompanyId()
       try {
         const [salesData, purchasesData, productsData] = await Promise.all([
-          saleService.getAll(true, companyId ?? undefined),
-          purchaseService.getAll(undefined, companyId ?? undefined),
-          productService.getAll(true, companyId ?? undefined),
+          saleService.getAllFast(true, companyId ?? undefined),
+          purchaseService.getAllFast(undefined, companyId ?? undefined),
+          productService.getAllFast(true, companyId ?? undefined),
         ])
         setSales(salesData)
         setPurchases(purchasesData)

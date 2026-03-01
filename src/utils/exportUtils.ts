@@ -317,8 +317,18 @@ export async function exportHTMLToPDF(
   pdf.save(`${filename}.pdf`)
 }
 
+/** Sanitize text for PDF: jsPDF Helvetica does not support ₹ or many Unicode chars */
+function sanitizeForPdf(text: string): string {
+  return text
+    .replace(/₹/g, 'Rs.')
+    .replace(/—/g, '-')
+    .replace(/━/g, '-')
+    .replace(/…/g, '...')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '') // zero-width chars
+}
+
 /**
- * Export data to PDF table
+ * Export data to PDF table with improved formatting for many columns
  */
 export function exportDataToPDF(
   data: any[][],
@@ -335,63 +345,77 @@ export function exportDataToPDF(
   
   const pdf = new jsPDF(orientation, 'mm', format)
   const pageWidth = pdf.internal.pageSize.width
-  const margin = 15
+  const pageHeight = pdf.internal.pageSize.height
+  const margin = 12
   const tableWidth = pageWidth - margin * 2
   const colCount = headers.length
   const colWidth = tableWidth / colCount
 
-  // Add title
-  pdf.setFontSize(16)
-  pdf.text(title, margin, margin)
+  // Use smaller font when many columns for better fit
+  const headerFontSize = colCount > 8 ? 8 : 10
+  const dataFontSize = colCount > 8 ? 7 : 9
+  const rowHeight = colCount > 8 ? 5 : 6
+
+  // Title
+  pdf.setFontSize(14)
+  pdf.setFont('helvetica', 'bold')
+  pdf.text(sanitizeForPdf(title), margin, margin)
   
-  // Add date
-  pdf.setFontSize(10)
-  pdf.text(`Generated: ${new Date().toLocaleString('en-IN')}`, margin, margin + 7)
+  pdf.setFontSize(9)
+  pdf.setFont('helvetica', 'normal')
+  pdf.setTextColor(80, 80, 80)
+  pdf.text(sanitizeForPdf(`Generated: ${new Date().toLocaleString('en-IN')}`), margin, margin + 6)
+  pdf.setTextColor(0, 0, 0)
 
   // Table header
-  let yPosition = margin + 15
-  pdf.setFontSize(10)
+  let yPosition = margin + 12
+  pdf.setFontSize(headerFontSize)
   pdf.setFont('helvetica', 'bold')
   
   headers.forEach((header, index) => {
-    const xPosition = margin + index * colWidth
-    pdf.text(header, xPosition, yPosition)
+    const xPosition = margin + index * colWidth + 1
+    const safeHeader = sanitizeForPdf(header)
+    const maxHeaderChars = Math.max(10, Math.floor((colWidth - 1) / (headerFontSize * 0.45)))
+    const shortHeader = safeHeader.length > maxHeaderChars ? safeHeader.substring(0, maxHeaderChars - 1) + '...' : safeHeader
+    pdf.text(shortHeader, xPosition, yPosition)
   })
 
-  // Draw header line
-  pdf.setLineWidth(0.5)
-  pdf.line(margin, yPosition + 3, pageWidth - margin, yPosition + 3)
+  pdf.setDrawColor(200, 200, 200)
+  pdf.setLineWidth(0.3)
+  pdf.line(margin, yPosition + 2, pageWidth - margin, yPosition + 2)
 
   // Table data
   pdf.setFont('helvetica', 'normal')
-  yPosition += 10
+  pdf.setFontSize(dataFontSize)
+  yPosition += 6
 
+  const maxCharsPerCol = Math.max(8, Math.floor((colWidth - 2) / (dataFontSize * 0.5)))
+  
   data.forEach((row) => {
-    // Check if new page is needed
-    if (yPosition > pdf.internal.pageSize.height - 20) {
-      pdf.addPage()
-      yPosition = margin + 10
+    if (yPosition > pageHeight - 18) {
+      pdf.addPage(format, orientation === 'landscape' ? 'l' : 'p')
+      yPosition = margin + 8
     }
 
     row.forEach((cell, colIndex) => {
-      const xPosition = margin + colIndex * colWidth
-      const cellText = cell !== null && cell !== undefined ? String(cell) : ''
-      pdf.text(cellText.substring(0, 30), xPosition, yPosition) // Limit text length
+      const xPosition = margin + colIndex * colWidth + 1
+      const raw = cell !== null && cell !== undefined ? String(cell) : ''
+      const cellText = sanitizeForPdf(raw)
+      const truncated = cellText.length > maxCharsPerCol ? cellText.substring(0, maxCharsPerCol - 1) + '...' : cellText
+      pdf.text(truncated, xPosition, yPosition)
     })
 
-    yPosition += 7
+    yPosition += rowHeight
   })
 
-  // Powered-by footer on last page
-  const pageHeight = pdf.internal.pageSize.height
-  pdf.setFontSize(9)
+  // Footer on last page
+  pdf.setFontSize(8)
   pdf.setFont('helvetica', 'normal')
   pdf.setTextColor(100, 100, 100)
   pdf.text(POWERED_BY_TEXT, pageWidth / 2, pageHeight - 10, { align: 'center' })
-  pdf.text(POWERED_BY_CONTACT, pageWidth / 2, pageHeight - 5, { align: 'center' })
+  pdf.text(POWERED_BY_CONTACT, pageWidth / 2, pageHeight - 6, { align: 'center' })
   pdf.setTextColor(0, 0, 0)
 
-  // Save PDF
   pdf.save(`${filename}.pdf`)
 }
 
@@ -897,11 +921,12 @@ export function buildReceiptHTML(
           const itemDiscountAmt = item.mrp != null && item.mrp > item.unit_price
             ? (item.mrp - item.unit_price) * item.quantity
             : (item.discount ?? 0)
-          const itemDiscountPct = item.discount_percentage != null
+          const derivedPct = item.mrp != null && item.mrp > 0 && item.unit_price < item.mrp
+            ? ((item.mrp - item.unit_price) / item.mrp) * 100
+            : 0
+          const itemDiscountPct = (item.discount_percentage != null && item.discount_percentage > 0)
             ? item.discount_percentage
-            : (item.mrp != null && item.mrp > 0 && item.unit_price < item.mrp
-              ? ((item.mrp - item.unit_price) / item.mrp) * 100
-              : 0)
+            : derivedPct
           const hasDiscount = itemDiscountAmt > 0
           return `
           <tr>

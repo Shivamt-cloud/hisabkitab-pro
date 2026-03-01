@@ -27,19 +27,19 @@ export const cloudTechnicianService = {
         return list
       }
 
-      if (data) {
-        for (const row of data) {
-          const t: Technician = {
-            id: Number(row.id),
-            company_id: row.company_id != null ? Number(row.company_id) : undefined,
-            name: row.name,
-            phone: row.phone ?? undefined,
-            notes: row.notes ?? undefined,
-          }
-          await put(STORES.TECHNICIANS, t)
-        }
+      // Supabase-first: sync to IndexedDB in background (don't block UI)
+      if (data && data.length > 0) {
+        const rows = (data || []).map((row: any) => ({
+          id: Number(row.id),
+          company_id: row.company_id != null ? Number(row.company_id) : undefined,
+          name: row.name,
+          phone: row.phone ?? undefined,
+          notes: row.notes ?? undefined,
+        })) as Technician[]
+        void Promise.all(rows.map((t) => put(STORES.TECHNICIANS, t))).catch((e) =>
+          console.warn('[cloudTechnicianService] Background sync failed:', e)
+        )
       }
-
       const out = (data || []).map((row: any) => ({
         id: Number(row.id),
         company_id: row.company_id != null ? Number(row.company_id) : undefined,
@@ -81,7 +81,9 @@ export const cloudTechnicianService = {
         phone: data.phone ?? undefined,
         notes: data.notes ?? undefined,
       }
-      await put(STORES.TECHNICIANS, t)
+      void put(STORES.TECHNICIANS, t).catch((e) =>
+        console.warn('[cloudTechnicianService] Background sync failed:', e)
+      )
       return t
     } catch {
       return await getById<Technician>(STORES.TECHNICIANS, id)

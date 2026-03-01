@@ -41,13 +41,12 @@ export const cloudCompanyService = {
         return companies
       }
 
-      // Sync to local storage for offline access
-      if (data) {
-        for (const company of data) {
-          await put(STORES.COMPANIES, company as Company)
-        }
+      // Supabase-first: sync to IndexedDB in background (don't block UI)
+      if (data && data.length > 0) {
+        void Promise.all((data as Company[]).map((c) => put(STORES.COMPANIES, c))).catch((e) =>
+          console.warn('[cloudCompanyService] Background sync failed:', e)
+        )
       }
-
       return (data as Company[]) || []
     } catch (error) {
       console.error('Error in cloudCompanyService.getAll:', error)
@@ -82,11 +81,12 @@ export const cloudCompanyService = {
         return await getById<Company>(STORES.COMPANIES, id)
       }
 
-      // Sync to local storage
+      // Supabase-first: sync to IndexedDB in background (don't block UI)
       if (data) {
-        await put(STORES.COMPANIES, data as Company)
+        void put(STORES.COMPANIES, data as Company).catch((e) =>
+          console.warn('[cloudCompanyService] Background sync failed:', e)
+        )
       }
-
       return data as Company | undefined
     } catch (error) {
       console.error('Error in cloudCompanyService.getById:', error)
@@ -119,11 +119,12 @@ export const cloudCompanyService = {
         return companies.find(c => c.unique_code?.toUpperCase() === code.toUpperCase())
       }
 
-      // Sync to local storage
+      // Supabase-first: sync to IndexedDB in background (don't block UI)
       if (data) {
-        await put(STORES.COMPANIES, data as Company)
+        void put(STORES.COMPANIES, data as Company).catch((e) =>
+          console.warn('[cloudCompanyService] Background sync failed:', e)
+        )
       }
-
       return data as Company | undefined
     } catch (error) {
       console.error('Error in cloudCompanyService.getByCode:', error)

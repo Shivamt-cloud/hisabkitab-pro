@@ -10,7 +10,44 @@ import { getAll, put, getById, deleteById, STORES } from '../database/db'
  */
 export const cloudExpenseService = {
   /**
-   * Get all expenses from cloud
+   * Fast fetch: Supabase only, no IndexedDB sync. Use for Daily Report, Expenses page.
+   * Falls back to IndexedDB when offline.
+   */
+  getAllFast: async (companyId?: number | null): Promise<Expense[]> => {
+    if (!isSupabaseAvailable() || !isOnline()) {
+      let expenses = await getAll<Expense>(STORES.EXPENSES)
+      if (companyId !== undefined && companyId !== null) {
+        expenses = expenses.filter(e => e.company_id === companyId)
+      } else if (companyId === null) return []
+      return expenses.sort((a, b) =>
+        new Date(b.expense_date).getTime() - new Date(a.expense_date).getTime()
+      )
+    }
+    try {
+      let query = supabase!.from('expenses').select('*')
+      if (companyId !== undefined && companyId !== null) query = query.eq('company_id', companyId)
+      const { data, error } = await query.order('expense_date', { ascending: false })
+      if (error) {
+        let expenses = await getAll<Expense>(STORES.EXPENSES)
+        if (companyId !== undefined && companyId !== null) expenses = expenses.filter(e => e.company_id === companyId)
+        else if (companyId === null) return []
+        return expenses.sort((a, b) =>
+          new Date(b.expense_date).getTime() - new Date(a.expense_date).getTime()
+        )
+      }
+      return (data as Expense[]) || []
+    } catch (_) {
+      let expenses = await getAll<Expense>(STORES.EXPENSES)
+      if (companyId !== undefined && companyId !== null) expenses = expenses.filter(e => e.company_id === companyId)
+      else if (companyId === null) return []
+      return expenses.sort((a, b) =>
+        new Date(b.expense_date).getTime() - new Date(a.expense_date).getTime()
+      )
+    }
+  },
+
+  /**
+   * Get all expenses from cloud (with IndexedDB sync for offline)
    */
   getAll: async (companyId?: number | null): Promise<Expense[]> => {
     // If Supabase not available or offline, use local storage
@@ -49,13 +86,12 @@ export const cloudExpenseService = {
         )
       }
 
-      // Sync to local storage for offline access
-      if (data) {
-        for (const expense of data) {
-          await put(STORES.EXPENSES, expense as Expense)
-        }
+      // Sync to local storage in background (don't block UI – IndexedDB sequential writes are slow)
+      if (data && data.length > 0) {
+        void Promise.all((data as Expense[]).map((e) => put(STORES.EXPENSES, e))).catch((e) =>
+          console.warn('[cloudExpenseService] Background sync failed:', e)
+        )
       }
-
       return (data as Expense[]) || []
     } catch (error) {
       console.error('Error in cloudExpenseService.getAll:', error)

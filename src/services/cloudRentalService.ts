@@ -86,7 +86,9 @@ export const cloudRentalService = {
         const local = await getById<Rental>(STORES.RENTALS, id)
         return local ?? null
       }
-      await put(STORES.RENTALS, data as Rental)
+      void put(STORES.RENTALS, data as Rental).catch((e) =>
+        console.warn('[cloudRentalService] Background sync failed:', e)
+      )
       return data as Rental
     } catch (e) {
       console.error('Error in cloudRentalService.getById:', e)

@@ -2556,9 +2556,18 @@ const SaleForm = () => {
 
               {/* Sale Items Cart */}
               <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6 border border-white/50">
-                <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+                <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2 flex-wrap">
                   <ShoppingCart className="w-6 h-6" />
-                  Cart ({saleItems.length} items)
+                  Cart
+                  {saleItems.length > 0 && (
+                    <span className="text-base font-semibold text-gray-600">
+                      ({saleItems.length} product{saleItems.length !== 1 ? 's' : ''}
+                      {(() => {
+                        const totalQty = saleItems.reduce((s, i) => s + (typeof i.quantity === 'number' ? i.quantity : 0), 0)
+                        return totalQty !== saleItems.length ? ` · ${totalQty} unit${totalQty !== 1 ? 's' : ''}` : ''
+                      })()})
+                    </span>
+                  )}
                 </h2>
                 {errors.items && <p className="text-red-600 text-sm mb-4">{errors.items}</p>}
                 

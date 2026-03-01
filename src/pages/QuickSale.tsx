@@ -35,6 +35,8 @@ const QuickSale = () => {
   const [lastSaleId, setLastSaleId] = useState<number | null>(null)
   const [showManualEntryModal, setShowManualEntryModal] = useState(false)
   const [manualEntryForm, setManualEntryForm] = useState({ barcode: '', productName: '', mrp: '', salePrice: '' })
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [paymentMethods, setPaymentMethods] = useState<Array<{ method: 'cash' | 'card' | 'upi' | 'other'; amount: number }>>([{ method: 'cash', amount: 0 }])
 
   // Load products and purchases, build barcode map
   useEffect(() => {
@@ -278,11 +280,27 @@ const QuickSale = () => {
 
   const grandTotal = saleItems.reduce((sum, i) => sum + i.total, 0)
 
-  const handlePay = async () => {
+  const openPaymentModal = () => {
     if (saleItems.length === 0) {
       toast.error('Add at least one item')
       return
     }
+    setPaymentMethods([{ method: 'cash', amount: grandTotal }])
+    setShowPaymentModal(true)
+  }
+
+  const handleConfirmPayment = async () => {
+    const finalMethods = paymentMethods.filter(p => (p.amount || 0) > 0)
+    if (finalMethods.length === 0) {
+      toast.error('Add at least one payment method')
+      return
+    }
+    const paymentTotal = finalMethods.reduce((sum, p) => sum + (p.amount || 0), 0)
+    if (Math.abs(paymentTotal - grandTotal) > 0.02) {
+      toast.error(`Payment total (₹${paymentTotal.toFixed(2)}) must equal ₹${grandTotal.toFixed(2)}`)
+      return
+    }
+    setShowPaymentModal(false)
     setSaving(true)
     try {
       const hasManualProducts = saleItems.some(item => !item.product_id || item.product_id === 0)
@@ -291,6 +309,7 @@ const QuickSale = () => {
         const manualStamp = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
         internalRemarks = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📋 MANUAL SALE – SYSTEM RECORD (IMMUTABLE)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nThis transaction includes product(s) entered manually by the user (not from the product list).\nCompleted: ${manualStamp}\nNote: This marker is permanent and cannot be modified or removed.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
       }
+      const pmList = finalMethods.map(p => ({ method: p.method, amount: p.amount }))
       const sale = {
         customer_id: undefined,
         customer_name: 'Walk-in Customer',
@@ -319,8 +338,8 @@ const QuickSale = () => {
         tax_amount: 0,
         grand_total: grandTotal,
         payment_status: 'paid' as const,
-        payment_method: 'cash',
-        payment_methods: [{ method: 'cash' as const, amount: grandTotal }],
+        payment_method: pmList[0].method,
+        payment_methods: pmList,
         sale_date: new Date().toISOString(),
         company_id: getCurrentCompanyId() || undefined,
         created_by: parseInt(user?.id || '1'),
@@ -483,7 +502,7 @@ const QuickSale = () => {
           </div>
         ) : (
           <button
-            onClick={handlePay}
+            onClick={openPaymentModal}
             disabled={saleItems.length === 0 || saving}
             className="w-full flex items-center justify-center gap-2 py-4 bg-emerald-600 text-white rounded-xl font-semibold text-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -603,6 +622,85 @@ const QuickSale = () => {
                 className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium"
               >
                 Add to Cart
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment method modal */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Payment</h3>
+            <p className="text-sm text-gray-600 mb-4">Total: ₹{grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+            <div className="space-y-3 max-h-[50vh] overflow-y-auto">
+              {paymentMethods.map((pm, idx) => (
+                <div key={idx} className="flex gap-2 items-center">
+                  <select
+                    value={pm.method}
+                    onChange={e => {
+                      const updated = [...paymentMethods]
+                      updated[idx].method = e.target.value as 'cash' | 'card' | 'upi' | 'other'
+                      setPaymentMethods(updated)
+                    }}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="upi">UPI</option>
+                    <option value="card">Card</option>
+                    <option value="other">Other</option>
+                  </select>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pm.amount || ''}
+                    onChange={e => {
+                      const updated = [...paymentMethods]
+                      updated[idx].amount = parseFloat(e.target.value) || 0
+                      setPaymentMethods(updated)
+                    }}
+                    placeholder="Amount"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  />
+                  {paymentMethods.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethods(prev => prev.filter((_, i) => i !== idx))}
+                      className="px-2 py-1 text-red-600 hover:bg-red-50 rounded"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  const total = paymentMethods.reduce((s, p) => s + (p.amount || 0), 0)
+                  const remaining = Math.max(0, grandTotal - total)
+                  setPaymentMethods([...paymentMethods, { method: 'cash', amount: remaining }])
+                }}
+                className="w-full py-2 border-2 border-dashed border-gray-300 text-gray-600 rounded-lg hover:border-emerald-500 hover:text-emerald-600 text-sm font-medium"
+              >
+                + Add payment method
+              </button>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => setShowPaymentModal(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmPayment}
+                className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium"
+              >
+                Confirm Payment
               </button>
             </div>
           </div>

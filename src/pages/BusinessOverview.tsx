@@ -161,9 +161,9 @@ const BusinessOverview = () => {
 
       const [allUsers, allSales, allPurchases, allExpenses] = await Promise.all([
         userService.getAll(),
-        saleService.getAll(true, companyId),
-        purchaseService.getAll(undefined, companyId),
-        expenseService.getAll(companyId),
+        saleService.getAllFast(true, companyId),
+        purchaseService.getAllFast(undefined, companyId),
+        expenseService.getAllFast(companyId),
       ])
 
       const filterByDate = (dateStr: string, from?: string, to?: string) => {

@@ -23,7 +23,7 @@ const Expenses = () => {
     setLoading(true)
     try {
       const companyId = getCurrentCompanyId()
-      const allExpenses = await expenseService.getAll(companyId)
+      const allExpenses = await expenseService.getAllFast(companyId)
       setExpenses(allExpenses)
     } catch (error) {
       console.error('Error loading expenses:', error)

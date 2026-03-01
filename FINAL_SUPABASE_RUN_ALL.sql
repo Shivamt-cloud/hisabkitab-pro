@@ -820,5 +820,44 @@ $$ LANGUAGE plpgsql STABLE;
 
 
 -- =====================================================
+-- PART 9: PERFORMANCE INDEXES (composite company + date)
+-- =====================================================
+-- Speeds up: All Reports, Daily Report, Daily Expenses, Dashboard, Business Overview, etc.
+-- Query pattern: WHERE company_id = X ORDER BY date_column DESC
+
+CREATE INDEX IF NOT EXISTS idx_purchases_company_date_desc
+  ON purchases(company_id, purchase_date DESC NULLS LAST)
+  WHERE company_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_sales_company_date_desc
+  ON sales(company_id, sale_date DESC NULLS LAST)
+  WHERE company_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_expenses_company_date_desc
+  ON expenses(company_id, expense_date DESC NULLS LAST)
+  WHERE company_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_services_company_date_desc
+  ON services(company_id, service_date DESC NULLS LAST)
+  WHERE company_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_rentals_company_booking_desc
+  ON rentals(company_id, booking_date DESC NULLS LAST)
+  WHERE company_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_salary_payments_company_date_desc
+  ON salary_payments(company_id, payment_date DESC NULLS LAST)
+  WHERE company_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_purchase_reorders_company_order_desc
+  ON purchase_reorders(company_id, order_date DESC NULLS LAST)
+  WHERE company_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_products_company_created_desc
+  ON products(company_id, created_at DESC NULLS LAST)
+  WHERE company_id IS NOT NULL;
+
+
+-- =====================================================
 -- END – HISABKITAB PRO FINAL SUPABASE SCRIPT
 -- =====================================================

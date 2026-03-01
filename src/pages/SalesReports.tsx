@@ -33,6 +33,46 @@ import { LockIcon } from '../components/icons/LockIcon'
 
 type ReportView = SalesReportView
 
+/** Parse payment methods from edit audit in internal_remarks (e.g. "Payment: cash ₹220 → card ₹100, cash ₹100, upi ₹20") */
+function parsePaymentMethodsFromRemarks(internalRemarks: string | undefined): Array<{ method: string; amount: number }> | null {
+  if (!internalRemarks || typeof internalRemarks !== 'string') return null
+  const regex = /Payment:\s*[^→]+→\s*([^\n━]+)/g
+  const matches = [...internalRemarks.matchAll(regex)]
+  const lastMatch = matches[matches.length - 1]
+  if (!lastMatch) return null
+  const rightSide = lastMatch[1].trim()
+  const pairRegex = /(\w+)\s*₹\s*([\d.]+)/g
+  const pairs: Array<{ method: string; amount: number }> = []
+  let m: RegExpExecArray | null
+  while ((m = pairRegex.exec(rightSide)) !== null) {
+    pairs.push({ method: m[1].toLowerCase(), amount: parseFloat(m[2]) || 0 })
+  }
+  return pairs.length > 0 ? pairs : null
+}
+
+/** Get effective payment methods: from payment_methods, or parsed from internal_remarks, or null */
+function getPaymentMethodsForDisplay(sale: Sale): Array<{ method: string; amount: number }> | null {
+  if (sale.payment_methods && sale.payment_methods.length > 0) {
+    return sale.payment_methods
+  }
+  return parsePaymentMethodsFromRemarks(sale.internal_remarks)
+}
+
+/** Format payment method for display: show method + amount (e.g. Cash: ₹220, or UPI: ₹100, Cash: ₹120) */
+function formatPaymentMethod(sale: Sale): string {
+  const methods = getPaymentMethodsForDisplay(sale)
+  if (methods && methods.length > 0) {
+    return methods
+      .map(p => `${p.method.charAt(0).toUpperCase() + p.method.slice(1)}: ₹${(p.amount || 0).toFixed(2)}`)
+      .join(', ')
+  }
+  const method = sale.payment_method || '—'
+  if (method !== '—' && sale.grand_total != null) {
+    return `${method.charAt(0).toUpperCase() + method.slice(1)}: ₹${sale.grand_total.toFixed(2)}`
+  }
+  return method
+}
+
 /** Format time for display: use created_at (actual record time) when available, else date-only as 12:00 AM */
 function formatRecordTime(dateStr: string, createdAt?: string | null): string {
   if (createdAt) {
@@ -106,9 +146,9 @@ const SalesReports = () => {
     const load = async () => {
       try {
         const [prods, cats, custs, persons] = await Promise.all([
-          productService.getAll(true, companyId),
+          productService.getAllFast(true, companyId),
           categoryService.getAll(),
-          customerService.getAll(true, companyId),
+          customerService.getAllFast(true, companyId),
           salesPersonService.getAll(true),
         ])
         setProducts(prods)
@@ -132,7 +172,7 @@ const SalesReports = () => {
       const { startDate, endDate } = reportService.getDateRange(timePeriod, customStartDate, customEndDate)
       const companyId = getCurrentCompanyId()
       try {
-        const allSales = await saleService.getAll(true, companyId)
+        const allSales = await saleService.getAllFast(true, companyId)
         // Filter by date range
         let filteredSales = allSales
         if (startDate || endDate) {
@@ -180,7 +220,7 @@ const SalesReports = () => {
           setSalesPersonReports(salesPersonReports)
           break
         case 'sales':
-          const allSales = await saleService.getAll(true, companyId)
+          const allSales = await saleService.getAllFast(true, companyId)
           // Filter by date range
           let filteredSales = allSales
           if (startDate || endDate) {
@@ -388,21 +428,40 @@ const SalesReports = () => {
         })
         sheetName = 'Sales by Sales Person'
         break
-      case 'sales':
-        headers.push('Date', 'Invoice', 'Customer', 'Items', 'Amount', 'Payment Status', 'Payment Method')
+      case 'sales': {
+        headers.push('Time', 'Date', 'Invoice', 'Type', 'Customer', 'Sales Person', 'Items', 'Subtotal', 'Discount', 'Tax', 'Amount', 'Return', 'Payment', 'Remark', 'Notes')
         filteredSales.forEach(s => {
+          const hasReturn = s.items?.some((i: { sale_type?: string }) => i.sale_type === 'return')
+          const hasSale = s.items?.some((i: { sale_type?: string }) => i.sale_type === 'sale')
+          const typeStr = hasReturn && hasSale ? 'Mixed' : hasReturn ? 'Return' : 'Sale'
+          const status = s.payment_status === 'paid' ? 'Paid' : 'Pending'
+          const methods = getPaymentMethodsForDisplay(s)
+          const methodStr = methods && methods.length > 0
+            ? methods.map(p => `₹${(p.amount || 0).toFixed(0)} ${p.method.charAt(0).toUpperCase() + p.method.slice(1)}`).join(', ')
+            : s.payment_method && s.grand_total != null
+              ? `₹${s.grand_total.toFixed(0)} ${s.payment_method.charAt(0).toUpperCase() + s.payment_method.slice(1)}`
+              : ''
           rows.push([
+            formatRecordTime(s.sale_date, s.created_at),
             new Date(s.sale_date).toLocaleDateString('en-IN'),
             s.invoice_number,
+            typeStr,
             s.customer_name || 'Walk-in Customer',
+            s.sales_person_name || '—',
             s.items.length,
+            parseFloat((s.subtotal ?? 0).toFixed(2)),
+            (s.discount ?? 0) > 0 ? parseFloat((s.discount ?? 0).toFixed(2)) : '—',
+            parseFloat((s.tax_amount ?? 0).toFixed(2)),
             parseFloat(s.grand_total.toFixed(2)),
-            s.payment_status,
-            s.payment_method || '',
+            (s.return_amount ?? 0) > 0 ? parseFloat((s.return_amount ?? 0).toFixed(2)) : '—',
+            methodStr ? `${status} · ${methodStr}` : status,
+            (s.internal_remarks || '').replace(/\n/g, ' ').slice(0, 200) || '—',
+            (s.notes || '').slice(0, 100) || '—',
           ])
         })
         sheetName = 'All Sales'
         break
+      }
     }
 
     const filename = `sales_report_${activeView}_${timePeriod}_${new Date().toISOString().split('T')[0]}`
@@ -417,78 +476,110 @@ const SalesReports = () => {
 
     switch (activeView) {
       case 'product':
-        headers.push('Product', 'Quantity', 'Revenue', 'Profit', 'Margin %')
+        headers.push('Product', 'Quantity', 'Revenue', 'Cost', 'Profit', 'Margin %', 'Avg Price', 'Sales Count')
         filteredProductReports.forEach(r => {
           rows.push([
             r.product_name,
             r.total_quantity,
             `₹${r.total_revenue.toFixed(2)}`,
+            `₹${r.total_cost.toFixed(2)}`,
             `₹${r.total_profit.toFixed(2)}`,
             `${r.profit_margin.toFixed(2)}%`,
+            `₹${r.average_price.toFixed(2)}`,
+            r.sale_count,
           ])
         })
         title = 'Sales Report - By Product'
         break
       case 'category':
-        headers.push('Category', 'Quantity', 'Revenue', 'Profit', 'Margin %')
+        headers.push('Category', 'Quantity', 'Revenue', 'Cost', 'Profit', 'Margin %', 'Products', 'Sales Count')
         filteredCategoryReports.forEach(r => {
           rows.push([
             r.category_name,
             r.total_quantity,
             `₹${r.total_revenue.toFixed(2)}`,
+            `₹${r.total_cost.toFixed(2)}`,
             `₹${r.total_profit.toFixed(2)}`,
             `${r.profit_margin.toFixed(2)}%`,
+            r.product_count,
+            r.sale_count,
           ])
         })
         title = 'Sales Report - By Category'
         break
       case 'customer':
-        headers.push('Customer', 'Quantity', 'Revenue', 'Profit', 'Orders')
+        headers.push('Customer', 'Quantity', 'Revenue', 'Cost', 'Profit', 'Margin %', 'Orders', 'Avg Order Value')
         filteredCustomerReports.forEach(r => {
           rows.push([
             r.customer_name,
             r.total_quantity,
             `₹${r.total_revenue.toFixed(2)}`,
+            `₹${r.total_cost.toFixed(2)}`,
             `₹${r.total_profit.toFixed(2)}`,
+            `${r.profit_margin.toFixed(2)}%`,
             r.sale_count,
+            `₹${r.average_order_value.toFixed(2)}`,
           ])
         })
         title = 'Sales Report - By Customer'
         break
       case 'salesperson':
-        headers.push('Sales Person', 'Quantity', 'Revenue', 'Profit', 'Commission')
+        headers.push('Sales Person', 'Quantity', 'Revenue', 'Cost', 'Profit', 'Margin %', 'Commission', 'Sales Count')
         filteredSalesPersonReports.forEach(r => {
           rows.push([
             r.sales_person_name,
             r.total_quantity,
             `₹${r.total_revenue.toFixed(2)}`,
+            `₹${r.total_cost.toFixed(2)}`,
             `₹${r.total_profit.toFixed(2)}`,
+            `${r.profit_margin.toFixed(2)}%`,
             `₹${r.commission_amount.toFixed(2)}`,
+            r.sale_count,
           ])
         })
         title = 'Sales Report - By Sales Person'
         break
-      case 'sales':
-        headers.push('Date', 'Invoice', 'Customer', 'Items', 'Amount', 'Payment Status')
+      case 'sales': {
+        headers.push('Time', 'Date', 'Invoice', 'Type', 'Customer', 'Sales Person', 'Items', 'Subtotal', 'Discount', 'Tax', 'Amount', 'Return', 'Payment', 'Remark', 'Notes')
         filteredSales.forEach(s => {
+          const hasReturn = s.items?.some((i: { sale_type?: string }) => i.sale_type === 'return')
+          const hasSale = s.items?.some((i: { sale_type?: string }) => i.sale_type === 'sale')
+          const typeStr = hasReturn && hasSale ? 'Mixed' : hasReturn ? 'Return' : 'Sale'
+          const status = s.payment_status === 'paid' ? 'Paid' : 'Pending'
+          const methods = getPaymentMethodsForDisplay(s)
+          const methodStr = methods && methods.length > 0
+            ? methods.map(p => `₹${(p.amount || 0).toFixed(0)} ${p.method.charAt(0).toUpperCase() + p.method.slice(1)}`).join(', ')
+            : s.payment_method && s.grand_total != null
+              ? `₹${s.grand_total.toFixed(0)} ${s.payment_method.charAt(0).toUpperCase() + s.payment_method.slice(1)}`
+              : ''
           rows.push([
+            formatRecordTime(s.sale_date, s.created_at),
             new Date(s.sale_date).toLocaleDateString('en-IN'),
             s.invoice_number,
+            typeStr,
             s.customer_name || 'Walk-in Customer',
+            s.sales_person_name || '—',
             s.items.length,
+            `₹${(s.subtotal ?? 0).toFixed(2)}`,
+            (s.discount ?? 0) > 0 ? `₹${(s.discount ?? 0).toFixed(2)}` : '—',
+            `₹${(s.tax_amount ?? 0).toFixed(2)}`,
             `₹${s.grand_total.toFixed(2)}`,
-            s.payment_status,
+            (s.return_amount ?? 0) > 0 ? `₹${(s.return_amount ?? 0).toFixed(2)}` : '—',
+            methodStr ? `${status} · ${methodStr}` : status,
+            (s.internal_remarks || '').replace(/\n/g, ' ').slice(0, 80) || '—',
+            (s.notes || '').slice(0, 50) || '—',
           ])
         })
         title = 'Sales Report - All Sales'
         break
+      }
     }
 
     const period = timePeriod === 'all' ? 'All Time' : timePeriod
     const fullTitle = `${title} (${period})`
     const filename = `sales_report_${activeView}_${timePeriod}_${new Date().toISOString().split('T')[0]}`
-    
-    exportDataToPDF(rows, headers, filename, fullTitle)
+    const pdfOptions = activeView === 'sales' ? { orientation: 'landscape' as const } : undefined
+    exportDataToPDF(rows, headers, filename, fullTitle, pdfOptions)
     toast.success('Report exported to PDF')
   }
 
@@ -652,13 +743,65 @@ const SalesReports = () => {
     return Object.entries(groups).sort(([a], [b]) => b.localeCompare(a))
   }, [filteredSales])
 
+  /** Aggregate payment methods for a list of sales: { method, count, total }[] */
+  const getPaymentSummaryForSales = (sales: Sale[]): { method: string; count: number; total: number }[] => {
+    const byMethod: Record<string, { count: number; total: number }> = {}
+    sales.forEach(sale => {
+      const methods = getPaymentMethodsForDisplay(sale)
+      if (methods && methods.length > 0) {
+        methods.forEach(p => {
+          const key = (p.method || '').toLowerCase()
+          if (!key) return
+          if (!byMethod[key]) byMethod[key] = { count: 0, total: 0 }
+          byMethod[key].count += 1
+          byMethod[key].total += p.amount || 0
+        })
+      } else if (sale.payment_method && sale.grand_total != null) {
+        const key = (sale.payment_method || '').toLowerCase()
+        if (!byMethod[key]) byMethod[key] = { count: 0, total: 0 }
+        byMethod[key].count += 1
+        byMethod[key].total += sale.grand_total
+      }
+    })
+    const order = ['upi', 'cash', 'card', 'credit', 'other']
+    return Object.entries(byMethod)
+      .map(([method, { count, total }]) => ({ method, count, total }))
+      .sort((a, b) => {
+        const ai = order.indexOf(a.method)
+        const bi = order.indexOf(b.method)
+        if (ai !== -1 && bi !== -1) return ai - bi
+        if (ai !== -1) return -1
+        if (bi !== -1) return 1
+        return a.method.localeCompare(b.method)
+      })
+  }
+
   const renderSalesList = () => (
     <div className="overflow-x-auto overflow-y-auto max-h-[60vh] border border-gray-200 rounded-lg" style={{ scrollbarGutter: 'stable' }}>
-      {salesGroupedByDate.map(([dateStr, dateSales]) => (
+      {salesGroupedByDate.map(([dateStr, dateSales]) => {
+        const paymentSummary = getPaymentSummaryForSales(dateSales)
+        return (
         <div key={dateStr} className="mb-6">
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-3 rounded-t-lg sticky top-0 z-10">
-            <span className="font-bold">{new Date(dateStr).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
-            <span className="ml-2 text-blue-100">({dateSales.length} sale{dateSales.length !== 1 ? 's' : ''})</span>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <span className="font-bold">{new Date(dateStr).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+              <span className="text-blue-100">({dateSales.length} sale{dateSales.length !== 1 ? 's' : ''})</span>
+              {paymentSummary.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 ml-2 pt-0.5">
+                  {paymentSummary.map(({ method, count, total }) => (
+                    <span
+                      key={method}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-white/20 backdrop-blur-sm border border-white/30"
+                      title={`${count} payment(s) · ₹${total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+                    >
+                      <span className="capitalize">{method}</span>
+                      <span className="opacity-90">{count}</span>
+                      <span className="font-bold">₹{total.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <table className="w-full min-w-[800px] text-sm">
             <thead className="bg-gray-100 border-b border-gray-200">
@@ -674,8 +817,7 @@ const SalesReports = () => {
                 {isColumnVisible('sales', 'tax_amount') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Tax</th>}
                 {isColumnVisible('sales', 'grand_total') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Amount</th>}
                 {isColumnVisible('sales', 'return_amount') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Return</th>}
-                {isColumnVisible('sales', 'payment_status') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Payment</th>}
-                {isColumnVisible('sales', 'payment_method') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Method</th>}
+                {isColumnVisible('sales', 'payment') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Payment</th>}
                 {isColumnVisible('sales', 'internal_remarks') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Remark</th>}
                 {isColumnVisible('sales', 'notes') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Notes</th>}
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase w-16">Actions</th>
@@ -705,10 +847,27 @@ const SalesReports = () => {
                   {isColumnVisible('sales', 'tax_amount') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">₹{sale.tax_amount.toFixed(2)}</td>}
                   {isColumnVisible('sales', 'grand_total') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-bold text-gray-900">₹{sale.grand_total.toFixed(2)}</td>}
                   {isColumnVisible('sales', 'return_amount') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-red-600">{(sale.return_amount ?? 0) > 0 ? `₹${(sale.return_amount ?? 0).toFixed(2)}` : '—'}</td>}
-                  {isColumnVisible('sales', 'payment_status') && <td className="px-4 py-3 whitespace-nowrap">
-                    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sale.payment_status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{sale.payment_status.charAt(0).toUpperCase() + sale.payment_status.slice(1)}</span>
-                  </td>}
-                  {isColumnVisible('sales', 'payment_method') && <td className="px-4 py-3 text-sm text-gray-600">{sale.payment_method || (sale.payment_methods?.map(p => p.method).join(', ') ?? '—')}</td>}
+                  {isColumnVisible('sales', 'payment') && (
+                    <td className="px-4 py-3 min-w-[180px] align-top" title={formatPaymentMethod(sale)}>
+                      {(() => {
+                        const status = sale.payment_status === 'paid' ? 'Paid' : 'Pending'
+                        const methods = getPaymentMethodsForDisplay(sale)
+                        const methodStr = methods && methods.length > 0
+                          ? methods.map(p => `₹${(p.amount || 0).toFixed(0)} ${(p.method || '').charAt(0).toUpperCase() + (p.method || '').slice(1).toLowerCase()}`).join(', ')
+                          : sale.payment_method && sale.grand_total != null
+                            ? `₹${sale.grand_total.toFixed(0)} ${(sale.payment_method || '').charAt(0).toUpperCase() + (sale.payment_method || '').slice(1).toLowerCase()}`
+                            : null
+                        return (
+                          <div className="flex flex-col gap-1">
+                            <span className={`inline-flex w-fit px-2 py-0.5 rounded-full text-xs font-medium ${sale.payment_status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                              {status}
+                            </span>
+                            {methodStr && <span className="text-sm text-gray-800 font-medium">{methodStr}</span>}
+                          </div>
+                        )
+                      })()}
+                    </td>
+                  )}
                   {isColumnVisible('sales', 'internal_remarks') && <td className="px-4 py-3 text-xs text-gray-600 max-w-[150px] truncate" title={sale.internal_remarks}>{sale.internal_remarks || '—'}</td>}
                   {isColumnVisible('sales', 'notes') && <td className="px-4 py-3 text-xs text-gray-600 max-w-[150px] truncate" title={sale.notes}>{sale.notes || '—'}</td>}
                   <td className="px-4 py-3 text-right whitespace-nowrap">
@@ -726,7 +885,8 @@ const SalesReports = () => {
             </tbody>
           </table>
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 
