@@ -83,9 +83,9 @@ const SaleForm = () => {
 
   const HELD_CART_KEY = () => `hisabkitab_held_cart_${getCurrentCompanyId() ?? 'default'}`
 
-  // Debounce search to avoid expensive filter on every keystroke (300ms)
+  // Debounce search to avoid expensive filter / RPC on every keystroke (400ms)
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300)
+    const timer = setTimeout(() => setDebouncedSearchQuery(searchQuery), 400)
     return () => clearTimeout(timer)
   }, [searchQuery])
 
@@ -137,11 +137,13 @@ const SaleForm = () => {
       const companyId = getCurrentCompanyId()
       
       // Load products and purchases in parallel
-      // Online + Supabase: getAllFast (fast) – search uses Supabase RPC. Offline: getAll (full IndexedDB) – search uses local.
+      // Online: limit purchases to recent 400 for barcode/article maps (search uses RPC). Offline: full IndexedDB.
       const useFastLoad = isSupabaseAvailable() && isOnline()
       const [allProducts, allPurchases] = await Promise.all([
         productService.getAllFast(false, companyId),
-        useFastLoad ? purchaseService.getAllFast(undefined, companyId) : purchaseService.getAll(undefined, companyId),
+        useFastLoad
+          ? purchaseService.getAllFast(undefined, companyId, { limit: 400 })
+          : purchaseService.getAll(undefined, companyId),
       ])
       const products = allProducts.filter(p => p.status === 'active')
       

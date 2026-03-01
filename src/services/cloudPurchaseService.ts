@@ -29,20 +29,23 @@ export const cloudPurchaseService = {
   /**
    * Fast fetch: Supabase only, no IndexedDB merge/sync. Use for Dashboard initial load.
    * Falls back to IndexedDB when offline.
+   * @param options.limit - When online, limit rows (e.g. 400 for Sale form map build – keeps initial load fast).
    */
-  getAllFast: async (type?: PurchaseType, companyId?: number | null): Promise<Purchase[]> => {
+  getAllFast: async (type?: PurchaseType, companyId?: number | null, options?: { limit?: number }): Promise<Purchase[]> => {
     if (!isSupabaseAvailable() || !isOnline()) {
       let purchases = await getAll<Purchase>(STORES.PURCHASES)
       if (companyId !== undefined && companyId !== null) {
         purchases = purchases.filter(p => p.company_id === companyId || p.company_id == null)
       } else if (companyId === null) return []
       if (type) purchases = purchases.filter(p => p.type === type)
-      return purchases.map(p => ({ ...p, items: normalizePurchaseItems(p.items, p.id) }))
+      const limited = options?.limit ? purchases.slice(0, options.limit) : purchases
+      return limited.map(p => ({ ...p, items: normalizePurchaseItems(p.items, p.id) }))
     }
     try {
       let query = supabase!.from('purchases').select('*')
       if (companyId !== undefined && companyId !== null) query = query.eq('company_id', companyId)
       if (type) query = query.eq('type', type)
+      if (options?.limit != null && options.limit > 0) query = query.limit(options.limit)
       const { data, error } = await query.order('purchase_date', { ascending: false })
       if (error) {
         let purchases = await getAll<Purchase>(STORES.PURCHASES)
