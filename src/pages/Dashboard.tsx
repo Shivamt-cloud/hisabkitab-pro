@@ -17,6 +17,7 @@ import { paymentService } from '../services/paymentService'
 import { expenseService } from '../services/expenseService'
 import { serviceRecordService } from '../services/serviceRecordService'
 import { getTierPricing } from '../utils/tierPricing'
+import { aggregatePaymentMethodsFromSales } from '../utils/salePaymentHelpers'
 import type { SubscriptionTier } from '../types/device'
 import { CONTACT_EMAIL, CONTACT_WEBSITE_URL, CONTACT_WEBSITE_DISPLAY, CONTACT_WHATSAPP_NUMBER, CONTACT_WHATSAPP_URL } from '../constants'
 import type { Expense } from '../types/expense'
@@ -569,27 +570,17 @@ const Dashboard = () => {
     const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0)
     const netCash = totalSales - totalPurchases - totalExpenses
 
-    // Aggregate sales by payment method (Cash, UPI, Card, Other, Credit)
+    // Aggregate by payment method (paid sales only, return_amount deducted) – same logic as Sales Report
+    const paymentTotals = aggregatePaymentMethodsFromSales(filteredSales)
     const byPayment = { cash: 0, upi: 0, card: 0, other: 0, credit: 0 }
     const norm = (m: string) => m.toLowerCase().trim()
-    filteredSales.forEach(sale => {
-      if (sale.payment_methods && sale.payment_methods.length > 0) {
-        sale.payment_methods.forEach(pm => {
-          const method = norm(pm.method)
-          if (method === 'cash') byPayment.cash += pm.amount
-          else if (method === 'upi') byPayment.upi += pm.amount
-          else if (method.includes('card')) byPayment.card += pm.amount
-          else if (method === 'credit') byPayment.credit += pm.amount
-          else byPayment.other += pm.amount
-        })
-      } else {
-        const method = norm(sale.payment_method || 'cash')
-        if (method === 'cash') byPayment.cash += sale.grand_total
-        else if (method === 'upi') byPayment.upi += sale.grand_total
-        else if (method.includes('card')) byPayment.card += sale.grand_total
-        else if (method === 'credit') byPayment.credit += sale.grand_total
-        else byPayment.other += sale.grand_total
-      }
+    paymentTotals.forEach(({ method, amount }) => {
+      const key = norm(method)
+      if (key === 'cash') byPayment.cash += amount
+      else if (key === 'upi') byPayment.upi += amount
+      else if (key.includes('card')) byPayment.card += amount
+      else if (key === 'credit') byPayment.credit += amount
+      else byPayment.other += amount
     })
     setCashFlow({ byPayment, totalSales, totalExpenses, netCash })
 

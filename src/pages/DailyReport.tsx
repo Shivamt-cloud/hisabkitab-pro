@@ -23,6 +23,8 @@ import {
 import { useToast } from '../context/ToastContext'
 import { getSingleDateForPreset } from '../utils/datePresets'
 import { POWERED_BY_TEXT, POWERED_BY_CONTACT } from '../utils/exportUtils'
+import { aggregatePaymentMethodsFromSales, getPaymentMethodsForDisplay } from '../utils/salePaymentHelpers'
+import { cloudDailyReportDetailsService } from '../services/cloudDailyReportDetailsService'
 import { Sale } from '../types/sale'
 import { Purchase } from '../types/purchase'
 import { Expense } from '../types/expense'
@@ -31,6 +33,7 @@ import { SalesPerson } from '../types/salesperson'
 const CUSTOMER_DETAILS_STORAGE_KEY = 'daily_report_customer'
 
 export interface DailyCustomerDetails {
+  sale_target?: number | null
   customers_purchased: number
   customers_returned: number
   return_remark: string
@@ -39,6 +42,7 @@ export interface DailyCustomerDetails {
 }
 
 const defaultCustomerDetails: DailyCustomerDetails = {
+  sale_target: undefined,
   customers_purchased: 0,
   customers_returned: 0,
   return_remark: '',
@@ -85,7 +89,30 @@ const DailyReport = () => {
   }, [selectedDate, companyId])
 
   useEffect(() => {
-    setCustomerDetails(loadCustomerDetailsFromStorage(companyId ?? undefined, selectedDate))
+    let cancelled = false
+    const load = async () => {
+      const fallback = () => setCustomerDetails(loadCustomerDetailsFromStorage(companyId ?? undefined, selectedDate))
+      if (companyId == null) {
+        fallback()
+        return
+      }
+      const cloud = await cloudDailyReportDetailsService.getByDate(companyId, selectedDate)
+      if (cancelled) return
+      if (cloud) {
+        setCustomerDetails({
+          sale_target: cloud.sale_target ?? undefined,
+          customers_purchased: cloud.customers_purchased ?? 0,
+          customers_returned: cloud.customers_returned ?? 0,
+          return_remark: cloud.return_reason ?? '',
+          expectation: cloud.expectation ?? '',
+          remark: cloud.remark ?? '',
+        })
+        return
+      }
+      fallback()
+    }
+    load()
+    return () => { cancelled = true }
   }, [selectedDate, companyId])
 
   const saveCustomerDetails = (next: DailyCustomerDetails) => {
@@ -93,8 +120,22 @@ const DailyReport = () => {
     saveCustomerDetailsToStorage(companyId ?? undefined, selectedDate, next)
   }
 
-  const handleSaveCustomerDetails = () => {
+  const handleSaveCustomerDetails = async () => {
     saveCustomerDetailsToStorage(companyId ?? undefined, selectedDate, customerDetails)
+    if (companyId != null) {
+      const saved = await cloudDailyReportDetailsService.upsert(companyId, selectedDate, {
+        sale_target: customerDetails.sale_target ?? null,
+        customers_purchased: customerDetails.customers_purchased,
+        customers_returned: customerDetails.customers_returned,
+        return_reason: customerDetails.return_remark,
+        expectation: customerDetails.expectation,
+        remark: customerDetails.remark,
+      })
+      if (saved) {
+        toast.success('Customer details saved to cloud')
+        return
+      }
+    }
     toast.success('Customer details saved')
   }
 
@@ -251,30 +292,11 @@ const DailyReport = () => {
              allOpening: openingExpenses, allClosing: closingExpenses }
   }, [expenses])
 
-  // Calculate sales by payment method
-  const salesByPaymentMethod = useMemo(() => {
-    const methodMap = new Map<string, number>()
-    
-    sales.forEach(sale => {
-      // Handle new payment_methods array
-      if (sale.payment_methods && sale.payment_methods.length > 0) {
-        sale.payment_methods.forEach(pm => {
-          const existing = methodMap.get(pm.method) || 0
-          methodMap.set(pm.method, existing + pm.amount)
-        })
-      } else {
-        // Fallback to legacy payment_method
-        const method = sale.payment_method || 'cash'
-        const existing = methodMap.get(method) || 0
-        methodMap.set(method, existing + sale.grand_total)
-      }
-    })
-    
-    return Array.from(methodMap.entries()).map(([method, amount]) => ({
-      method: method.charAt(0).toUpperCase() + method.slice(1),
-      amount
-    })).sort((a, b) => b.amount - a.amount)
-  }, [sales])
+  // Sales by payment method = sum of Payment column amounts (same logic as Sales Report). Paid sales only.
+  const salesByPaymentMethod = useMemo(
+    () => aggregatePaymentMethodsFromSales(sales),
+    [sales]
+  )
 
   // Calculate comprehensive cash flow and accounting
   const cashFlow = useMemo(() => {
@@ -424,14 +446,16 @@ const DailyReport = () => {
       device.salesTotal += sale.grand_total
       
       // Track sales by payment method
-      if (sale.payment_methods && sale.payment_methods.length > 0) {
-        sale.payment_methods.forEach(pm => {
-          const existing = device.salesByPaymentMethod.get(pm.method) || 0
-          device.salesByPaymentMethod.set(pm.method, existing + pm.amount)
+      if (sale.payment_status !== 'paid') return
+      const methods = getPaymentMethodsForDisplay(sale)
+      if (methods && methods.length > 0) {
+        methods.forEach(pm => {
+          const key = (pm.method || '').toLowerCase().trim() || 'other'
+          device.salesByPaymentMethod.set(key, (device.salesByPaymentMethod.get(key) || 0) + (Number(pm.amount) || 0))
         })
-      } else if (sale.payment_method) {
-        const existing = device.salesByPaymentMethod.get(sale.payment_method) || 0
-        device.salesByPaymentMethod.set(sale.payment_method, existing + sale.grand_total)
+      } else if (sale.payment_method && sale.grand_total != null) {
+        const key = (sale.payment_method || 'cash').toLowerCase().trim() || 'cash'
+        device.salesByPaymentMethod.set(key, (device.salesByPaymentMethod.get(key) || 0) + sale.grand_total)
       }
     })
 
@@ -718,10 +742,16 @@ const DailyReport = () => {
           </div>
         </div>
 
-        ${(customerDetails.customers_purchased > 0 || customerDetails.customers_returned > 0 || customerDetails.return_remark.trim() || customerDetails.expectation.trim() || customerDetails.remark.trim()) ? `
+        ${(customerDetails.sale_target != null && customerDetails.sale_target > 0 || customerDetails.customers_purchased > 0 || customerDetails.customers_returned > 0 || customerDetails.return_remark.trim() || customerDetails.expectation.trim() || customerDetails.remark.trim()) ? `
         <div class="summary-section" style="margin-top: 24px;">
           <h2>Customer details</h2>
           <div class="summary-grid" style="grid-template-columns: repeat(2, 1fr);">
+            ${customerDetails.sale_target != null && customerDetails.sale_target > 0 ? `
+            <div class="summary-card">
+              <h3>Sale target (this day)</h3>
+              <p class="amount">${formatCurrency(customerDetails.sale_target)}</p>
+            </div>
+            ` : ''}
             <div class="summary-card">
               <h3>Customers purchased</h3>
               <p class="amount">${customerDetails.customers_purchased}</p>
@@ -766,11 +796,12 @@ const DailyReport = () => {
         ${salesByPaymentMethod.length > 0 ? `
         <div class="payment-section">
           <h2>Sales by Payment Method</h2>
+          <p style="font-size: 11px; color: #6b7280; margin-bottom: 8px;">Payment received per method (not invoice total).</p>
           <table>
             <thead>
               <tr>
                 <th>Payment Method</th>
-                <th class="text-right">Amount</th>
+                <th class="text-right">Payment Received</th>
               </tr>
             </thead>
             <tbody>
@@ -1202,6 +1233,11 @@ ${salesPersonText}
 
 📝 *Expenses by Sales Person*
 ${expensesPersonText}
+${(customerDetails.sale_target != null && customerDetails.sale_target > 0 || customerDetails.customers_purchased > 0 || customerDetails.customers_returned > 0 || customerDetails.return_remark.trim() || customerDetails.expectation.trim() || customerDetails.remark.trim()) ? `
+👤 *Customer details*
+${customerDetails.sale_target != null && customerDetails.sale_target > 0 ? `• Sale target (this day): ₹${customerDetails.sale_target.toLocaleString('en-IN', { maximumFractionDigits: 2 })}\n` : ''}• Customers purchased: ${customerDetails.customers_purchased}
+• Customers returned: ${customerDetails.customers_returned}${customerDetails.return_remark.trim() ? `\n• Return reason: ${customerDetails.return_remark}` : ''}${customerDetails.expectation.trim() ? `\n• Expectation: ${customerDetails.expectation}` : ''}${customerDetails.remark.trim() ? `\n• Remark: ${customerDetails.remark}` : ''}
+` : ''}
 
 📈 *Counts*
 • Sales: ${totals.salesCount}
@@ -1375,8 +1411,20 @@ ${POWERED_BY_CONTACT}`
               <User className="w-5 h-5 text-indigo-600" />
               Customer details
             </h2>
-            <p className="text-sm text-gray-600 mb-4">Track how many customers purchased, returned, and add expectations or remarks for the day.</p>
+            <p className="text-sm text-gray-600 mb-4">Track how many customers purchased, returned, and add expectations or remarks for the day. Stored in cloud for time-wise reporting.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Sale target (this day, ₹)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={customerDetails.sale_target != null && customerDetails.sale_target > 0 ? customerDetails.sale_target : ''}
+                  onChange={(e) => saveCustomerDetails({ ...customerDetails, sale_target: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })}
+                  placeholder="Optional"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Customers purchased</label>
                 <input
@@ -1547,12 +1595,13 @@ ${POWERED_BY_CONTACT}`
                 </div>
               )}
 
-              {/* Sales Collections */}
+              {/* Sales Collections (payment received by method, not invoice/sale amount) */}
               <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-5 border-2 border-blue-200">
-                <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
+                <h3 className="text-lg font-bold text-gray-900 mb-1 flex items-center gap-2">
                   <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
                   Today's Sales Collections
                 </h3>
+                <p className="text-xs text-gray-600 mb-3">Payment received by method (paid sales only). For split payments, each method shows the amount actually received in that mode.</p>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                   <div className="bg-white rounded-lg p-3 border border-blue-200">
                     <p className="text-xs text-gray-600 mb-1">Cash</p>

@@ -65,6 +65,13 @@ Run this **after** both `RUN_ALL_SUPABASE_TABLES_ONE_SCRIPT.sql` and `APPLY_MISS
 
 All statements use `IF NOT EXISTS` / `DROP CONSTRAINT IF EXISTS` so the script is **safe to re-run**.
 
+## 3.5. Daily Report details (sale target + customer details in Supabase)
+
+**`CREATE_DAILY_REPORT_DETAILS_TABLE.sql`**
+
+- Creates **`daily_report_details`**: per-day sale target, customers purchased/returned, return reason, expectation, remark. Enables time-wise reporting and cross-device sync for Daily Report customer details.
+- Run after base schema (companies table exists). Safe to re-run.
+
 ## 4. Maintenance / alert (optional – for Settings > Maintenance & Alerts to sync to all users)
 
 **`ADD_MAINTENANCE_CONFIG_TABLE.sql`**
@@ -103,5 +110,6 @@ These are **not required** if you have run the three steps above (RUN_ALL → AP
 - [ ] Run **APPLY_REMAINING_SUPABASE_MIGRATIONS.sql**
 - [ ] Run **ADD_ORDERED_QTY_BOX_PIECE.sql** (reorder: ordered qty box/piece)
 - [ ] Run **ADD_RECEIVED_QTY_BOX_PIECE.sql** (reorder: received qty box/piece; run after ADD_ORDERED_QTY_BOX_PIECE)
+- [ ] Run **CREATE_DAILY_REPORT_DETAILS_TABLE.sql** (optional: Daily Report sale target + customer details in cloud for time-wise reporting)
 
 After these, the database has everything the app expects for Supabase sync.

@@ -30,33 +30,12 @@ import {
   type SalesReportView,
 } from '../utils/salesReportColumns'
 import { LockIcon } from '../components/icons/LockIcon'
+import {
+  getPaymentMethodsForDisplay,
+  getNetPaymentMethodsForSale,
+} from '../utils/salePaymentHelpers'
 
 type ReportView = SalesReportView
-
-/** Parse payment methods from edit audit in internal_remarks (e.g. "Payment: cash ₹220 → card ₹100, cash ₹100, upi ₹20") */
-function parsePaymentMethodsFromRemarks(internalRemarks: string | undefined): Array<{ method: string; amount: number }> | null {
-  if (!internalRemarks || typeof internalRemarks !== 'string') return null
-  const regex = /Payment:\s*[^→]+→\s*([^\n━]+)/g
-  const matches = [...internalRemarks.matchAll(regex)]
-  const lastMatch = matches[matches.length - 1]
-  if (!lastMatch) return null
-  const rightSide = lastMatch[1].trim()
-  const pairRegex = /(\w+)\s*₹\s*([\d.]+)/g
-  const pairs: Array<{ method: string; amount: number }> = []
-  let m: RegExpExecArray | null
-  while ((m = pairRegex.exec(rightSide)) !== null) {
-    pairs.push({ method: m[1].toLowerCase(), amount: parseFloat(m[2]) || 0 })
-  }
-  return pairs.length > 0 ? pairs : null
-}
-
-/** Get effective payment methods: from payment_methods, or parsed from internal_remarks, or null */
-function getPaymentMethodsForDisplay(sale: Sale): Array<{ method: string; amount: number }> | null {
-  if (sale.payment_methods && sale.payment_methods.length > 0) {
-    return sale.payment_methods
-  }
-  return parsePaymentMethodsFromRemarks(sale.internal_remarks)
-}
 
 /** Format payment method for display: show method + amount (e.g. Cash: ₹220, or UPI: ₹100, Cash: ₹120) */
 function formatPaymentMethod(sale: Sale): string {
@@ -743,29 +722,27 @@ const SalesReports = () => {
     return Object.entries(groups).sort(([a], [b]) => b.localeCompare(a))
   }, [filteredSales])
 
-  /** Aggregate payment methods for a list of sales: { method, count, total }[] */
+  /**
+   * Aggregate by payment method = net received per method (payment minus return_amount).
+   * Only paid sales. Cash = sum of (cash received − return given in cash), etc.
+   */
   const getPaymentSummaryForSales = (sales: Sale[]): { method: string; count: number; total: number }[] => {
-    const byMethod: Record<string, { count: number; total: number }> = {}
+    const byMethod: Record<string, { total: number; saleIds: Set<number> }> = {}
     sales.forEach(sale => {
-      const methods = getPaymentMethodsForDisplay(sale)
-      if (methods && methods.length > 0) {
-        methods.forEach(p => {
-          const key = (p.method || '').toLowerCase()
-          if (!key) return
-          if (!byMethod[key]) byMethod[key] = { count: 0, total: 0 }
-          byMethod[key].count += 1
-          byMethod[key].total += p.amount || 0
-        })
-      } else if (sale.payment_method && sale.grand_total != null) {
-        const key = (sale.payment_method || '').toLowerCase()
-        if (!byMethod[key]) byMethod[key] = { count: 0, total: 0 }
-        byMethod[key].count += 1
-        byMethod[key].total += sale.grand_total
-      }
+      if (sale.payment_status !== 'paid') return
+      const netMethods = getNetPaymentMethodsForSale(sale)
+      netMethods.forEach(p => {
+        const key = (p.method || '').toLowerCase().trim() || 'other'
+        const amt = Number(p.amount) || 0
+        if (amt <= 0) return
+        if (!byMethod[key]) byMethod[key] = { total: 0, saleIds: new Set() }
+        byMethod[key].total += amt
+        byMethod[key].saleIds.add(sale.id)
+      })
     })
     const order = ['upi', 'cash', 'card', 'credit', 'other']
     return Object.entries(byMethod)
-      .map(([method, { count, total }]) => ({ method, count, total }))
+      .map(([method, { total, saleIds }]) => ({ method, count: saleIds.size, total }))
       .sort((a, b) => {
         const ai = order.indexOf(a.method)
         const bi = order.indexOf(b.method)
@@ -792,13 +769,20 @@ const SalesReports = () => {
                     <span
                       key={method}
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-white/20 backdrop-blur-sm border border-white/30"
-                      title={`${count} payment(s) · ₹${total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+                      title={`Net received (${method}) after return: ₹${total.toLocaleString('en-IN', { minimumFractionDigits: 2 })} from ${count} sale${count !== 1 ? 's' : ''}`}
                     >
                       <span className="capitalize">{method}</span>
                       <span className="opacity-90">{count}</span>
                       <span className="font-bold">₹{total.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
                     </span>
                   ))}
+                  <span
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-white/30 backdrop-blur-sm border border-white/40"
+                    title={`Total net received (all methods, after return)`}
+                  >
+                    <span className="opacity-90">Total</span>
+                    <span className="font-bold">₹{paymentSummary.reduce((sum, p) => sum + p.total, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                  </span>
                 </div>
               )}
             </div>
