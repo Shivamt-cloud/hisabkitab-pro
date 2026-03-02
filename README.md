@@ -64,6 +64,16 @@ npm run build
 npm run preview
 ```
 
+### After deployment – users not seeing changes?
+
+The app is a PWA and caches JS/CSS. After you deploy:
+
+1. **Deploy the latest build** – Run `npm run build` after `git pull`, then deploy the new `dist/` folder (not an old one).
+2. **Users should refresh once** – Ask users to do a **hard refresh**: `Ctrl+Shift+R` (Windows/Linux) or `Cmd+Shift+R` (Mac). Or they can wait for the blue **"New version available!"** banner at the top and click **Update now**.
+3. **If still old** – Clear site data for the app URL (browser settings → Site data → clear), then reload.
+
+Update checks run on load, when the tab becomes visible again, and every 30 minutes, so the banner usually appears after a refresh or when returning to the tab.
+
 ## Project Structure
 
 ```

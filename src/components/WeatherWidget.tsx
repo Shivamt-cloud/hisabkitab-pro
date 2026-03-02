@@ -201,7 +201,7 @@ export function WeatherWidget() {
 
   if (loading && !weather) {
     return (
-      <div className="flex items-center gap-3 rounded-xl border border-sky-200 bg-gradient-to-br from-sky-900/90 to-blue-900/90 px-4 py-2.5 shadow-md ring-1 ring-sky-500/30 animate-pulse min-w-[140px]">
+      <div className="hidden md:flex items-center gap-3 rounded-xl border border-sky-200 bg-gradient-to-br from-sky-900/90 to-blue-900/90 px-4 py-2.5 shadow-md ring-1 ring-sky-500/30 animate-pulse min-w-[140px]">
         <div className="h-8 w-8 rounded-full bg-sky-500/30" />
         <div className="space-y-1">
           <div className="h-3 w-20 bg-sky-500/30 rounded" />
@@ -216,7 +216,7 @@ export function WeatherWidget() {
       <button
         type="button"
         onClick={handleSetLocation}
-        className="flex items-center gap-2 rounded-xl border border-amber-200/50 bg-amber-900/30 px-4 py-2.5 min-w-[140px] hover:bg-amber-900/50 text-left"
+        className="hidden md:flex items-center gap-2 rounded-xl border border-amber-200/50 bg-amber-900/30 px-4 py-2.5 min-w-[140px] hover:bg-amber-900/50 text-left"
         title="Set location or retry auto-detect"
       >
         <MapPin className="h-4 w-4 text-amber-400/80 shrink-0" />
@@ -228,7 +228,7 @@ export function WeatherWidget() {
   const info = getWeatherInfo(weather.code)
 
   return (
-    <div className="relative flex items-center gap-3 rounded-xl border border-sky-200 bg-gradient-to-br from-sky-900/95 to-blue-900/95 px-4 py-2.5 shadow-md ring-1 ring-sky-500/40 overflow-hidden">
+    <div className="hidden md:flex relative items-center gap-3 rounded-xl border border-sky-200 bg-gradient-to-br from-sky-900/95 to-blue-900/95 px-4 py-2.5 shadow-md ring-1 ring-sky-500/40 overflow-hidden">
       <div className="absolute inset-0 bg-[length:200%_100%] bg-gradient-to-r from-transparent via-white/10 to-transparent animate-shimmer pointer-events-none" />
       <div className="relative flex items-center gap-3">
         <div className="text-sky-300 drop-shadow-[0_0_8px_rgba(56,189,248,0.4)] animate-weather-icon">

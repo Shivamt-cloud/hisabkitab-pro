@@ -10,18 +10,23 @@ export function UpdateBanner() {
     // Check for updates on mount
     checkForUpdates()
 
-    // Listen for update availability
+    // Listen for update availability (when SW finds new version)
     const cleanup = onUpdateAvailable(() => {
       setUpdateAvailable(true)
     })
 
-    // Also check periodically (every 24 hours)
-    const interval = setInterval(() => {
-      checkForUpdates()
-    }, 24 * 60 * 60 * 1000) // 24 hours
+    // When user returns to the tab (e.g. after you deployed), check for new version
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') checkForUpdates()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    // Also check periodically (every 30 min) so deploy is picked up without refresh
+    const interval = setInterval(() => checkForUpdates(), 30 * 60 * 1000)
 
     return () => {
       cleanup()
+      document.removeEventListener('visibilitychange', onVisibilityChange)
       clearInterval(interval)
     }
   }, [])
