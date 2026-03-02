@@ -2,7 +2,9 @@ import { useState, useMemo, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { usePlanUpgrade } from '../context/PlanUpgradeContext'
+import { useLocation } from '../context/LocationContext'
 import { UserMenu } from '../components/UserMenu'
+import { WeatherWidget } from '../components/WeatherWidget'
 import { saleService } from '../services/saleService'
 import { purchaseService, supplierService } from '../services/purchaseService'
 import { productService } from '../services/productService'
@@ -115,6 +117,23 @@ const FOOTER_APPS: Array<{ name: string; url: string; color: string; icon: 'calc
 ]
 const FOOTER_ROTATION_INTERVAL_MS = 5000 // Switch to next set of apps every 5 seconds
 const FOOTER_APPS_VISIBLE = 4 // How many app cards to show at a time (rest rotate in)
+
+function LocalTimeBlock({ currentTime }: { currentTime: Date }) {
+  const { placeName } = useLocation()
+  return (
+    <div className="hidden font-mono rounded-xl border border-emerald-200 bg-slate-900 px-4 py-2.5 shadow-md ring-1 ring-emerald-600/50 md:block">
+      <p className={`text-[10px] font-semibold tracking-widest text-emerald-400/90 ${placeName ? '' : 'uppercase'}`}>
+        {placeName || 'Local'}
+      </p>
+      <p className="text-xs tabular-nums text-slate-300">
+        {currentTime.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
+      </p>
+      <p className="text-lg font-bold tabular-nums tracking-wide text-emerald-400 drop-shadow-[0_0_6px_rgba(52,211,153,0.25)]">
+        {currentTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
+      </p>
+    </div>
+  )
+}
 
 const Dashboard = () => {
   const { hasPermission, hasPlanFeature, user, getCurrentCompanyId, currentCompanyId } = useAuth()
@@ -1110,85 +1129,105 @@ const Dashboard = () => {
               {CONTACT_EMAIL}
             </a>
           </div>
-          <div className="flex items-center justify-between py-6">
-            <div>
-              <h1 className="text-4xl font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                {companyName && companyName.trim() ? `${companyName} - HisabKitab-Pro` : 'HisabKitab-Pro'}
+          <div className="flex flex-col gap-6 py-6">
+            {/* Row 1: Brand (left) + Time blocks (right) */}
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-3">
+              <h1 className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
+                {companyName && companyName.trim() ? (
+                  <>
+                    <span className="text-3xl font-extrabold tracking-tight text-gray-900 sm:text-4xl">
+                      {companyName}
+                    </span>
+                    <span className="text-2xl sm:text-3xl text-gray-300 font-extralight select-none" aria-hidden>—</span>
+                    <span className="inline-block rounded-lg bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 px-3 py-1 text-3xl font-extrabold tracking-tight text-white shadow-lg shadow-indigo-500/25 sm:text-4xl">
+                      HisabKitab-Pro
+                    </span>
+                  </>
+                ) : (
+                  <span className="inline-block rounded-lg bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 px-3 py-1 text-3xl font-extrabold tracking-tight text-white shadow-lg shadow-indigo-500/25 sm:text-4xl">
+                    HisabKitab-Pro
+                  </span>
+                )}
               </h1>
-              <p className="text-sm text-gray-600 mt-1 font-medium">Complete Inventory Management System</p>
-              <p className="text-xs text-gray-500 mt-0.5">Streamline Your Business Operations</p>
+              <p className="text-sm font-medium text-gray-500 tracking-wide">
+                Complete Inventory Management System
+              </p>
             </div>
-            <div className="flex items-center gap-4">
+
+              {/* New York | Weather (auto local) | Local time */}
+              <div className="flex flex-shrink-0 flex-wrap items-stretch gap-3">
+                <div className="hidden font-mono rounded-xl border border-amber-200 bg-amber-950/90 px-4 py-2.5 shadow-md ring-1 ring-amber-600/40 md:block">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-amber-400/95">New York</p>
+                  <p className="text-xs tabular-nums text-amber-200/90">
+                    {currentTime.toLocaleDateString('en-GB', { timeZone: 'America/New_York', day: '2-digit', month: 'long', year: 'numeric' })}
+                  </p>
+                  <p className="text-lg font-bold tabular-nums tracking-wide text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.3)]">
+                    {currentTime.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
+                  </p>
+                </div>
+                <WeatherWidget />
+                <LocalTimeBlock currentTime={currentTime} />
+              </div>
+            </div>
+
+            {/* Row 2: Products, Manual, Notifications, Plan, User - left aligned */}
+            <div className="flex flex-wrap items-center gap-3 border-t border-gray-200/60 pt-4">
               {hasPermission('products:read') && (
                 <button
                   onClick={() => navigate('/products')}
-                  className="hidden md:flex items-center gap-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold py-2.5 px-4 rounded-lg hover:shadow-lg transition-all duration-300 transform hover:scale-105"
+                  className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:bg-violet-700 transition-colors"
                 >
                   <Package className="w-5 h-5" />
-                  Products
+                  <span className="hidden sm:inline">Products</span>
                 </button>
               )}
-              <div className="text-right bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl px-6 py-3 border border-blue-100 hidden md:block">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Today</p>
-                <p className="text-lg font-bold text-gray-900 mt-1">
-                  {currentTime.toLocaleDateString('en-IN', { 
-                    weekday: 'long', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric' 
-                  })}
-                </p>
-                <p className="text-sm font-semibold text-gray-600 mt-1">
-                  {currentTime.toLocaleTimeString('en-IN', { 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    second: '2-digit',
-                    hour12: true
-                  })}
-                </p>
-              </div>
+              <Link
+                to="/user-manual"
+                className="inline-flex items-center gap-2 rounded-lg border-2 border-teal-200 bg-teal-50 px-4 py-2.5 text-sm font-semibold text-teal-800 hover:bg-teal-100 hover:border-teal-300 transition-colors"
+                title="User Manual"
+              >
+                <BookOpen className="w-5 h-5 text-teal-600" />
+                <span className="hidden sm:inline">Manual</span>
+              </Link>
               <button
                 onClick={() => navigate('/notifications')}
-                className="relative p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                className="relative inline-flex items-center gap-2 rounded-lg border-2 border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800 hover:bg-amber-100 hover:border-amber-300 transition-colors"
                 title="Notifications"
               >
-                <Bell className="w-6 h-6 text-gray-600" />
+                <Bell className="w-5 h-5 text-amber-600" />
+                <span className="hidden sm:inline">Notifications</span>
                 {unreadNotifications > 0 && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                  <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
                     {unreadNotifications > 9 ? '9+' : unreadNotifications}
                   </span>
                 )}
               </button>
-              <Link
-                to="/user-manual"
-                className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-700 font-medium"
-                title="User Manual (Help)"
-              >
-                <BookOpen className="w-5 h-5 text-gray-600" />
-                <span className="hidden sm:inline">User Manual</span>
-              </Link>
-              <div className="flex flex-col items-end gap-2">
+              {subscriptionInfo && (
+                <button
+                  onClick={() => setShowSubscriptionDetails(!showSubscriptionDetails)}
+                  className="inline-flex items-center justify-between gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:from-blue-700 hover:to-indigo-700 transition-all"
+                >
+                  <span className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4 shrink-0" />
+                    <span className="truncate">
+                      {subscriptionInfo.tier === 'premium_plus' ? 'Premium Plus' : subscriptionInfo.tier === 'premium_plus_plus' ? 'Premium++' : subscriptionInfo.tier === 'premium' ? 'Premium' : subscriptionInfo.tier === 'standard' ? 'Standard' : subscriptionInfo.tier === 'starter' ? 'Starter' : subscriptionInfo.tier ? 'Plan' : 'Subscription'}
+                    </span>
+                  </span>
+                  {showSubscriptionDetails ? <ChevronUp className="h-4 w-4 shrink-0" /> : <ChevronDown className="h-4 w-4 shrink-0" />}
+                </button>
+              )}
+              <div className="flex-shrink-0 rounded-lg border-2 border-indigo-200 bg-indigo-50/80 p-1 shadow-sm">
                 <UserMenu />
-                {subscriptionInfo && (
-                  <div className="w-full max-w-xs">
-                    <button
-                      onClick={() => setShowSubscriptionDetails(!showSubscriptionDetails)}
-                      className="w-full flex items-center justify-between bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-lg px-4 py-2 hover:from-blue-700 hover:to-indigo-800 transition-all shadow-md"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4" />
-                        <span className="text-sm font-semibold">
-                          {subscriptionInfo.tier ? (subscriptionInfo.tier === 'premium_plus' ? 'Premium Plus Plan' : subscriptionInfo.tier === 'premium_plus_plus' ? 'Premium Plus Plus Plan' : subscriptionInfo.tier === 'premium' ? 'Premium Plan' : subscriptionInfo.tier === 'standard' ? 'Standard Plan' : subscriptionInfo.tier === 'starter' ? 'Starter Plan' : 'Basic Plan') : 'Subscription'}
-                        </span>
-                      </div>
-                      {showSubscriptionDetails ? (
-                        <ChevronUp className="w-4 h-4" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4" />
-                      )}
-                    </button>
-                    {showSubscriptionDetails && (
-                      <div className="mt-2 bg-white rounded-lg shadow-xl p-4 border border-gray-200">
+              </div>
+            </div>
+          </div>
+
+          {/* Subscription dropdown (below header row when expanded) */}
+          {subscriptionInfo && showSubscriptionDetails && (
+            <div className="pb-4">
+              <div className="w-full max-w-xs sm:max-w-sm">
+                <div className="mt-2 bg-white rounded-lg shadow-xl p-4 border border-gray-200">
                         <div className="space-y-3">
                           {/* Recharge Button */}
                           <button
@@ -1286,32 +1325,29 @@ const Dashboard = () => {
                             </div>
                           )}
                         </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-              {/* New version available – show below plan so existing users can update */}
-              {pwaUpdateAvailable && (
-                <div className="mt-2 w-full max-w-xs rounded-lg border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
-                  <p className="text-sm font-semibold text-emerald-800 flex items-center gap-2">
-                    <Download className="w-4 h-4 shrink-0" />
-                    New update available
-                  </p>
-                  <p className="text-xs text-emerald-700 mt-1">
-                    Install the latest version to get new features and fixes.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => applyPwaUpdate()}
-                    className="mt-2 w-full inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
-                  >
-                    Install now
-                  </button>
                 </div>
-              )}
+              </div>
             </div>
-          </div>
+          )}
+          {/* New version available – show below plan so existing users can update */}
+          {pwaUpdateAvailable && (
+            <div className="mt-2 w-full max-w-xs rounded-lg border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
+              <p className="text-sm font-semibold text-emerald-800 flex items-center gap-2">
+                <Download className="w-4 h-4 shrink-0" />
+                New update available
+              </p>
+              <p className="text-xs text-emerald-700 mt-1">
+                Install the latest version to get new features and fixes.
+              </p>
+              <button
+                type="button"
+                onClick={() => applyPwaUpdate()}
+                className="mt-2 w-full inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+              >
+                Install now
+              </button>
+            </div>
+          )}
         </div>
       </header>
 

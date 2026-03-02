@@ -31,6 +31,24 @@
   animation: price-highlight 2.5s ease-in-out infinite;
 }
 
+/* Weather widget: gentle icon animation */
+@keyframes weather-float {
+  0%, 100% { transform: translateY(0) scale(1); opacity: 1; }
+  50% { transform: translateY(-2px) scale(1.05); opacity: 0.95; }
+}
+.animate-weather-icon {
+  animation: weather-float 3s ease-in-out infinite;
+}
+
+/* Shimmer for weather card */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.animate-shimmer {
+  animation: shimmer 8s linear infinite;
+}
+
 /* Smooth animations */
 * {
   transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;

@@ -82,6 +82,7 @@ import { GlobalSearch } from './components/GlobalSearch'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
 import { ToastProvider } from './context/ToastContext'
 import { PlanUpgradeProvider } from './context/PlanUpgradeContext'
+import { LocationProvider } from './context/LocationContext'
 import { Toast } from './components/Toast'
 
 // Lazy load to prevent import errors from breaking the app
@@ -107,7 +108,9 @@ function App() {
             path="/"
             element={
               <ProtectedRoute>
-                <Dashboard />
+                <LocationProvider>
+                  <Dashboard />
+                </LocationProvider>
               </ProtectedRoute>
             }
           />
