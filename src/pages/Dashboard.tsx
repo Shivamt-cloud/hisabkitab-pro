@@ -119,8 +119,19 @@ const FOOTER_APPS: Array<{ name: string; url: string; color: string; icon: 'calc
 const FOOTER_ROTATION_INTERVAL_MS = 5000 // Switch to next set of apps every 5 seconds
 const FOOTER_APPS_VISIBLE = 4 // How many app cards to show at a time (rest rotate in)
 
-function LocalTimeBlock({ currentTime }: { currentTime: Date }) {
+function LocalTimeBlock({ currentTime, inline = false }: { currentTime: Date; inline?: boolean }) {
   const { placeName } = useLocation()
+  if (inline) {
+    return (
+      <span className="hidden md:inline tabular-nums text-gray-700">
+        <span className="font-semibold text-emerald-700">{placeName || 'Local'}</span>
+        {' · '}
+        {currentTime.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
+        {' · '}
+        {currentTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
+      </span>
+    )
+  }
   return (
     <div className="hidden font-mono rounded-xl border border-emerald-200 bg-slate-900 px-4 py-2.5 shadow-md ring-1 ring-emerald-600/50 md:block">
       <p className={`text-[10px] font-semibold tracking-widest text-emerald-400/90 ${placeName ? '' : 'uppercase'}`}>
@@ -1102,8 +1113,8 @@ const Dashboard = () => {
       {/* Header */}
       <header className="bg-white/80 backdrop-blur-lg shadow-lg border-b border-gray-200/50 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Contact us - single line at top */}
-          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 py-2.5 border-b border-gray-200/60 text-sm">
+          {/* Contact us - top: desktop only; mobile uses footer only */}
+          <div className="hidden md:flex flex-wrap items-center justify-center gap-2 sm:gap-3 py-2.5 border-b border-gray-200/60 text-sm">
             <span className="text-gray-500 font-semibold uppercase tracking-wider">Contact us</span>
             <a href={CONTACT_WEBSITE_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium">
               <Globe className="w-3.5 h-3.5" />
@@ -1120,10 +1131,10 @@ const Dashboard = () => {
               {CONTACT_EMAIL}
             </a>
           </div>
-          <div className="flex flex-col gap-6 py-6">
-            {/* Row 1: Brand (left) + Time blocks (right) */}
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-3">
+          <div className="flex flex-col gap-3 py-4">
+            {/* Row 1: Brand (left) | Date/time & weather in 2 lines (right) on tablet + desktop */}
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="flex-shrink-0 space-y-1 lg:space-y-0.5">
               <h1 className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
                 {companyName && companyName.trim() ? (
                   <>
@@ -1146,8 +1157,26 @@ const Dashboard = () => {
               </p>
             </div>
 
-              {/* New York | Weather (auto local) | Local time */}
-              <div className="flex flex-shrink-0 flex-wrap items-stretch gap-3">
+              {/* Tablet (md) + Desktop (lg): time & weather in 2 lines - same as desktop */}
+              <div className="hidden md:flex flex-col gap-1 flex-shrink-0 font-mono text-sm text-gray-600 min-w-0 max-w-full">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="tabular-nums whitespace-nowrap">
+                    <span className="font-semibold text-amber-700">New York</span>
+                    {' · '}
+                    {currentTime.toLocaleDateString('en-GB', { timeZone: 'America/New_York', day: '2-digit', month: 'long', year: 'numeric' })}
+                    {' · '}
+                    {currentTime.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
+                  </span>
+                  <span className="text-gray-300">|</span>
+                  <WeatherWidget inline />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-300">|</span>
+                  <LocalTimeBlock inline currentTime={currentTime} />
+                </div>
+              </div>
+              {/* Mobile only: boxed time + weather (tablet uses strip above) */}
+              <div className="flex md:hidden flex-shrink-0 flex-wrap items-stretch gap-3">
                 <div className="hidden font-mono rounded-xl border border-amber-200 bg-amber-950/90 px-4 py-2.5 shadow-md ring-1 ring-amber-600/40 md:block">
                   <p className="text-[10px] font-semibold uppercase tracking-widest text-amber-400/95">New York</p>
                   <p className="text-xs tabular-nums text-amber-200/90">
@@ -1162,34 +1191,34 @@ const Dashboard = () => {
               </div>
             </div>
 
-            {/* Row 2: Products, Manual, Notifications, Plan, User - left aligned */}
-            <div className="flex flex-wrap items-center gap-3 border-t border-gray-200/60 pt-4">
+            {/* Row 2: Products, Manual, Notifications, Plan, User - just below time/weather; one line on mobile (scroll if needed) */}
+            <div className="flex flex-nowrap items-center gap-2 sm:gap-3 border-t border-gray-200/60 pt-3 overflow-x-auto pb-1 min-w-0">
               {hasPermission('products:read') && (
                 <button
                   onClick={() => navigate('/products')}
-                  className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:bg-violet-700 transition-colors"
+                  className="inline-flex flex-shrink-0 items-center gap-1.5 sm:gap-2 rounded-lg bg-violet-600 px-2.5 py-2 sm:px-4 sm:py-2.5 text-sm font-semibold text-white shadow-md hover:bg-violet-700 transition-colors"
                 >
-                  <Package className="w-5 h-5" />
+                  <Package className="w-4 h-4 sm:w-5 sm:h-5" />
                   <span className="hidden sm:inline">Products</span>
                 </button>
               )}
               <Link
                 to="/user-manual"
-                className="inline-flex items-center gap-2 rounded-lg border-2 border-teal-200 bg-teal-50 px-4 py-2.5 text-sm font-semibold text-teal-800 hover:bg-teal-100 hover:border-teal-300 transition-colors"
+                className="inline-flex flex-shrink-0 items-center gap-1.5 sm:gap-2 rounded-lg border-2 border-teal-200 bg-teal-50 px-2.5 py-2 sm:px-4 sm:py-2.5 text-sm font-semibold text-teal-800 hover:bg-teal-100 hover:border-teal-300 transition-colors"
                 title="User Manual"
               >
-                <BookOpen className="w-5 h-5 text-teal-600" />
+                <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 text-teal-600" />
                 <span className="hidden sm:inline">Manual</span>
               </Link>
               <button
                 onClick={() => navigate('/notifications')}
-                className="relative inline-flex items-center gap-2 rounded-lg border-2 border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800 hover:bg-amber-100 hover:border-amber-300 transition-colors"
+                className="relative inline-flex flex-shrink-0 items-center gap-1.5 sm:gap-2 rounded-lg border-2 border-amber-200 bg-amber-50 px-2.5 py-2 sm:px-4 sm:py-2.5 text-sm font-semibold text-amber-800 hover:bg-amber-100 hover:border-amber-300 transition-colors"
                 title="Notifications"
               >
-                <Bell className="w-5 h-5 text-amber-600" />
+                <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600" />
                 <span className="hidden sm:inline">Notifications</span>
                 {unreadNotifications > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
+                  <span className="absolute -top-1 -right-1 flex h-4 w-4 sm:h-5 sm:w-5 items-center justify-center rounded-full bg-red-500 text-[10px] sm:text-xs font-bold text-white">
                     {unreadNotifications > 9 ? '9+' : unreadNotifications}
                   </span>
                 )}
@@ -1197,15 +1226,15 @@ const Dashboard = () => {
               {subscriptionInfo && (
                 <button
                   onClick={() => setShowSubscriptionDetails(!showSubscriptionDetails)}
-                  className="inline-flex items-center justify-between gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:from-blue-700 hover:to-indigo-700 transition-all"
+                  className="inline-flex flex-shrink-0 items-center justify-between gap-1.5 sm:gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-2.5 py-2 sm:px-4 sm:py-2.5 text-sm font-semibold text-white shadow-md hover:from-blue-700 hover:to-indigo-700 transition-all"
                 >
-                  <span className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 shrink-0" />
-                    <span className="truncate">
+                  <span className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                    <Calendar className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+                    <span className="truncate max-w-[4rem] sm:max-w-none">
                       {subscriptionInfo.tier === 'premium_plus' ? 'Premium Plus' : subscriptionInfo.tier === 'premium_plus_plus' ? 'Premium++' : subscriptionInfo.tier === 'premium' ? 'Premium' : subscriptionInfo.tier === 'standard' ? 'Standard' : subscriptionInfo.tier === 'starter' ? 'Starter' : subscriptionInfo.tier ? 'Plan' : 'Subscription'}
                     </span>
                   </span>
-                  {showSubscriptionDetails ? <ChevronUp className="h-4 w-4 shrink-0" /> : <ChevronDown className="h-4 w-4 shrink-0" />}
+                  {showSubscriptionDetails ? <ChevronUp className="w-4 h-4 shrink-0" /> : <ChevronDown className="w-4 h-4 shrink-0" />}
                 </button>
               )}
               <div className="flex-shrink-0 rounded-lg border-2 border-indigo-200 bg-indigo-50/80 p-1 shadow-sm">
@@ -2504,8 +2533,8 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Contact Us */}
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 py-4 px-4 bg-gray-50 rounded-xl border border-gray-200">
+        {/* Contact Us - footer: visible on mobile and desktop */}
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:gap-x-6 py-4 px-4 bg-gray-50 rounded-xl border border-gray-200">
           <span className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
             <MessageCircle className="w-4 h-4 text-blue-600" />
             Contact us

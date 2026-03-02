@@ -28,7 +28,7 @@ interface WeatherData {
   wind: number
 }
 
-export function WeatherWidget() {
+export function WeatherWidget({ inline = false }: { inline?: boolean }) {
   const location = useLocationOptional()
   const [standaloneCoords, setStandaloneCoords] = useState<{ lat: number; lon: number } | null>(null)
   const [standalonePlaceName, setStandalonePlaceName] = useState<string | null>(null)
@@ -200,6 +200,9 @@ export function WeatherWidget() {
   const error = location ? locationError || weatherError : weatherError
 
   if (loading && !weather) {
+    if (inline) {
+      return <span className="hidden md:inline font-mono text-sm text-gray-400">Weather …</span>
+    }
     return (
       <div className="hidden md:flex items-center gap-3 rounded-xl border border-sky-200 bg-gradient-to-br from-sky-900/90 to-blue-900/90 px-4 py-2.5 shadow-md ring-1 ring-sky-500/30 animate-pulse min-w-[140px]">
         <div className="h-8 w-8 rounded-full bg-sky-500/30" />
@@ -212,6 +215,13 @@ export function WeatherWidget() {
   }
 
   if (error || !weather) {
+    if (inline) {
+      return (
+        <button type="button" onClick={handleSetLocation} className="hidden md:inline-flex items-center gap-1 font-mono text-sm text-amber-600 hover:text-amber-700">
+          <MapPin className="h-3 w-3" /> Weather unavailable
+        </button>
+      )
+    }
     return (
       <button
         type="button"
@@ -226,6 +236,31 @@ export function WeatherWidget() {
   }
 
   const info = getWeatherInfo(weather.code)
+
+  /** Inline one-liner for header strip (no box) */
+  if (inline) {
+    return (
+      <span className="hidden md:inline-flex items-center gap-1.5 font-mono text-sm text-gray-700 [&_svg]:w-4 [&_svg]:h-4">
+        <span className="text-sky-600 shrink-0">{info.icon}</span>
+        <button
+          type="button"
+          onClick={handleSetLocation}
+          className="inline-flex items-center gap-1 hover:text-sky-700 focus:outline-none"
+          title="Change location"
+        >
+          {placeName ?? 'Weather'}
+          <MapPin className="h-3 w-3 opacity-70" />
+        </button>
+        <span className="tabular-nums font-semibold text-gray-900">
+          {Math.round(weather.temp)}°C
+          {weather.apparentTemp != null && (
+            <span className="font-normal text-gray-500 ml-0.5">(feels {Math.round(weather.apparentTemp)}°C)</span>
+          )}
+        </span>
+        <span className="text-gray-500">{info.label}</span>
+      </span>
+    )
+  }
 
   return (
     <div className="hidden md:flex relative items-center gap-3 rounded-xl border border-sky-200 bg-gradient-to-br from-sky-900/95 to-blue-900/95 px-4 py-2.5 shadow-md ring-1 ring-sky-500/40 overflow-hidden">
