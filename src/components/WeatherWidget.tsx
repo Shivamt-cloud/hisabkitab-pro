@@ -240,7 +240,7 @@ export function WeatherWidget({ inline = false }: { inline?: boolean }) {
   /** Inline one-liner for header strip (no box) */
   if (inline) {
     return (
-      <span className="hidden md:inline-flex items-center gap-1.5 font-mono text-sm text-gray-700 [&_svg]:w-4 [&_svg]:h-4">
+      <span className="hidden md:inline-flex md:min-w-0 md:truncate items-center gap-1.5 font-mono text-sm text-gray-700 [&_svg]:w-4 [&_svg]:h-4">
         <span className="text-sky-600 shrink-0">{info.icon}</span>
         <button
           type="button"

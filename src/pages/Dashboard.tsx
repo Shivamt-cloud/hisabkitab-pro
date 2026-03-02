@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { usePlanUpgrade } from '../context/PlanUpgradeContext'
@@ -123,7 +124,7 @@ function LocalTimeBlock({ currentTime, inline = false }: { currentTime: Date; in
   const { placeName } = useLocation()
   if (inline) {
     return (
-      <span className="hidden md:inline tabular-nums text-gray-700">
+      <span className="hidden md:inline md:min-w-0 md:truncate md:inline-block tabular-nums text-gray-700">
         <span className="font-semibold text-emerald-700">{placeName || 'Local'}</span>
         {' · '}
         {currentTime.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
@@ -176,6 +177,9 @@ const Dashboard = () => {
   } | null>(null)
   const [showSubscriptionDetails, setShowSubscriptionDetails] = useState(false)
   const [showRechargeModal, setShowRechargeModal] = useState(false)
+  const planButtonRef = useRef<HTMLButtonElement>(null)
+  const subscriptionPanelRef = useRef<HTMLDivElement>(null)
+  const [subscriptionPanelPosition, setSubscriptionPanelPosition] = useState<{ top?: number; bottom?: number; left: number }>({ left: 0 })
   const [generalSettings, setGeneralSettings] = useState<{ sales_target_daily?: number; sales_target_monthly?: number }>({})
   const [topProducts, setTopProducts] = useState<Array<{ name: string; value: number }>>([])
   const [topCustomers, setTopCustomers] = useState<Array<{ name: string; value: number }>>([])
@@ -1084,6 +1088,41 @@ const Dashboard = () => {
   // Check if subscription is expiring soon (within 30 days)
   const isSubscriptionExpiringSoon = subscriptionDaysRemaining !== null && subscriptionDaysRemaining <= 30 && subscriptionDaysRemaining > 0
 
+  // Plan popover: position when opened and close on outside click / scroll
+  useEffect(() => {
+    if (!showSubscriptionDetails || !planButtonRef.current) return
+    const rect = planButtonRef.current.getBoundingClientRect()
+    const spaceBelow = window.innerHeight - rect.bottom
+    const panelHeight = 420
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+    // On mobile prefer opening upward so panel is visible without scrolling
+    const openUp = isMobile || (spaceBelow < panelHeight && rect.top > spaceBelow)
+    const gap = 8
+    setSubscriptionPanelPosition({
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 384)),
+      ...(openUp ? { bottom: window.innerHeight - rect.top + gap } : { top: rect.bottom + gap }),
+    })
+  }, [showSubscriptionDetails])
+
+  useEffect(() => {
+    if (!showSubscriptionDetails) return
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (
+        planButtonRef.current?.contains(target) ||
+        subscriptionPanelRef.current?.contains(target)
+      ) return
+      setShowSubscriptionDetails(false)
+    }
+    const handleScroll = () => setShowSubscriptionDetails(false)
+    document.addEventListener('mousedown', handleClickOutside)
+    window.addEventListener('scroll', handleScroll, true)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      window.removeEventListener('scroll', handleScroll, true)
+    }
+  }, [showSubscriptionDetails])
+
   const handleSaveSetGoal = async () => {
     const companyId = getCurrentCompanyId()
     const effectiveCompanyId = companyId ?? user?.company_id ?? undefined
@@ -1132,7 +1171,7 @@ const Dashboard = () => {
             </a>
           </div>
           <div className="flex flex-col gap-3 py-4">
-            {/* Row 1: Brand (left) | Date/time & weather in 2 lines (right) on tablet + desktop */}
+            {/* Row 1: Brand (left) | Date/time & weather in 3 lines (right) on tablet + desktop so nothing gets cut */}
             <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div className="flex-shrink-0 space-y-1 lg:space-y-0.5">
               <h1 className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
@@ -1157,22 +1196,29 @@ const Dashboard = () => {
               </p>
             </div>
 
-              {/* Tablet (md) + Desktop (lg): time & weather in 2 lines - same as desktop */}
+              {/* Tablet (md) + Desktop (lg): date/time & weather in 3 lines so nothing gets cut */}
               <div className="hidden md:flex flex-col gap-1 flex-shrink-0 font-mono text-sm text-gray-600 min-w-0 max-w-full">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="tabular-nums whitespace-nowrap">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-gray-300 shrink-0">|</span>
+                  <span className="tabular-nums whitespace-nowrap truncate">
                     <span className="font-semibold text-amber-700">New York</span>
                     {' · '}
                     {currentTime.toLocaleDateString('en-GB', { timeZone: 'America/New_York', day: '2-digit', month: 'long', year: 'numeric' })}
                     {' · '}
                     {currentTime.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
                   </span>
-                  <span className="text-gray-300">|</span>
-                  <WeatherWidget inline />
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-300">|</span>
-                  <LocalTimeBlock inline currentTime={currentTime} />
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-gray-300 shrink-0">|</span>
+                  <span className="min-w-0 truncate block">
+                    <LocalTimeBlock inline currentTime={currentTime} />
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-gray-300 shrink-0">|</span>
+                  <span className="min-w-0 truncate block">
+                    <WeatherWidget inline />
+                  </span>
                 </div>
               </div>
               {/* Mobile only: boxed time + weather (tablet uses strip above) */}
@@ -1225,6 +1271,7 @@ const Dashboard = () => {
               </button>
               {subscriptionInfo && (
                 <button
+                  ref={planButtonRef}
                   onClick={() => setShowSubscriptionDetails(!showSubscriptionDetails)}
                   className="inline-flex flex-shrink-0 items-center justify-between gap-1.5 sm:gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-2.5 py-2 sm:px-4 sm:py-2.5 text-sm font-semibold text-white shadow-md hover:from-blue-700 hover:to-indigo-700 transition-all"
                 >
@@ -1243,111 +1290,117 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {/* Subscription dropdown (below header row when expanded) */}
-          {subscriptionInfo && showSubscriptionDetails && (
-            <div className="pb-4">
-              <div className="w-full max-w-xs sm:max-w-sm">
-                <div className="mt-2 bg-white rounded-lg shadow-xl p-4 border border-gray-200">
-                        <div className="space-y-3">
-                          {/* Recharge Button */}
-                          <button
-                            onClick={() => setShowRechargeModal(true)}
-                            className={`w-full px-4 py-2.5 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
-                              subscriptionDaysRemaining !== null && subscriptionDaysRemaining <= 30
-                                ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white hover:from-orange-600 hover:to-red-600'
-                                : 'bg-gradient-to-r from-blue-600 to-indigo-700 text-white hover:from-blue-700 hover:to-indigo-800'
-                            }`}
-                          >
-                            <CreditCard className="w-4 h-4" />
-                            {subscriptionDaysRemaining !== null && subscriptionDaysRemaining <= 0
-                              ? 'Activate Subscription'
-                              : subscriptionDaysRemaining !== null && subscriptionDaysRemaining <= 30
-                                ? 'Renew Now'
-                                : 'Recharge'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => navigate('/subscription/payments')}
-                            className="w-full px-4 py-2.5 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-800 hover:bg-gray-50"
-                          >
-                            <ReceiptText className="w-4 h-4" />
-                            Payment History
-                          </button>
-                          <div>
-                            <p className="text-gray-500 text-xs mb-1">Plan</p>
-                            <p className="text-gray-900 font-semibold">
-                              {subscriptionInfo.tier
-                                ? (() => {
-                                    const tierInfo = getTierPricing(subscriptionInfo.tier as SubscriptionTier)
-                                    const icon = subscriptionInfo.tier === 'premium_plus' || subscriptionInfo.tier === 'premium_plus_plus' ? '🚗' : subscriptionInfo.tier === 'premium' ? '♾️' : subscriptionInfo.tier === 'standard' ? '📱📱📱' : subscriptionInfo.tier === 'starter' ? '📱' : '📱'
-                                    return `${icon} ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}`
-                                  })()
-                                : 'N/A'}
-                            </p>
-                          </div>
-                          {subscriptionInfo.status && (
-                            <div>
-                              <p className="text-gray-500 text-xs mb-1">Status</p>
-                              <p className={`font-semibold capitalize ${
-                                subscriptionInfo.status === 'active' ? 'text-green-600' : 
-                                subscriptionInfo.status === 'expired' ? 'text-red-600' : 
-                                'text-gray-900'
-                              }`}>
-                                {subscriptionInfo.status}
-                              </p>
-                            </div>
-                          )}
-                          {subscriptionInfo.startDate && (
-                            <div>
-                              <p className="text-gray-500 text-xs mb-1">Start Date</p>
-                              <p className="text-gray-900 text-sm">
-                                {new Date(subscriptionInfo.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
-                              </p>
-                            </div>
-                          )}
-                          {subscriptionInfo.endDate && (
-                            <div>
-                              <p className="text-gray-500 text-xs mb-1">End Date</p>
-                              <p className="text-gray-900 text-sm font-semibold">
-                                {new Date(subscriptionInfo.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
-                              </p>
-                            </div>
-                          )}
-                          {subscriptionInfo.endDate && subscriptionDaysRemaining !== null && (
-                            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-3 border border-blue-200">
-                              <p className="text-gray-500 text-xs mb-2 font-semibold">Days Remaining</p>
-                              <p className={`font-bold text-xl ${
-                                subscriptionDaysRemaining <= 7 ? 'text-red-600' :
-                                subscriptionDaysRemaining <= 30 ? 'text-orange-600' :
-                                'text-green-600'
-                              }`}>
-                                {subscriptionDaysRemaining > 0 ? (
-                                  <span>{subscriptionDaysRemaining} day{subscriptionDaysRemaining !== 1 ? 's' : ''} remaining</span>
-                                ) : subscriptionDaysRemaining === 0 ? (
-                                  <span className="text-red-600">⚠️ Expires Today</span>
-                                ) : (
-                                  <span className="text-red-600">❌ Expired {Math.abs(subscriptionDaysRemaining)} day{Math.abs(subscriptionDaysRemaining) !== 1 ? 's' : ''} ago</span>
-                                )}
-                              </p>
-                              {subscriptionDaysRemaining > 0 && subscriptionDaysRemaining <= 30 && (
-                                <p className="text-orange-600 text-xs mt-1 font-medium">
-                                  ⚠️ Renew soon to avoid service interruption
-                                </p>
-                              )}
-                            </div>
-                          )}
-                          {(subscriptionInfo.tier === 'premium' || subscriptionInfo.tier === 'premium_plus' || subscriptionInfo.tier === 'premium_plus_plus') && !subscriptionInfo.endDate && (
-                            <div>
-                              <p className="text-gray-500 text-xs mb-1">Access</p>
-                              <p className="text-gray-900 font-semibold text-green-600">
-                                {subscriptionInfo.tier === 'premium_plus' ? 'Unlimited + Services (Bike, Car, E-bike, E-car)' : subscriptionInfo.tier === 'premium_plus_plus' ? 'Unlimited + All Services' : 'Unlimited'}
-                              </p>
-                            </div>
-                          )}
-                        </div>
+          {/* Subscription popover: rendered in portal so it pops out above page content */}
+          {subscriptionInfo && showSubscriptionDetails && (subscriptionPanelPosition.top !== undefined || subscriptionPanelPosition.bottom !== undefined) && createPortal(
+            <div
+              ref={subscriptionPanelRef}
+              className="fixed w-full max-w-xs sm:max-w-sm bg-white rounded-lg shadow-2xl p-4 border border-gray-200 z-[9999] max-h-[min(420px,calc(100vh-80px))] overflow-y-auto"
+              style={{
+                left: subscriptionPanelPosition.left,
+                right: 'auto',
+                ...(subscriptionPanelPosition.bottom !== undefined
+                  ? { bottom: subscriptionPanelPosition.bottom }
+                  : { top: subscriptionPanelPosition.top }),
+              }}
+            >
+              <div className="space-y-3">
+                <button
+                  onClick={() => setShowRechargeModal(true)}
+                  className={`w-full px-4 py-2.5 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
+                    subscriptionDaysRemaining !== null && subscriptionDaysRemaining <= 30
+                      ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white hover:from-orange-600 hover:to-red-600'
+                      : 'bg-gradient-to-r from-blue-600 to-indigo-700 text-white hover:from-blue-700 hover:to-indigo-800'
+                  }`}
+                >
+                  <CreditCard className="w-4 h-4" />
+                  {subscriptionDaysRemaining !== null && subscriptionDaysRemaining <= 0
+                    ? 'Activate Subscription'
+                    : subscriptionDaysRemaining !== null && subscriptionDaysRemaining <= 30
+                      ? 'Renew Now'
+                      : 'Recharge'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/subscription/payments')}
+                  className="w-full px-4 py-2.5 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-800 hover:bg-gray-50"
+                >
+                  <ReceiptText className="w-4 h-4" />
+                  Payment History
+                </button>
+                <div>
+                  <p className="text-gray-500 text-xs mb-1">Plan</p>
+                  <p className="text-gray-900 font-semibold">
+                    {subscriptionInfo.tier
+                      ? (() => {
+                          const tierInfo = getTierPricing(subscriptionInfo.tier as SubscriptionTier)
+                          const icon = subscriptionInfo.tier === 'premium_plus' || subscriptionInfo.tier === 'premium_plus_plus' ? '🚗' : subscriptionInfo.tier === 'premium' ? '♾️' : subscriptionInfo.tier === 'standard' ? '📱📱📱' : subscriptionInfo.tier === 'starter' ? '📱' : '📱'
+                          return `${icon} ${tierInfo.name} - ${tierInfo.deviceDisplayLabel}`
+                        })()
+                      : 'N/A'}
+                  </p>
                 </div>
+                {subscriptionInfo.status && (
+                  <div>
+                    <p className="text-gray-500 text-xs mb-1">Status</p>
+                    <p className={`font-semibold capitalize ${
+                      subscriptionInfo.status === 'active' ? 'text-green-600' :
+                      subscriptionInfo.status === 'expired' ? 'text-red-600' :
+                      'text-gray-900'
+                    }`}>
+                      {subscriptionInfo.status}
+                    </p>
+                  </div>
+                )}
+                {subscriptionInfo.startDate && (
+                  <div>
+                    <p className="text-gray-500 text-xs mb-1">Start Date</p>
+                    <p className="text-gray-900 text-sm">
+                      {new Date(subscriptionInfo.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                    </p>
+                  </div>
+                )}
+                {subscriptionInfo.endDate && (
+                  <div>
+                    <p className="text-gray-500 text-xs mb-1">End Date</p>
+                    <p className="text-gray-900 text-sm font-semibold">
+                      {new Date(subscriptionInfo.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                    </p>
+                  </div>
+                )}
+                {subscriptionInfo.endDate && subscriptionDaysRemaining !== null && (
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-3 border border-blue-200">
+                    <p className="text-gray-500 text-xs mb-2 font-semibold">Days Remaining</p>
+                    <p className={`font-bold text-xl ${
+                      subscriptionDaysRemaining <= 7 ? 'text-red-600' :
+                      subscriptionDaysRemaining <= 30 ? 'text-orange-600' :
+                      'text-green-600'
+                    }`}>
+                      {subscriptionDaysRemaining > 0 ? (
+                        <span>{subscriptionDaysRemaining} day{subscriptionDaysRemaining !== 1 ? 's' : ''} remaining</span>
+                      ) : subscriptionDaysRemaining === 0 ? (
+                        <span className="text-red-600">⚠️ Expires Today</span>
+                      ) : (
+                        <span className="text-red-600">❌ Expired {Math.abs(subscriptionDaysRemaining)} day{Math.abs(subscriptionDaysRemaining) !== 1 ? 's' : ''} ago</span>
+                      )}
+                    </p>
+                    {subscriptionDaysRemaining > 0 && subscriptionDaysRemaining <= 30 && (
+                      <p className="text-orange-600 text-xs mt-1 font-medium">
+                        ⚠️ Renew soon to avoid service interruption
+                      </p>
+                    )}
+                  </div>
+                )}
+                {(subscriptionInfo.tier === 'premium' || subscriptionInfo.tier === 'premium_plus' || subscriptionInfo.tier === 'premium_plus_plus') && !subscriptionInfo.endDate && (
+                  <div>
+                    <p className="text-gray-500 text-xs mb-1">Access</p>
+                    <p className="text-gray-900 font-semibold text-green-600">
+                      {subscriptionInfo.tier === 'premium_plus' ? 'Unlimited + Services (Bike, Car, E-bike, E-car)' : subscriptionInfo.tier === 'premium_plus_plus' ? 'Unlimited + All Services' : 'Unlimited'}
+                    </p>
+                  </div>
+                )}
               </div>
-            </div>
+            </div>,
+            document.body
           )}
           {/* New version available – show below plan so existing users can update */}
           {pwaUpdateAvailable && (
