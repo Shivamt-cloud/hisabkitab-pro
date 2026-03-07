@@ -12,10 +12,11 @@ import {
   SalesBySalesPersonReport,
   ReportTimePeriod,
 } from '../types/reports'
-import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText, Eye, ShoppingCart, Search, X, Columns3, Pencil } from 'lucide-react'
+import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText, Eye, ShoppingCart, Search, X, Columns3, Pencil, FileDown } from 'lucide-react'
 import { saleService } from '../services/saleService'
 import { Sale } from '../types/sale'
-import { exportToExcel as exportExcel, exportDataToPDF } from '../utils/exportUtils'
+import { exportToExcel as exportExcel, exportDataToPDF, exportAlterationSlipToPDF, type AlterationSlipData } from '../utils/exportUtils'
+import { companyService } from '../services/companyService'
 import { productService, Product } from '../services/productService'
 import { categoryService } from '../services/productService'
 import { customerService } from '../services/customerService'
@@ -30,6 +31,7 @@ import {
   type SalesReportView,
 } from '../utils/salesReportColumns'
 import { LockIcon } from '../components/icons/LockIcon'
+import { ScrollableTableWrapper } from '../components/ScrollableTableWrapper'
 import {
   getPaymentMethodsForDisplay,
   getNetPaymentMethodsForSale,
@@ -562,8 +564,45 @@ const SalesReports = () => {
     toast.success('Report exported to PDF')
   }
 
+  const handleDownloadAlterationSlip = async (sale: Sale) => {
+    if (!sale.hold_for_alteration) return
+    const an = sale.alteration_notes || ''
+    const purposeMatch = an.match(/^Purpose:\s*(.+?)(?=\n|$)/m)
+    const sentToMatch = an.match(/^Sent to:\s*(.+?)(?=\n|$)/m)
+    const purpose = purposeMatch?.[1]?.trim() || 'Alteration'
+    const sentTo = sentToMatch?.[1]?.trim() || ''
+    let companyInfo: AlterationSlipData['company_info']
+    try {
+      if (sale.company_id) {
+        const co = await companyService.getById(sale.company_id)
+        if (co) companyInfo = { name: co.name, address: co.address, phone: co.phone, email: co.email }
+      }
+    } catch (_) {}
+    const slipData: AlterationSlipData = {
+      invoice_number: sale.invoice_number || '',
+      sale_date: sale.sale_date,
+      customer_name: sale.customer_name || 'Walk-in Customer',
+      items: (sale.items || []).filter(i => i.sale_type !== 'return').map(i => ({
+        product_name: i.product_name,
+        quantity: i.quantity,
+        unit_price: i.unit_price,
+        total: i.total,
+        barcode: i.barcode,
+        purchase_item_article: i.purchase_item_article,
+        sale_type: i.sale_type,
+      })),
+      purpose,
+      sent_to: sentTo,
+      amount_to_pay: sale.amount_to_pay || 0,
+      notes: an.replace(/^Purpose:\s*.+\n?/m, '').replace(/^Sent to:\s*.+\n?/m, '').trim(),
+      company_info: companyInfo,
+    }
+    exportAlterationSlipToPDF(slipData)
+    toast.success('Alteration slip downloaded')
+  }
+
   const renderProductReport = () => (
-    <div className="overflow-x-auto overflow-y-auto max-h-[55vh] border border-gray-200 rounded-lg" style={{ scrollbarGutter: 'stable' }}>
+    <ScrollableTableWrapper minWidth="700px" maxHeight="55vh">
       <table className="w-full min-w-[700px]">
         <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 sticky top-0 z-10">
           <tr>
@@ -594,11 +633,11 @@ const SalesReports = () => {
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollableTableWrapper>
   )
 
   const renderCategoryReport = () => (
-    <div className="overflow-x-auto overflow-y-auto max-h-[55vh] border border-gray-200 rounded-lg" style={{ scrollbarGutter: 'stable' }}>
+    <ScrollableTableWrapper minWidth="700px" maxHeight="55vh">
       <table className="w-full min-w-[700px]">
         <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 sticky top-0 z-10">
           <tr>
@@ -629,11 +668,11 @@ const SalesReports = () => {
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollableTableWrapper>
   )
 
   const renderCustomerReport = () => (
-    <div className="overflow-x-auto overflow-y-auto max-h-[55vh] border border-gray-200 rounded-lg" style={{ scrollbarGutter: 'stable' }}>
+    <ScrollableTableWrapper minWidth="700px" maxHeight="55vh">
       <table className="w-full min-w-[700px]">
         <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 sticky top-0 z-10">
           <tr>
@@ -664,11 +703,11 @@ const SalesReports = () => {
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollableTableWrapper>
   )
 
   const renderSalesPersonReport = () => (
-    <div className="overflow-x-auto overflow-y-auto max-h-[55vh] border border-gray-200 rounded-lg" style={{ scrollbarGutter: 'stable' }}>
+    <ScrollableTableWrapper minWidth="700px" maxHeight="55vh">
       <table className="w-full min-w-[700px]">
         <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 sticky top-0 z-10">
           <tr>
@@ -699,7 +738,7 @@ const SalesReports = () => {
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollableTableWrapper>
   )
 
   const getCurrentReport = () => {
@@ -754,7 +793,7 @@ const SalesReports = () => {
   }
 
   const renderSalesList = () => (
-    <div className="overflow-x-auto overflow-y-auto max-h-[60vh] border border-gray-200 rounded-lg" style={{ scrollbarGutter: 'stable' }}>
+    <ScrollableTableWrapper minWidth="800px" maxHeight="60vh">
       {salesGroupedByDate.map(([dateStr, dateSales]) => {
         const paymentSummary = getPaymentSummaryForSales(dateSales)
         return (
@@ -861,6 +900,9 @@ const SalesReports = () => {
                       ) : (
                         <button onClick={() => showPlanUpgrade('sales_edit')} className="p-2 text-gray-400 hover:bg-gray-100 rounded" title="Upgrade to Premium to edit sale"><LockIcon className="w-4 h-4" /></button>
                       )}
+                      {sale.hold_for_alteration && (
+                        <button onClick={() => handleDownloadAlterationSlip(sale)} className="p-2 text-amber-600 hover:bg-amber-50 rounded" title="Download Alteration Slip"><FileDown className="w-4 h-4" /></button>
+                      )}
                       <button onClick={() => navigate(`/invoice/${sale.id}`)} className="p-2 text-blue-600 hover:bg-blue-50 rounded" title="View Receipt"><Eye className="w-4 h-4" /></button>
                     </div>
                   </td>
@@ -871,7 +913,7 @@ const SalesReports = () => {
         </div>
         )
       })}
-    </div>
+    </ScrollableTableWrapper>
   )
 
   const currentReport = getCurrentReport()

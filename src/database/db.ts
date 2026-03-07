@@ -2,7 +2,7 @@
 // Provides a simple interface to interact with IndexedDB
 
 const DB_NAME = 'hisabkitab_db'
-const DB_VERSION = 22 // Add TECHNICIANS store for service technician list
+const DB_VERSION = 23 // Add ALTERATION_TYPES, ALTERATION_CONTACTS stores
 
 // Object store names (tables)
 export const STORES = {
@@ -41,6 +41,8 @@ export const STORES = {
   EMPLOYEE_GOODS_PURCHASES: 'employee_goods_purchases',
   SERVICES: 'services',
   TECHNICIANS: 'technicians',
+  ALTERATION_TYPES: 'alteration_types',
+  ALTERATION_CONTACTS: 'alteration_contacts',
 } as const
 
 let dbInstance: IDBDatabase | null = null
@@ -376,6 +378,18 @@ export function initDB(config: DBConfig = {}): Promise<IDBDatabase> {
         if (!techStore.indexNames.contains('company_id')) {
           techStore.createIndex('company_id', 'company_id', { unique: false })
         }
+      }
+
+      // Alteration types (Purpose: Alteration, Tailor, etc.)
+      if (!db.objectStoreNames.contains(STORES.ALTERATION_TYPES)) {
+        const typesStore = db.createObjectStore(STORES.ALTERATION_TYPES, { keyPath: 'id' })
+        typesStore.createIndex('company_id', 'company_id', { unique: false })
+      }
+
+      // Alteration contacts (Sent to: tailor, technician)
+      if (!db.objectStoreNames.contains(STORES.ALTERATION_CONTACTS)) {
+        const contactsStore = db.createObjectStore(STORES.ALTERATION_CONTACTS, { keyPath: 'id' })
+        contactsStore.createIndex('company_id', 'company_id', { unique: false })
       }
 
       // Handle EXPENSES store - create if needed, or add missing indexes

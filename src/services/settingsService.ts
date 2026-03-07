@@ -1,6 +1,7 @@
 import { SystemSettings, CompanySettings, InvoiceSettings, TaxSettings, GeneralSettings, ReceiptPrinterSettings, BarcodeLabelSettings, MaintenanceSettings } from '../types/settings'
 import { getById, put, STORES } from '../database/db'
 import { cloudMaintenanceService } from './cloudMaintenanceService'
+import { cloudCompanyService } from './cloudCompanyService'
 
 const SETTINGS_KEY = 'main'
 
@@ -275,17 +276,31 @@ export const settingsService = {
 
   // Get general settings (optionally for a specific company)
   getGeneral: async (companyId?: number): Promise<GeneralSettings> => {
+    const mainSettings = await settingsService.getAll()
+    const mainGeneral = mainSettings.general
+
     if (companyId) {
-      // Get company-specific settings
+      // Try Supabase first (company-level sales targets in companies table)
+      const cloudTargets = await cloudCompanyService.getSalesTargets(companyId)
+      if (cloudTargets && (cloudTargets.sales_target_daily != null || cloudTargets.sales_target_monthly != null)) {
+        const merged = {
+          ...mainGeneral,
+          sales_target_daily: cloudTargets.sales_target_daily ?? mainGeneral.sales_target_daily,
+          sales_target_monthly: cloudTargets.sales_target_monthly ?? mainGeneral.sales_target_monthly,
+        }
+        return merged
+      }
+      // Fallback: company-specific IndexedDB settings
       const key = `company_${companyId}_general`
       const record = await getById<SettingsRecord>(STORES.SETTINGS, key)
       if (record?.settings?.general) {
-        return { ...defaultSettings.general, ...record.settings.general }
+        const companyGeneral = { ...defaultSettings.general, ...record.settings.general }
+        const salesTargetDaily = companyGeneral.sales_target_daily ?? mainGeneral.sales_target_daily
+        const salesTargetMonthly = companyGeneral.sales_target_monthly ?? mainGeneral.sales_target_monthly
+        return { ...companyGeneral, sales_target_daily: salesTargetDaily, sales_target_monthly: salesTargetMonthly }
       }
     }
-    // Fall back to main settings
-    const settings = await settingsService.getAll()
-    return settings.general
+    return mainGeneral
   },
 
   // Update company settings
@@ -361,13 +376,13 @@ export const settingsService = {
   // Update general settings (optionally for a specific company)
   updateGeneral: async (general: Partial<GeneralSettings>, userId?: number, companyId?: number): Promise<GeneralSettings> => {
     if (companyId) {
-      // Store company-specific general settings
+      // Store company-specific general settings in IndexedDB
       const key = `company_${companyId}_general`
       const existing = await getById<SettingsRecord>(STORES.SETTINGS, key)
       const updatedGeneral = existing?.settings?.general
         ? { ...existing.settings.general, ...general }
         : { ...defaultSettings.general, ...general }
-      
+
       await put(STORES.SETTINGS, {
         key,
         settings: {
@@ -376,6 +391,13 @@ export const settingsService = {
           updated_by: userId,
         },
       })
+      // Sync sales targets to Supabase (companies table)
+      if (general.sales_target_daily !== undefined || general.sales_target_monthly !== undefined) {
+        void cloudCompanyService.updateSalesTargets(companyId, {
+          sales_target_daily: updatedGeneral.sales_target_daily,
+          sales_target_monthly: updatedGeneral.sales_target_monthly,
+        })
+      }
       return updatedGeneral as GeneralSettings
     } else {
       // Update main settings

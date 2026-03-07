@@ -15,6 +15,7 @@ import { exportToExcel as exportExcel, exportDataToPDF } from '../utils/exportUt
 import { productService, categoryService, Product, Category } from '../services/productService'
 import { purchaseService, supplierService } from '../services/purchaseService'
 import type { Purchase, Supplier } from '../types/purchase'
+import { ScrollableTableWrapper } from '../components/ScrollableTableWrapper'
 import {
   PURCHASE_REPORT_COLUMNS,
   DEFAULT_VISIBLE_COLUMNS,
@@ -335,7 +336,7 @@ const PurchaseReports = () => {
   }
 
   const renderSupplierReport = () => (
-    <div className="overflow-x-auto overflow-y-auto max-h-[55vh] border border-gray-200 rounded-lg" style={{ scrollbarGutter: 'stable' }}>
+    <ScrollableTableWrapper minWidth="700px" maxHeight="55vh">
       <table className="w-full min-w-[700px]">
         <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 sticky top-0 z-10">
           <tr>
@@ -360,11 +361,11 @@ const PurchaseReports = () => {
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollableTableWrapper>
   )
 
   const renderProductReport = () => (
-    <div className="overflow-x-auto overflow-y-auto max-h-[55vh] border border-gray-200 rounded-lg" style={{ scrollbarGutter: 'stable' }}>
+    <ScrollableTableWrapper minWidth="700px" maxHeight="55vh">
       <table className="w-full min-w-[700px]">
         <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 sticky top-0 z-10">
           <tr>
@@ -391,11 +392,11 @@ const PurchaseReports = () => {
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollableTableWrapper>
   )
 
   const renderCategoryReport = () => (
-    <div className="overflow-x-auto overflow-y-auto max-h-[55vh] border border-gray-200 rounded-lg" style={{ scrollbarGutter: 'stable' }}>
+    <ScrollableTableWrapper minWidth="700px" maxHeight="55vh">
       <table className="w-full min-w-[700px]">
         <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 sticky top-0 z-10">
           <tr>
@@ -418,7 +419,7 @@ const PurchaseReports = () => {
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollableTableWrapper>
   )
 
   const purchasesGroupedByDate = useMemo(() => {
@@ -432,7 +433,7 @@ const PurchaseReports = () => {
   }, [filteredPurchases])
 
   const renderPurchasesList = () => (
-    <div className="overflow-x-auto overflow-y-auto max-h-[60vh] border border-gray-200 rounded-lg" style={{ scrollbarGutter: 'stable' }}>
+    <ScrollableTableWrapper minWidth="800px" maxHeight="60vh">
       {purchasesGroupedByDate.map(([dateStr, datePurchases]) => (
         <div key={dateStr} className="mb-6">
           <div className="bg-gradient-to-r from-amber-600 to-orange-600 text-white px-4 py-3 rounded-t-lg sticky top-0 z-10">
@@ -477,7 +478,7 @@ const PurchaseReports = () => {
           </table>
         </div>
       ))}
-    </div>
+    </ScrollableTableWrapper>
   )
 
   const getCurrentReport = () => {

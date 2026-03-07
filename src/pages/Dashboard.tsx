@@ -93,7 +93,7 @@ interface ReportSummary {
   onClick?: () => void // Optional click handler
 }
 
-type TimePeriod = 'all' | 'today' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
+type TimePeriod = 'all' | 'today' | 'yesterday' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'custom'
 
 // Footer apps: 12+ FreeToolHub tools (direct links) + BlessedBump + FreeToolHub main. Add new tools here.
 const FOOTER_APPS: Array<{ name: string; url: string; color: string; icon: 'calculator' | 'trending' | 'dollar' | 'wifi' | 'heart' | 'wrench' | 'filetext' }> = [
@@ -155,7 +155,7 @@ const Dashboard = () => {
   const [footerRotationIndex, setFooterRotationIndex] = useState(0)
   const [reports, setReports] = useState<ReportSummary[]>([])
   const [currentTime, setCurrentTime] = useState(new Date())
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>('all')
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>('today')
   const [customStartDate, setCustomStartDate] = useState('')
   const [customEndDate, setCustomEndDate] = useState('')
   const [unreadNotifications, setUnreadNotifications] = useState(0)
@@ -433,6 +433,13 @@ const Dashboard = () => {
         endDate = toLocalDateString(today)
         break
       }
+      case 'yesterday': {
+        const yesterday = new Date(now)
+        yesterday.setDate(now.getDate() - 1)
+        startDate = toLocalDateString(yesterday)
+        endDate = toLocalDateString(yesterday)
+        break
+      }
       case 'thisWeek': {
         const weekStart = new Date(now)
         weekStart.setDate(now.getDate() - now.getDay())
@@ -497,27 +504,27 @@ const Dashboard = () => {
     // Get date range based on selected time period
     const { startDate, endDate } = getDateRange()
 
-    // Filter sales by date range
+    // Get date as YYYY-MM-DD in local timezone (avoids UTC/local mismatch)
+    const getLocalDateStr = (dateInput: string | Date): string => {
+      const d = new Date(dateInput)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    }
+
+    // Filter sales by date range (compare calendar days in local timezone)
     const filteredSales = allSales.filter(sale => {
       if (!startDate && !endDate) return true
-      const saleDate = new Date(sale.sale_date).getTime()
-      if (startDate && saleDate < new Date(startDate).getTime()) return false
-      if (endDate) {
-        const endDateTime = new Date(endDate).getTime() + 86400000 // Add 24 hours to include entire end date
-        if (saleDate > endDateTime) return false
-      }
+      const saleDateStr = getLocalDateStr(sale.sale_date)
+      if (startDate && saleDateStr < startDate) return false
+      if (endDate && saleDateStr > endDate) return false
       return true
     })
 
     // Filter purchases by date range
     const filteredPurchases = allPurchases.filter(purchase => {
       if (!startDate && !endDate) return true
-      const purchaseDate = new Date(purchase.purchase_date).getTime()
-      if (startDate && purchaseDate < new Date(startDate).getTime()) return false
-      if (endDate) {
-        const endDateTime = new Date(endDate).getTime() + 86400000 // Add 24 hours to include entire end date
-        if (purchaseDate > endDateTime) return false
-      }
+      const purchaseDateStr = getLocalDateStr(purchase.purchase_date)
+      if (startDate && purchaseDateStr < startDate) return false
+      if (endDate && purchaseDateStr > endDate) return false
       return true
     })
 
@@ -574,12 +581,9 @@ const Dashboard = () => {
     const filteredExpenses = allExpenses.filter(exp => {
       if (exp.expense_type === 'opening' || exp.expense_type === 'closing') return false
       if (!startDate && !endDate) return true
-      const expDate = new Date(exp.expense_date).getTime()
-      if (startDate && expDate < new Date(startDate).getTime()) return false
-      if (endDate) {
-        const endDateTime = new Date(endDate).getTime() + 86400000
-        if (expDate > endDateTime) return false
-      }
+      const expDateStr = getLocalDateStr(exp.expense_date)
+      if (startDate && expDateStr < startDate) return false
+      if (endDate && expDateStr > endDate) return false
       return true
     })
     const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0)
@@ -1503,35 +1507,126 @@ const Dashboard = () => {
                   </button>
                 </div>
                 {generalSettings.sales_target_daily != null && generalSettings.sales_target_daily > 0 || generalSettings.sales_target_monthly != null && generalSettings.sales_target_monthly > 0 ? (
-                  <div className="flex flex-wrap gap-4">
-                    {generalSettings.sales_target_daily != null && generalSettings.sales_target_daily > 0 && (
-                      <div className="flex-1 min-w-[140px]">
-                        <p className="text-xs text-gray-600 mb-0.5">Daily</p>
-                        <p className="text-base font-bold text-gray-900">
-                          ₹{dashboardStats.todaySales.toLocaleString('en-IN', { maximumFractionDigits: 0 })} of ₹{generalSettings.sales_target_daily.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                        </p>
-                        <div className="mt-1 h-2 bg-gray-200 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-r from-emerald-500 to-teal-600 rounded-full"
-                            style={{ width: `${Math.min(100, (dashboardStats.todaySales / generalSettings.sales_target_daily) * 100)}%` }}
-                          />
-                        </div>
+                  <div className="space-y-4">
+                    {/* Reminder block – polished design at top */}
+                    <div className="rounded-xl bg-white/80 backdrop-blur-sm border border-emerald-200/80 shadow-sm overflow-hidden">
+                      <div className="p-4 sm:p-5 space-y-4">
+                        {generalSettings.sales_target_daily != null && generalSettings.sales_target_daily > 0 && (() => {
+                          const todaySales = dashboardStats.todaySales
+                          const dailyTarget = generalSettings.sales_target_daily!
+                          const dailyRemaining = Math.max(0, dailyTarget - todaySales)
+                          const dailyDone = todaySales >= dailyTarget
+                          return (
+                            <div className="flex items-start gap-3">
+                              <div className={`flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center ${dailyDone ? 'bg-emerald-100' : 'bg-amber-50'}`}>
+                                <Clock className={`w-5 h-5 ${dailyDone ? 'text-emerald-600' : 'text-amber-600'}`} />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Today</p>
+                                <p className="text-base font-semibold text-gray-900 mt-0.5">
+                                  You reached ₹{todaySales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                  {dailyDone
+                                    ? <span className="text-emerald-600 ml-1">— daily target achieved! ✓</span>
+                                    : <span className="text-amber-700 ml-1">— need ₹{dailyRemaining.toLocaleString('en-IN', { maximumFractionDigits: 0 })} more</span>
+                                  }
+                                </p>
+                              </div>
+                            </div>
+                          )
+                        })()}
+                        {generalSettings.sales_target_monthly != null && generalSettings.sales_target_monthly > 0 && (() => {
+                          const now = new Date()
+                          const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+                          const daysGone = now.getDate()
+                          const expectedByNow = (daysGone / daysInMonth) * generalSettings.sales_target_monthly!
+                          const actual = dashboardStats.thisMonthSales
+                          const diff = actual - expectedByNow
+                          const remaining = generalSettings.sales_target_monthly! - actual
+                          const isAhead = diff > 0
+                          const isBehind = diff < -500
+                          const MOTIVATIONAL = {
+                            ahead: ['Keep the momentum going!', 'You\'re doing great — stay consistent.', 'Ahead of schedule! Celebrate the wins.'],
+                            behind: ['Every sale counts — you\'ve got this!', 'Focus on today. Small steps lead to big results.', 'The month isn\'t over yet. Push a little harder!'],
+                            onTrack: ['You\'re on track. Keep it up!', 'Steady progress wins the race.', 'Right on schedule. Stay focused.'],
+                          }
+                          const arr = isAhead ? MOTIVATIONAL.ahead : isBehind ? MOTIVATIONAL.behind : MOTIVATIONAL.onTrack
+                          const msg = arr[daysGone % arr.length]
+                          return (
+                            <>
+                              <div className="flex items-start gap-3">
+                                <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                                  <Calendar className="w-5 h-5 text-blue-600" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">This month</p>
+                                  <p className="text-base font-semibold text-gray-900 mt-0.5">
+                                    {daysInMonth} days total · {daysGone} days gone
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {isAhead && (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-800 text-sm font-semibold">
+                                    <ArrowUpRight className="w-4 h-4" /> Ahead by ₹{Math.round(diff).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                  </span>
+                                )}
+                                {isBehind && (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-100 text-amber-800 text-sm font-semibold">
+                                    <ArrowDownRight className="w-4 h-4" /> Behind by ₹{Math.round(-diff).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                  </span>
+                                )}
+                                {remaining > 0 && (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 text-gray-800 text-sm font-semibold">
+                                    <TrendingUp className="w-4 h-4" /> ₹{Math.round(remaining).toLocaleString('en-IN', { maximumFractionDigits: 0 })} to go
+                                  </span>
+                                )}
+                                {remaining <= 0 && (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 text-sm font-semibold">🎉 Monthly target achieved!</span>
+                                )}
+                              </div>
+                              <div className="pt-2 border-t border-emerald-100">
+                                <p className="text-sm italic text-gray-600 flex items-start gap-2">
+                                  <span className="text-emerald-400 mt-0.5">"</span>
+                                  <span>{msg}</span>
+                                  <span className="text-emerald-400">"</span>
+                                </p>
+                              </div>
+                            </>
+                          )
+                        })()}
                       </div>
-                    )}
-                    {generalSettings.sales_target_monthly != null && generalSettings.sales_target_monthly > 0 && (
-                      <div className="flex-1 min-w-[140px]">
-                        <p className="text-xs text-gray-600 mb-0.5">Monthly</p>
-                        <p className="text-base font-bold text-gray-900">
-                          ₹{dashboardStats.thisMonthSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })} of ₹{generalSettings.sales_target_monthly.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                        </p>
-                        <div className="mt-1 h-2 bg-gray-200 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-r from-emerald-500 to-teal-600 rounded-full"
-                            style={{ width: `${Math.min(100, (dashboardStats.thisMonthSales / generalSettings.sales_target_monthly) * 100)}%` }}
-                          />
+                    </div>
+                    {/* Progress bars */}
+                    <div className="flex flex-wrap gap-4">
+                      {generalSettings.sales_target_daily != null && generalSettings.sales_target_daily > 0 && (
+                        <div className="flex-1 min-w-[140px]">
+                          <p className="text-xs text-gray-600 mb-0.5">Daily</p>
+                          <p className="text-base font-bold text-gray-900">
+                            ₹{dashboardStats.todaySales.toLocaleString('en-IN', { maximumFractionDigits: 0 })} of ₹{generalSettings.sales_target_daily.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                          </p>
+                          <div className="mt-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-emerald-500 to-teal-600 rounded-full"
+                              style={{ width: `${Math.min(100, (dashboardStats.todaySales / generalSettings.sales_target_daily) * 100)}%` }}
+                            />
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
+                      {generalSettings.sales_target_monthly != null && generalSettings.sales_target_monthly > 0 && (
+                        <div className="flex-1 min-w-[140px]">
+                          <p className="text-xs text-gray-600 mb-0.5">Monthly</p>
+                          <p className="text-base font-bold text-gray-900">
+                            ₹{dashboardStats.thisMonthSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })} of ₹{generalSettings.sales_target_monthly.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                          </p>
+                          <div className="mt-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-emerald-500 to-teal-600 rounded-full"
+                              style={{ width: `${Math.min(100, (dashboardStats.thisMonthSales / generalSettings.sales_target_monthly) * 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <p className="text-sm text-gray-600">
@@ -1973,6 +2068,16 @@ const Dashboard = () => {
                       }`}
                     >
                       Today
+                    </button>
+                    <button
+                      onClick={() => setTimePeriod('yesterday')}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        timePeriod === 'yesterday'
+                          ? 'bg-blue-600 text-white shadow-md'
+                          : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
+                      }`}
+                    >
+                      Yesterday
                     </button>
                     <button
                       onClick={() => setTimePeriod('thisWeek')}

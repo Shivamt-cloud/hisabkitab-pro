@@ -15,9 +15,11 @@ import { Breadcrumbs } from '../components/Breadcrumbs'
 import CustomerModal from '../components/CustomerModal'
 import { usePlanUpgrade } from '../context/PlanUpgradeContext'
 import { LockIcon } from '../components/icons/LockIcon'
-import { X, Plus, Trash2, Search, ShoppingCart, Home, User, Pause, Play, RotateCcw, PenSquare } from 'lucide-react'
+import { X, Plus, Trash2, Search, ShoppingCart, Home, User, Pause, Play, RotateCcw, PenSquare, Download } from 'lucide-react'
 import { SaleItem, Sale } from '../types/sale'
 import { Purchase, PurchaseItem } from '../types/purchase'
+import { exportAlterationSlipToPDF, type AlterationSlipData } from '../utils/exportUtils'
+import { companyService } from '../services/companyService'
 
 const SaleForm = () => {
   const navigate = useNavigate()
@@ -77,6 +79,13 @@ const SaleForm = () => {
   const [saleSegmentId, setSaleSegmentId] = useState<number | null>(null) // Price segment for this sale (null = Retail/default)
   const [priceSegments, setPriceSegments] = useState<Array<{ id: number; name: string; description?: string; is_default: boolean }>>([])
   const [isSubmitting, setIsSubmitting] = useState(false) // Prevent double-click on Complete Sale
+
+  // Alteration: hold for balance on collection (e.g. after tailor)
+  const [holdForAlteration, setHoldForAlteration] = useState(false)
+  const [alterationPurpose, setAlterationPurpose] = useState('') // Purpose (e.g. Alteration, Tailor)
+  const [alterationSentTo, setAlterationSentTo] = useState('') // Sent to (tailor/technician)
+  const [alterationNotes, setAlterationNotes] = useState('') // Additional notes
+  const [amountToPay, setAmountToPay] = useState<number>(0) // Amount to pay to tailor/technician
 
   // Segment pricing: key = priceKey(productId, segmentId, article). When user selects segment, override product prices.
   const segmentPricesMapRef = useRef<Map<string, number>>(new Map())
@@ -345,6 +354,19 @@ const SaleForm = () => {
           salesPersonId: sale.sales_person_id ?? '',
           creditApplied: cred,
         }
+        // Alteration fields
+        setHoldForAlteration(sale.hold_for_alteration ?? false)
+        setAmountToPay(sale.amount_to_pay ?? 0)
+        const an = sale.alteration_notes ?? ''
+        let purpose = '', sentTo = '', notes = ''
+        for (const line of an.split('\n')) {
+          if (line.startsWith('Purpose: ')) purpose = line.slice(9).trim()
+          else if (line.startsWith('Sent to: ')) sentTo = line.slice(9).trim()
+          else if (line.trim()) notes = notes ? notes + '\n' + line : line
+        }
+        setAlterationPurpose(purpose)
+        setAlterationSentTo(sentTo)
+        setAlterationNotes(notes)
       } catch (err) {
         console.error('Error loading sale for edit:', err)
         toast.error('Failed to load sale')
@@ -2128,9 +2150,9 @@ const SaleForm = () => {
     const creditPaymentTotal = creditPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
     const returnAmount = Math.max(0, paymentTotal - grandTotal)
     
-    // Validate: payment + credit applied + credit payment should be at least equal to grand total
+    // Validate: payment must cover grand total, unless Alteration / Hold for collection (partial payment allowed)
     const totalCoverage = paymentTotal + creditApplied + creditPaymentTotal
-    if (totalCoverage < grandTotal - 0.01) {
+    if (!holdForAlteration && totalCoverage < grandTotal - 0.01) {
       setIsSubmitting(false)
       setErrors({ payment: `Payment total (₹${paymentTotal.toFixed(2)}) + Credit Applied (₹${creditApplied.toFixed(2)}) + Credit Payment (₹${creditPaymentTotal.toFixed(2)}) is less than grand total (₹${grandTotal.toFixed(2)})` })
       return
@@ -2217,6 +2239,13 @@ const SaleForm = () => {
       return_amount: returnAmount > 0 ? returnAmount : undefined, // Store return amount if any
       credit_applied: creditApplied > 0 ? creditApplied : undefined, // Store credit applied if any
       internal_remarks: finalInternalRemarks || undefined, // Internal remarks + auto edit change log
+      hold_for_alteration: holdForAlteration || undefined,
+      alteration_notes: holdForAlteration
+        ? [alterationPurpose && `Purpose: ${alterationPurpose}`, alterationSentTo && `Sent to: ${alterationSentTo}`, alterationNotes].filter(Boolean).join('\n')
+        : undefined,
+      alteration_type_id: undefined, // Reserved for future dropdown
+      sent_to_contact_id: undefined, // Reserved for future dropdown
+      amount_to_pay: holdForAlteration && amountToPay > 0 ? amountToPay : undefined,
       sale_date: new Date().toISOString(),
       company_id: getCurrentCompanyId() || undefined,
       created_by: parseInt(user?.id || '1')
@@ -2273,6 +2302,14 @@ const SaleForm = () => {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => { window.open('/sales/new', '_blank') }}
+                className="flex items-center justify-center w-10 h-10 rounded-lg border border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100 transition-colors"
+                title="New sale"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
               {saleItems.length > 0 && (
                 <button
                   type="button"
@@ -2972,6 +3009,113 @@ const SaleForm = () => {
                 </div>
               </div>
 
+              {/* Alteration / Hold for collection */}
+              <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6 border border-white/50">
+                <h2 className="text-xl font-bold text-gray-900 mb-4">Alteration / Hold for collection</h2>
+                <div className="space-y-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={holdForAlteration}
+                      onChange={(e) => setHoldForAlteration(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">
+                      Hold for alteration (customer pays part now, balance on collection)
+                    </span>
+                  </label>
+                  {holdForAlteration && (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">Purpose (e.g. Alteration, Tailor)</label>
+                          <input
+                            type="text"
+                            value={alterationPurpose}
+                            onChange={(e) => setAlterationPurpose(e.target.value)}
+                            placeholder="Alteration"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">Sent to (tailor/technician)</label>
+                          <input
+                            type="text"
+                            value={alterationSentTo}
+                            onChange={(e) => setAlterationSentTo(e.target.value)}
+                            placeholder="Tailor name"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Amount to pay (to tailor/technician) ₹</label>
+                        <input
+                          type="number"
+                          value={amountToPay || ''}
+                          onChange={(e) => setAmountToPay(Math.max(0, parseFloat(e.target.value) || 0))}
+                          placeholder="0"
+                          min="0"
+                          step="0.01"
+                          className="w-full max-w-xs px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Notes (e.g. Cast – collect after alteration)</label>
+                        <textarea
+                          value={alterationNotes}
+                          onChange={(e) => setAlterationNotes(e.target.value)}
+                          placeholder="Optional notes"
+                          rows={2}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        />
+                      </div>
+                      {saleItems.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            let companyInfo: AlterationSlipData['company_info']
+                            try {
+                              const cid = getCurrentCompanyId()
+                              if (cid) {
+                                const co = await companyService.getById(cid)
+                                if (co) companyInfo = { name: co.name, address: co.address, phone: co.phone, email: co.email }
+                              }
+                            } catch (_) {}
+                            const slipData: AlterationSlipData = {
+                              invoice_number: isEditing ? editingInvoiceNumber : 'Draft',
+                              sale_date: new Date().toISOString(),
+                              customer_name: customers.find(c => c.id === customerId)?.name || 'Walk-in Customer',
+                              items: saleItems.filter(i => i.sale_type !== 'return').map(i => ({
+                                product_name: i.product_name,
+                                quantity: i.quantity,
+                                unit_price: i.unit_price,
+                                total: i.total,
+                                barcode: i.barcode,
+                                purchase_item_article: i.purchase_item_article,
+                                sale_type: i.sale_type,
+                              })),
+                              purpose: alterationPurpose?.trim() || 'Alteration',
+                              sent_to: alterationSentTo?.trim() || '',
+                              amount_to_pay: amountToPay || 0,
+                              notes: alterationNotes?.trim() || '',
+                              company_info: companyInfo,
+                            }
+                            exportAlterationSlipToPDF(slipData)
+                            toast.success('Alteration slip downloaded')
+                          }}
+                          className="flex items-center gap-2 px-4 py-2 bg-amber-100 text-amber-800 rounded-xl hover:bg-amber-200 transition-colors font-medium"
+                          title="Download slip for tailor/technician"
+                        >
+                          <Download className="w-4 h-4" />
+                          Download Alteration Slip
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+
               {/* Payment Details */}
               <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6 border border-white/50">
                 <h2 className="text-xl font-bold text-gray-900 mb-4">Payment Details</h2>
@@ -3285,10 +3429,13 @@ const SaleForm = () => {
                     {(() => {
                       // Separate credit payments from actual payments
                       const nonCreditPayments = paymentMethods.filter(p => p.method !== 'credit')
+                      const creditPayments = paymentMethods.filter(p => p.method === 'credit')
+                      const creditPaymentTotal = creditPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
                       const paymentTotalBeforeRounding = nonCreditPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
                       const paymentTotal = roundUp(paymentTotalBeforeRounding) // Round up total paid
                       const grandTotal = getGrandTotal() // Already rounded
-                      const amountDue = Math.max(0, grandTotal - paymentTotal - creditApplied)
+                      const totalPaid = paymentTotal + creditApplied + creditPaymentTotal
+                      const balanceDue = Math.max(0, grandTotal - totalPaid)
                       const returnAmount = Math.max(0, paymentTotal - grandTotal)
                       
                       if (returnAmount > 0) {
@@ -3309,11 +3456,25 @@ const SaleForm = () => {
                             </span>
                           </div>
                         )
-                      } else if (paymentTotal + creditApplied < grandTotal - 0.01) {
+                      } else if (balanceDue > 0.01) {
+                        if (holdForAlteration) {
+                          const purpose = alterationPurpose?.trim() || 'Alteration'
+                          return (
+                            <div className="flex flex-col gap-1 bg-amber-50 p-3 rounded-lg border border-amber-200">
+                              <div className="flex justify-between items-center">
+                                <span className="text-sm font-semibold text-amber-800">Balance Due:</span>
+                                <span className="text-lg font-bold text-amber-700">₹{balanceDue.toFixed(2)}</span>
+                              </div>
+                              <p className="text-xs text-amber-700">
+                                Product is with us for {purpose}. Due amount will be paid by the customer while receiving the product.
+                              </p>
+                            </div>
+                          )
+                        }
                         return (
                           <div className="flex justify-between items-center bg-red-50 p-3 rounded-lg border border-red-200">
                             <span className="text-sm font-semibold text-red-700">Balance Due:</span>
-                            <span className="text-lg font-bold text-red-600">₹{(grandTotal - paymentTotal).toFixed(2)}</span>
+                            <span className="text-lg font-bold text-red-600">₹{balanceDue.toFixed(2)}</span>
                           </div>
                         )
                       }
@@ -3374,6 +3535,8 @@ const SaleForm = () => {
                   type="submit"
                   disabled={isSubmitting || (() => {
                     if (saleItems.length === 0) return true
+                    // Alteration / Hold for collection: allow partial payment
+                    if (holdForAlteration) return false
                     const hasReturnItems = saleItems.some(item => item.sale_type === 'return')
                     const hasSaleItems = saleItems.some(item => item.sale_type === 'sale')
                     const nonCreditPayments = paymentMethods.filter(p => p.method !== 'credit')

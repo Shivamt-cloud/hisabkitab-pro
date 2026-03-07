@@ -47,6 +47,12 @@ export interface Sale {
   credit_added?: number // Amount of credit added to customer from returns
   notes?: string // Customer-facing notes (shown on invoice)
   internal_remarks?: string // Internal remarks (NOT shown to customers, only in reports)
+  /** Alteration: hold for balance on collection (e.g. after tailor) */
+  hold_for_alteration?: boolean
+  alteration_notes?: string
+  alteration_type_id?: number
+  sent_to_contact_id?: number
+  amount_to_pay?: number
   /** When set, this sale is for parts/products sold during this service */
   service_id?: number
   company_id?: number

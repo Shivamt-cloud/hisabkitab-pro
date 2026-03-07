@@ -6,8 +6,9 @@ import { useNavigate } from 'react-router-dom'
 import { saleService } from '../services/saleService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Sale } from '../types/sale'
-import { Eye, ShoppingCart, TrendingUp, DollarSign, Archive, Home, FileSpreadsheet, FileText, Trash2, Pencil } from 'lucide-react'
-import { exportToExcel as exportExcel, exportDataToPDF } from '../utils/exportUtils'
+import { Eye, ShoppingCart, TrendingUp, DollarSign, Archive, Home, FileSpreadsheet, FileText, Trash2, Pencil, FileDown } from 'lucide-react'
+import { exportToExcel as exportExcel, exportDataToPDF, exportAlterationSlipToPDF, type AlterationSlipData } from '../utils/exportUtils'
+import { companyService } from '../services/companyService'
 import { LockIcon } from '../components/icons/LockIcon'
 
 type TimePeriod = 'all' | 'today' | 'yesterday' | 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom'
@@ -236,6 +237,43 @@ const SalesHistory = () => {
     const filename = `sales_history_${timePeriod}_${new Date().toISOString().split('T')[0]}`
     exportExcel(rows, headers, filename, 'Sales History')
     toast.success('Sales history exported to Excel')
+  }
+
+  const handleDownloadAlterationSlip = async (sale: Sale) => {
+    if (!sale.hold_for_alteration) return
+    const an = sale.alteration_notes || ''
+    const purposeMatch = an.match(/^Purpose:\s*(.+?)(?=\n|$)/m)
+    const sentToMatch = an.match(/^Sent to:\s*(.+?)(?=\n|$)/m)
+    const purpose = purposeMatch?.[1]?.trim() || 'Alteration'
+    const sentTo = sentToMatch?.[1]?.trim() || ''
+    let companyInfo: AlterationSlipData['company_info']
+    try {
+      if (sale.company_id) {
+        const co = await companyService.getById(sale.company_id)
+        if (co) companyInfo = { name: co.name, address: co.address, phone: co.phone, email: co.email }
+      }
+    } catch (_) {}
+    const slipData: AlterationSlipData = {
+      invoice_number: sale.invoice_number || '',
+      sale_date: sale.sale_date,
+      customer_name: sale.customer_name || 'Walk-in Customer',
+      items: (sale.items || []).filter(i => i.sale_type !== 'return').map(i => ({
+        product_name: i.product_name,
+        quantity: i.quantity,
+        unit_price: i.unit_price,
+        total: i.total,
+        barcode: i.barcode,
+        purchase_item_article: i.purchase_item_article,
+        sale_type: i.sale_type,
+      })),
+      purpose,
+      sent_to: sentTo,
+      amount_to_pay: sale.amount_to_pay || 0,
+      notes: an.replace(/^Purpose:\s*.+\n?/m, '').replace(/^Sent to:\s*.+\n?/m, '').trim(),
+      company_info: companyInfo,
+    }
+    exportAlterationSlipToPDF(slipData)
+    toast.success('Alteration slip downloaded')
   }
 
   const exportToPDF = () => {
@@ -689,6 +727,15 @@ const SalesHistory = () => {
                                 title="Delete Sale"
                               >
                                 <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                            {sale.hold_for_alteration && (
+                              <button
+                                onClick={() => handleDownloadAlterationSlip(sale)}
+                                className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                                title="Download Alteration Slip"
+                              >
+                                <FileDown className="w-4 h-4" />
                               </button>
                             )}
                             <button

@@ -612,6 +612,11 @@ export type ReceiptInvoiceData = {
   return_amount?: number
   credit_applied?: number
   credit_balance?: number
+  /** Alteration: product held for alteration, balance due on collection */
+  hold_for_alteration?: boolean
+  alteration_purpose?: string
+  alteration_notes?: string
+  balance_due?: number
   company_info?: {
     name?: string
     address?: string
@@ -1010,6 +1015,16 @@ export function buildReceiptHTML(
     </div>
     ` : ''}
 
+    ${(invoiceData as any).hold_for_alteration && (invoiceData as any).balance_due > 0 ? `
+    <div class="section" style="background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; padding: 10px; margin-top: 8px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <span style="font-size: 11px; font-weight: 600; color: #92400e;">Balance Due:</span>
+        <span style="font-size: 13px; font-weight: 700; color: #b45309;">₹${((invoiceData as any).balance_due || 0).toFixed(2)}</span>
+      </div>
+      <div style="font-size: 10px; color: #92400e;">Product is with us for ${(invoiceData as any).alteration_purpose || 'Alteration'}. Due amount will be paid by the customer while receiving the product.</div>
+    </div>
+    ` : ''}
+
     ${showNotes ? `
     <div class="section">
       <div class="section-title">Notes</div>
@@ -1024,14 +1039,20 @@ export function buildReceiptHTML(
       ${whatsappNumber ? `<div style="margin-top: 2px; font-size: 9px;">WhatsApp: ${whatsappNumber}</div>` : ''}
       ${instagramHandle ? `<div style="margin-top: 2px; font-size: 9px;">Instagram: ${instagramHandle}</div>` : ''}
       ${facebookPage ? `<div style="margin-top: 2px; font-size: 9px;">Facebook: ${facebookPage}</div>` : ''}
-      <div style="margin-top: 6px; font-size: 10px; font-weight: 600; color: #4f46e5;">${POWERED_BY_TEXT}</div>
-      <div style="margin-top: 2px; font-size: 9px;">${POWERED_BY_CONTACT}</div>
+      <div class="powered-by" style="margin-top: 8px; padding-top: 6px; border-top: 1px dashed #ccc;">
+        <div style="font-size: 9px; font-weight: bold; color: #4f46e5; text-transform: uppercase; margin-bottom: 2px;">Powered by</div>
+        <div style="font-size: 10px; font-weight: 600; color: #4f46e5;">${POWERED_BY_TEXT}</div>
+        <div style="margin-top: 2px; font-size: 9px;">${POWERED_BY_CONTACT}</div>
+      </div>
       <div style="margin-top: 4px; font-size: 9px;">This is a computer-generated receipt</div>
     </div>
     ` : `
     <div class="footer">
-      <div style="margin-top: 6px; font-size: 10px; font-weight: 600; color: #4f46e5;">${POWERED_BY_TEXT}</div>
-      <div style="margin-top: 2px; font-size: 9px;">${POWERED_BY_CONTACT}</div>
+      <div class="powered-by" style="margin-top: 4px; padding-top: 6px; border-top: 1px dashed #ccc;">
+        <div style="font-size: 9px; font-weight: bold; color: #4f46e5; text-transform: uppercase; margin-bottom: 2px;">Powered by</div>
+        <div style="font-size: 10px; font-weight: 600; color: #4f46e5;">${POWERED_BY_TEXT}</div>
+        <div style="margin-top: 2px; font-size: 9px;">${POWERED_BY_CONTACT}</div>
+      </div>
       <div style="margin-top: 4px; font-size: 9px;">This is a computer-generated receipt</div>
     </div>`}
   </div>
@@ -1069,6 +1090,138 @@ export function printReceipt(
   
   // Focus window for printing
   receiptWindow.focus()
+}
+
+/** Data for Alteration Slip (for tailor/technician) */
+export interface AlterationSlipData {
+  invoice_number: string
+  sale_date: string
+  customer_name: string
+  items: Array<{
+    product_name: string
+    quantity: number
+    unit_price?: number
+    total?: number
+    barcode?: string
+    purchase_item_article?: string
+    sale_type?: string
+  }>
+  purpose: string
+  sent_to: string
+  amount_to_pay: number
+  notes: string
+  company_info?: {
+    name?: string
+    address?: string
+    phone?: string
+    email?: string
+  }
+}
+
+/**
+ * Export Alteration Slip to PDF for tailor/technician.
+ * Compact slip format (80mm width, receipt-style).
+ */
+export function exportAlterationSlipToPDF(
+  data: AlterationSlipData,
+  filename: string = `Alteration_Slip_${data.invoice_number || 'Draft'}.pdf`
+): void {
+  const pageWidth = 80
+  const pageHeight = 250
+  const pdf = new jsPDF('p', 'mm', [pageWidth, pageHeight] as [number, number])
+  const margin = 4
+  const contentWidth = pageWidth - margin * 2
+  let y = margin + 2
+
+  // Title
+  pdf.setFontSize(11)
+  pdf.setFont('helvetica', 'bold')
+  pdf.text('ALTERATION SLIP', margin, y)
+  y += 6
+
+  // Company
+  pdf.setFontSize(8)
+  pdf.text(data.company_info?.name || 'HisabKitab', margin, y)
+  y += 4
+  pdf.setFont('helvetica', 'normal')
+  pdf.setFontSize(7)
+  if (data.company_info?.address) {
+    const addrLines = pdf.splitTextToSize(data.company_info.address, contentWidth)
+    addrLines.forEach((line: string) => {
+      pdf.text(line, margin, y)
+      y += 3.5
+    })
+  }
+  if (data.company_info?.phone) {
+    pdf.text(`Ph: ${data.company_info.phone}`, margin, y)
+    y += 4
+  }
+  y += 2
+
+  // Divider
+  pdf.setDrawColor(180, 180, 180)
+  pdf.setLineWidth(0.2)
+  pdf.line(margin, y, pageWidth - margin, y)
+  y += 4
+
+  // Invoice & Date
+  pdf.setFont('helvetica', 'bold')
+  pdf.setFontSize(7)
+  pdf.text(`Inv: ${data.invoice_number || 'Draft'}`, margin, y)
+  pdf.text(new Date(data.sale_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }), pageWidth - margin, y, { align: 'right' })
+  y += 4
+
+  // Customer
+  pdf.setFont('helvetica', 'normal')
+  const custLines = pdf.splitTextToSize(`Customer: ${data.customer_name || 'Walk-in'}`, contentWidth)
+  custLines.forEach((l: string) => { pdf.text(l, margin, y); y += 3.5 })
+  y += 2
+
+  // Products
+  pdf.setFont('helvetica', 'bold')
+  pdf.setFontSize(7)
+  pdf.text('Products:', margin, y)
+  y += 4
+  pdf.setFont('helvetica', 'normal')
+  data.items.forEach((item, i) => {
+    if (item.sale_type === 'return') return
+    const desc = `${i + 1}. ${item.product_name} | Qty: ${item.quantity}${item.purchase_item_article ? ` | Art: ${item.purchase_item_article}` : ''}`
+    const lines = pdf.splitTextToSize(desc, contentWidth)
+    lines.forEach((line: string) => {
+      pdf.text(line, margin, y)
+      y += 3.5
+    })
+    y += 1
+  })
+  y += 3
+
+  // Alteration details box
+  pdf.setDrawColor(180, 180, 180)
+  pdf.rect(margin, y - 1, contentWidth, 32)
+  pdf.setFont('helvetica', 'bold')
+  pdf.setFontSize(8)
+  pdf.text('Alteration Details', margin + 2, y + 4)
+  pdf.setFont('helvetica', 'normal')
+  pdf.setFontSize(7)
+  pdf.text(`Purpose: ${data.purpose || 'Alteration'}`, margin + 2, y + 9)
+  pdf.text(`Sent to: ${data.sent_to || '—'}`, margin + 2, y + 13)
+  pdf.text(`Amt to pay: Rs.${data.amount_to_pay.toFixed(2)}`, margin + 2, y + 17)
+  if (data.notes) {
+    const noteLines = pdf.splitTextToSize(`Notes: ${data.notes}`, contentWidth - 4)
+    noteLines.forEach((line: string, idx: number) => {
+      pdf.text(line, margin + 2, y + 21 + idx * 3.5)
+    })
+  }
+  y += 36
+
+  // Footer
+  pdf.setFontSize(6)
+  pdf.setTextColor(100, 100, 100)
+  pdf.text(POWERED_BY_TEXT, pageWidth / 2, y + 2, { align: 'center' })
+  pdf.text(POWERED_BY_CONTACT, pageWidth / 2, y + 5, { align: 'center' })
+  pdf.setTextColor(0, 0, 0)
+
+  pdf.save(filename)
 }
 
 // --- Reorder PDF/Excel export with app advertisement ---

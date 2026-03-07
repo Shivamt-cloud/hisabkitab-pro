@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect } from 'react'
 import { InvoiceData } from '../types/invoice'
-import { Printer, Download, X, Share2, Plus, Receipt } from 'lucide-react'
-import { exportInvoiceToPDF, exportHTMLToPDF, printReceipt, buildReceiptHTML } from '../utils/exportUtils'
+import { Printer, Download, X, Share2, Plus, Receipt, FileText } from 'lucide-react'
+import { exportInvoiceToPDF, exportHTMLToPDF, printReceipt, buildReceiptHTML, exportAlterationSlipToPDF, type AlterationSlipData } from '../utils/exportUtils'
 import { CONTACT_EMAIL, CONTACT_WEBSITE_URL, CONTACT_WHATSAPP_NUMBER, CONTACT_WHATSAPP_URL } from '../constants'
 import { settingsService } from '../services/settingsService'
 
@@ -40,13 +40,15 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true, autoPrin
   }
 
   const handleDownloadPDF = async () => {
+    const customerName = (invoiceData.customer?.name || 'Walk-in_Customer').replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, '_')
+    const filename = `Invoice_${invoiceData.invoice_number}_${customerName}`
     try {
       if (invoiceRef.current) {
         // Add ID to invoice container for PDF export
         const tempId = `invoice-${Date.now()}`
         invoiceRef.current.setAttribute('id', tempId)
         
-        await exportHTMLToPDF(tempId, `Invoice_${invoiceData.invoice_number}`, {
+        await exportHTMLToPDF(tempId, filename, {
           format: 'a4',
           orientation: 'portrait',
           margin: 10,
@@ -55,12 +57,12 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true, autoPrin
         invoiceRef.current.removeAttribute('id')
       } else {
         // Fallback to simplified PDF export
-        exportInvoiceToPDF(invoiceData, `Invoice_${invoiceData.invoice_number}`)
+        exportInvoiceToPDF(invoiceData, filename)
       }
     } catch (error) {
       console.error('Error generating PDF:', error)
       // Fallback to simplified PDF export
-      exportInvoiceToPDF(invoiceData, `Invoice_${invoiceData.invoice_number}`)
+      exportInvoiceToPDF(invoiceData, filename)
     }
   }
 
@@ -209,6 +211,35 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true, autoPrin
           >
             <Download className="w-5 h-5 text-gray-600" />
           </button>
+          {invoiceData.hold_for_alteration && (
+            <button
+              onClick={() => {
+                const slipData: AlterationSlipData = {
+                  invoice_number: invoiceData.invoice_number,
+                  sale_date: invoiceData.invoice_date,
+                  customer_name: invoiceData.customer?.name || 'Walk-in Customer',
+                  items: invoiceData.items.map(i => ({
+                    product_name: i.product_name,
+                    quantity: i.quantity,
+                    unit_price: i.unit_price,
+                    total: i.total,
+                    sale_type: (i as any).sale_type,
+                  })),
+                  purpose: invoiceData.alteration_purpose || 'Alteration',
+                  sent_to: invoiceData.alteration_sent_to || '',
+                  amount_to_pay: invoiceData.alteration_amount_to_pay || 0,
+                  notes: (invoiceData.alteration_notes || '').replace(/^Purpose:\s*.+\n?/m, '').replace(/^Sent to:\s*.+\n?/m, '').trim(),
+                  company_info: invoiceData.company_info,
+                }
+                exportAlterationSlipToPDF(slipData)
+              }}
+              className="px-3 py-2 hover:bg-amber-50 rounded transition-colors flex items-center gap-2 text-sm font-medium text-amber-700 border border-amber-200"
+              title="Download Alteration Slip for tailor/technician"
+            >
+              <FileText className="w-5 h-5 text-amber-600" />
+              <span className="hidden sm:inline">Alteration Slip</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -503,6 +534,19 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true, autoPrin
             </div>
           </div>
         </div>
+
+        {/* Alteration / Hold for collection message */}
+        {invoiceData.hold_for_alteration && invoiceData.balance_due !== undefined && invoiceData.balance_due > 0 && (
+          <div className="border-t border-gray-200 pt-6 mb-6 p-4 bg-amber-50 rounded-lg border border-amber-200">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-sm font-semibold text-amber-800">Balance Due:</span>
+              <span className="text-lg font-bold text-amber-700">₹{invoiceData.balance_due.toFixed(2)}</span>
+            </div>
+            <p className="text-sm text-amber-700">
+              Product is with us for {invoiceData.alteration_purpose || 'Alteration'}. Due amount will be paid by the customer while receiving the product.
+            </p>
+          </div>
+        )}
 
         {/* Notes */}
         {invoiceData.notes && (

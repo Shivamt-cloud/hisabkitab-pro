@@ -145,6 +145,18 @@ const InvoiceView = () => {
         }
       }
 
+      // Compute balance due for alteration (grand_total - total paid)
+      const pmTotal = (sale.payment_methods || []).reduce((sum, p) => sum + (p.amount || 0), 0)
+      const balanceDue = sale.hold_for_alteration
+        ? Math.max(0, sale.grand_total - pmTotal - (sale.credit_applied || 0))
+        : undefined
+      // Parse purpose and sent_to from alteration_notes
+      const an = sale.alteration_notes || ''
+      const purposeMatch = an.match(/^Purpose:\s*(.+?)(?=\n|$)/m)
+      const sentToMatch = an.match(/^Sent to:\s*(.+?)(?=\n|$)/m)
+      const alterationPurpose = purposeMatch?.[1]?.trim() || 'Alteration'
+      const alterationSentTo = sentToMatch?.[1]?.trim() || ''
+
       const invoice: InvoiceData = {
         invoice_number: sale.invoice_number,
         invoice_date: sale.sale_date,
@@ -156,13 +168,19 @@ const InvoiceView = () => {
         tax_amount: sale.tax_amount,
         grand_total: sale.grand_total,
         payment_method: sale.payment_method,
-        payment_methods: sale.payment_methods, // Include multiple payment methods
-        return_amount: sale.return_amount, // Include return amount if any
-        credit_applied: sale.credit_applied, // Include credit applied if any
-        credit_balance: customerCreditBalance, // Include current credit balance
+        payment_methods: sale.payment_methods,
+        return_amount: sale.return_amount,
+        credit_applied: sale.credit_applied,
+        credit_balance: customerCreditBalance,
         payment_status: sale.payment_status,
         sales_person: sale.sales_person_name || sale.items?.find(i => i.sales_person_name)?.sales_person_name || undefined,
         notes: sale.notes,
+        hold_for_alteration: sale.hold_for_alteration,
+        alteration_purpose: alterationPurpose,
+        alteration_sent_to: alterationSentTo,
+        alteration_amount_to_pay: sale.amount_to_pay,
+        alteration_notes: sale.alteration_notes,
+        balance_due: balanceDue,
         company_info: companyInfo,
       }
 

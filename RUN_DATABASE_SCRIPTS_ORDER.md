@@ -65,6 +65,13 @@ Run this **after** both `RUN_ALL_SUPABASE_TABLES_ONE_SCRIPT.sql` and `APPLY_MISS
 
 All statements use `IF NOT EXISTS` / `DROP CONSTRAINT IF EXISTS` so the script is **safe to re-run**.
 
+## 3.4. Sales targets on companies (Dashboard Sales Target in Supabase)
+
+**`ADD_SALES_TARGETS_TO_COMPANIES.sql`**
+
+- Adds `sales_target_daily`, `sales_target_monthly` to **`companies`** table so Dashboard Sales Target syncs to Supabase and persists across devices.
+- Run after base schema (companies table exists). Safe to re-run.
+
 ## 3.5. Daily Report details (sale target + customer details in Supabase)
 
 **`CREATE_DAILY_REPORT_DETAILS_TABLE.sql`**

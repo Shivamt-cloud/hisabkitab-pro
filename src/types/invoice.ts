@@ -26,6 +26,13 @@ export interface InvoiceData {
   payment_status: string
   sales_person?: string
   notes?: string
+  /** Alteration: product held for alteration/tailor, balance due on collection */
+  hold_for_alteration?: boolean
+  alteration_purpose?: string
+  alteration_sent_to?: string
+  alteration_amount_to_pay?: number
+  alteration_notes?: string
+  balance_due?: number
   company_info?: CompanyInfo
 }
 

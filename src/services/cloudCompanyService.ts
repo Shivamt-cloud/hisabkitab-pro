@@ -262,6 +262,56 @@ export const cloudCompanyService = {
   },
 
   /**
+   * Get sales targets for a company from cloud (Dashboard Sales Target)
+   */
+  getSalesTargets: async (companyId: number): Promise<{ sales_target_daily?: number; sales_target_monthly?: number } | null> => {
+    if (!isSupabaseAvailable() || !isOnline()) return null
+    try {
+      const { data, error } = await supabase!
+        .from('companies')
+        .select('sales_target_daily, sales_target_monthly')
+        .eq('id', companyId)
+        .single()
+
+      if (error || !data) return null
+      const daily = data.sales_target_daily != null ? Number(data.sales_target_daily) : undefined
+      const monthly = data.sales_target_monthly != null ? Number(data.sales_target_monthly) : undefined
+      return { sales_target_daily: daily, sales_target_monthly: monthly }
+    } catch {
+      return null
+    }
+  },
+
+  /**
+   * Update sales targets for a company in cloud
+   */
+  updateSalesTargets: async (
+    companyId: number,
+    targets: { sales_target_daily?: number; sales_target_monthly?: number }
+  ): Promise<boolean> => {
+    if (!isSupabaseAvailable() || !isOnline()) return false
+    try {
+      const { error } = await supabase!
+        .from('companies')
+        .update({
+          sales_target_daily: targets.sales_target_daily ?? null,
+          sales_target_monthly: targets.sales_target_monthly ?? null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', companyId)
+
+      if (error) {
+        console.error('[cloudCompanyService] Error updating sales targets:', error)
+        return false
+      }
+      return true
+    } catch (e) {
+      console.error('[cloudCompanyService] Error updating sales targets:', e)
+      return false
+    }
+  },
+
+  /**
    * Delete company from cloud
    */
   delete: async (id: number): Promise<boolean> => {
