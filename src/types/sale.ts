@@ -41,7 +41,7 @@ export interface Sale {
   total_commission?: number // Total commission for this sale
   payment_status: PaymentStatus
   payment_method: string // Legacy: single payment method (for backward compatibility)
-  payment_methods?: Array<{ method: string; amount: number }> // New: multiple payment methods
+  payment_methods?: Array<{ method: string; amount: number; received_at?: string }> // New: multiple payment methods; received_at = when this payment was received (e.g. balance on collection)
   return_amount?: number // Amount to return to customer when payment exceeds grand total
   credit_applied?: number // Amount of customer credit applied to this sale
   credit_added?: number // Amount of credit added to customer from returns

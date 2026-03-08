@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { useNavigate, useParams } from 'react-router-dom'
 import { purchaseService, supplierService } from '../services/purchaseService'
+import { supplierPaymentService } from '../services/supplierPaymentService'
 import { productService } from '../services/productService'
 import { companyService } from '../services/companyService'
 import { priceSegmentService, productSegmentPriceService } from '../services/priceListService'
@@ -10,7 +11,7 @@ import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Breadcrumbs } from '../components/Breadcrumbs'
 import { SimplePurchase, PurchaseItem, Supplier } from '../types/purchase'
 import { Product } from '../services/productService'
-import { ArrowLeft, Save, Plus, Trash2, Package, Home, Calculator, RefreshCw, Barcode, Printer, Columns3, Sparkles } from 'lucide-react'
+import { ArrowLeft, Save, Plus, Trash2, Package, Home, Calculator, RefreshCw, Barcode, Printer, Columns3, Sparkles, CreditCard } from 'lucide-react'
 import { generateBarcode, BarcodeFormat, BARCODE_FORMAT_INFO } from '../utils/barcodeGenerator'
 import {
   DEFAULT_VISIBLE_COLUMNS_SIMPLE,
@@ -50,6 +51,10 @@ const SimplePurchaseForm = () => {
   const [items, setItems] = useState<PurchaseItem[]>([])
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'pending' | 'partial'>('pending')
   const [paymentMethod, setPaymentMethod] = useState('')
+  const [checkDetails, setCheckDetails] = useState<Array<{ id?: number; check_number: string; bank_name: string; issue_date: string; due_date: string; amount: number; status: 'pending' | 'cleared' }>>([])
+
+  const PAYMENT_METHOD_OPTIONS = ['Cash', 'Bank Transfer', 'Cheque', 'UPI', 'Credit Card', 'Debit Card', 'Other']
+  const isCheque = paymentMethod.toLowerCase() === 'cheque'
   const [notes, setNotes] = useState('')
   const [returnRemarks, setReturnRemarks] = useState('')
   const [loading, setLoading] = useState(false)
@@ -76,6 +81,29 @@ const SimplePurchaseForm = () => {
     } catch (_) {}
     return new Set(DEFAULT_VISIBLE_COLUMNS_SIMPLE)
   })
+  useEffect(() => {
+    if (paymentMethod.toLowerCase() !== 'cheque') setCheckDetails([])
+  }, [paymentMethod])
+
+  const addCheckDetail = () => {
+    const defaultDue = new Date()
+    defaultDue.setDate(defaultDue.getDate() + 30)
+    setCheckDetails(prev => [...prev, {
+      check_number: '',
+      bank_name: '',
+      issue_date: new Date().toISOString().split('T')[0],
+      due_date: defaultDue.toISOString().split('T')[0],
+      amount: 0,
+      status: 'pending' as const,
+    }])
+  }
+  const updateCheckDetail = (index: number, field: string, value: string | number) => {
+    setCheckDetails(prev => prev.map((c, i) => i === index ? { ...c, [field]: value } : c))
+  }
+  const removeCheckDetail = (index: number) => {
+    setCheckDetails(prev => prev.filter((_, i) => i !== index))
+  }
+
   const toggleColumnVisibility = (key: string) => {
     setVisibleColumns(prev => {
       const next = new Set(prev)
@@ -231,7 +259,22 @@ const SimplePurchaseForm = () => {
         })
         setItemSegmentPrices(segMap)
         setPaymentStatus(simplePurchase.payment_status)
-        setPaymentMethod(simplePurchase.payment_method || '')
+        const pm = simplePurchase.payment_method || ''
+        setPaymentMethod(pm ? (PAYMENT_METHOD_OPTIONS.find(o => o.toLowerCase() === pm.toLowerCase()) || pm) : '')
+        if (pm.toLowerCase() === 'cheque' && simplePurchase.id) {
+          const checks = await supplierPaymentService.getChecksByPurchase(simplePurchase.id)
+          setCheckDetails(checks.map(c => ({
+            id: c.id,
+            check_number: c.check_number,
+            bank_name: c.bank_name || '—',
+            issue_date: c.issue_date.split('T')[0],
+            due_date: c.due_date.split('T')[0],
+            amount: c.amount,
+            status: (c.status === 'cleared' ? 'cleared' : 'pending') as 'pending' | 'cleared',
+          })))
+        } else {
+          setCheckDetails([])
+        }
         setNotes(simplePurchase.notes || '')
         setReturnRemarks(simplePurchase.return_remarks || '')
       }
@@ -548,6 +591,18 @@ const SimplePurchaseForm = () => {
       return
     }
 
+    if (isCheque && checkDetails.length > 0) {
+      const invalid = checkDetails.some(ch => !ch.check_number.trim() || !ch.issue_date || !ch.due_date || (ch.amount || 0) <= 0)
+      if (invalid) {
+        toast.error('Please fill check number, created date, withdraw date, and amount for all checks.')
+        return
+      }
+      if (!supplierId) {
+        toast.error('Supplier is required when payment is by cheque.')
+        return
+      }
+    }
+
     if (!validate()) {
       return
     }
@@ -590,6 +645,32 @@ const SimplePurchaseForm = () => {
             }
           }
         }
+        if (isCheque && supplierId) {
+          const existingChecks = await supplierPaymentService.getChecksByPurchase(parseInt(id))
+          const detailIds = new Set(checkDetails.filter(c => c.id).map(c => c!.id))
+          for (const ex of existingChecks) {
+            if (!detailIds.has(ex.id)) await supplierPaymentService.deleteCheck(ex.id)
+          }
+          for (const ch of checkDetails) {
+            const data = {
+              supplier_id: supplierId as number,
+              purchase_id: parseInt(id),
+              check_number: ch.check_number,
+              bank_name: ch.bank_name.trim() || '—',
+              amount: ch.amount,
+              issue_date: ch.issue_date,
+              due_date: ch.due_date,
+              status: ch.status as 'pending' | 'cleared',
+              company_id: getCurrentCompanyId() ?? undefined,
+              created_by: parseInt(user?.id || '1'),
+            }
+            if (ch.id) {
+              await supplierPaymentService.updateCheck(ch.id, data)
+            } else {
+              await supplierPaymentService.createCheck(data)
+            }
+          }
+        }
         toast.success('Purchase updated successfully!')
         navigate('/purchases/history')
       } else {
@@ -599,7 +680,7 @@ const SimplePurchaseForm = () => {
           product_name: products.find(p => p.id === item.product_id)?.name,
         }))
         
-        await purchaseService.createSimple({
+        const created = await purchaseService.createSimple({
           type: 'simple',
           purchase_date: purchaseDate,
           due_date: dueDate.trim() || undefined,
@@ -615,6 +696,22 @@ const SimplePurchaseForm = () => {
           company_id: getCurrentCompanyId() ?? undefined,
           created_by: parseInt(user?.id || '1'),
         })
+        if (isCheque && checkDetails.length > 0 && supplierId && created.id) {
+          for (const ch of checkDetails) {
+            await supplierPaymentService.createCheck({
+              supplier_id: supplierId as number,
+              purchase_id: created.id,
+              check_number: ch.check_number,
+              bank_name: ch.bank_name.trim() || '—',
+              amount: ch.amount,
+              issue_date: ch.issue_date,
+              due_date: ch.due_date,
+              status: ch.status as 'pending' | 'cleared',
+              company_id: getCurrentCompanyId() ?? undefined,
+              created_by: parseInt(user?.id || '1'),
+            })
+          }
+        }
         // Save segment prices to product_segment_prices
         const companyId = getCurrentCompanyId()
         for (let i = 0; i < finalItems.length; i++) {
@@ -798,14 +895,106 @@ const SimplePurchaseForm = () => {
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Payment Method</label>
-                  <input
-                    type="text"
+                  <select
                     value={paymentMethod}
                     onChange={(e) => setPaymentMethod(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    placeholder="e.g., Cash"
-                  />
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none appearance-none bg-white"
+                  >
+                    <option value="">Select method</option>
+                    {PAYMENT_METHOD_OPTIONS.map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
                 </div>
+
+                {isCheque && (
+                  <div className="col-span-full mt-4 p-4 bg-amber-50 rounded-xl border border-amber-200">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-sm font-semibold text-amber-800 flex items-center gap-2">
+                        <CreditCard className="w-4 h-4" />
+                        Check details
+                      </span>
+                      <button
+                        type="button"
+                        onClick={addCheckDetail}
+                        className="text-sm font-medium text-amber-700 hover:text-amber-900 flex items-center gap-1"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Add new check
+                      </button>
+                    </div>
+                    {checkDetails.length === 0 ? (
+                      <p className="text-sm text-amber-700">No checks added. Click &quot;Add new check&quot; to add check details (these will appear in Upcoming Checks).</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {checkDetails.map((ch, idx) => (
+                          <div key={idx} className="grid grid-cols-2 sm:grid-cols-6 gap-2 items-end bg-white p-3 rounded-lg border border-amber-200">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">Check No</label>
+                              <input
+                                type="text"
+                                value={ch.check_number}
+                                onChange={(e) => updateCheckDetail(idx, 'check_number', e.target.value)}
+                                placeholder="Check number"
+                                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-amber-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">Created date</label>
+                              <input
+                                type="date"
+                                value={ch.issue_date}
+                                onChange={(e) => updateCheckDetail(idx, 'issue_date', e.target.value)}
+                                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-amber-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">Withdraw date</label>
+                              <input
+                                type="date"
+                                value={ch.due_date}
+                                onChange={(e) => updateCheckDetail(idx, 'due_date', e.target.value)}
+                                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-amber-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">Amount ₹</label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={ch.amount || ''}
+                                onChange={(e) => updateCheckDetail(idx, 'amount', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-amber-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">Status</label>
+                              <select
+                                value={ch.status}
+                                onChange={(e) => updateCheckDetail(idx, 'status', e.target.value as 'pending' | 'cleared')}
+                                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-amber-500 bg-white"
+                              >
+                                <option value="pending">Pending</option>
+                                <option value="cleared">Completed</option>
+                              </select>
+                            </div>
+                            <div className="flex items-end">
+                              <button
+                                type="button"
+                                onClick={() => removeCheckDetail(idx)}
+                                className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                                title="Remove check"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
               </div>
             </div>

@@ -23,7 +23,7 @@ import {
 import { useToast } from '../context/ToastContext'
 import { getSingleDateForPreset } from '../utils/datePresets'
 import { POWERED_BY_TEXT, POWERED_BY_CONTACT } from '../utils/exportUtils'
-import { aggregatePaymentMethodsFromSales, getPaymentMethodsForDisplay } from '../utils/salePaymentHelpers'
+import { aggregatePaymentMethodsFromSales, getPaymentMethodsForDisplay, getCollectionsForDateRange } from '../utils/salePaymentHelpers'
 import { cloudDailyReportDetailsService } from '../services/cloudDailyReportDetailsService'
 import { Sale } from '../types/sale'
 import { Purchase } from '../types/purchase'
@@ -76,6 +76,7 @@ const DailyReport = () => {
   
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0])
   const [sales, setSales] = useState<Sale[]>([])
+  const [allSales, setAllSales] = useState<Sale[]>([]) // All sales (for balance collections by received_at date)
   const [purchases, setPurchases] = useState<Purchase[]>([])
   const [allPurchases, setAllPurchases] = useState<Purchase[]>([]) // Store all purchases for profit calculation
   const [expenses, setExpenses] = useState<Expense[]>([])
@@ -163,6 +164,8 @@ const DailyReport = () => {
         const saleDate = new Date(sale.sale_date).getTime()
         return saleDate >= dateStart && saleDate < dateEnd
       })
+
+      setAllSales(allSales)
 
       // Filter purchases by date for display, but keep all purchases for profit calculation
       const filteredPurchases = allPurchases.filter(purchase => {
@@ -292,11 +295,12 @@ const DailyReport = () => {
              allOpening: openingExpenses, allClosing: closingExpenses }
   }, [expenses])
 
-  // Sales by payment method = sum of Payment column amounts (same logic as Sales Report). Paid sales only.
-  const salesByPaymentMethod = useMemo(
-    () => aggregatePaymentMethodsFromSales(sales),
-    [sales]
-  )
+  // Collections by payment method = amounts received ON this day (payments with received_at on this day, or initial payments for sales with sale_date on this day)
+  const salesByPaymentMethod = useMemo(() => {
+    const dateStart = new Date(selectedDate).getTime()
+    const dateEnd = dateStart + 86400000
+    return getCollectionsForDateRange(allSales, dateStart, dateEnd)
+  }, [allSales, selectedDate])
 
   // Calculate comprehensive cash flow and accounting
   const cashFlow = useMemo(() => {
@@ -1601,7 +1605,7 @@ ${POWERED_BY_CONTACT}`
                   <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
                   Today's Sales Collections
                 </h3>
-                <p className="text-xs text-gray-600 mb-3">Payment received by method (paid sales only). For split payments, each method shows the amount actually received in that mode.</p>
+                <p className="text-xs text-gray-600 mb-3">Payment received by method (paid sales only). Includes balance received on collection (alteration) when received on this date. For split payments, each method shows the amount actually received in that mode.</p>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                   <div className="bg-white rounded-lg p-3 border border-blue-200">
                     <p className="text-xs text-gray-600 mb-1">Cash</p>

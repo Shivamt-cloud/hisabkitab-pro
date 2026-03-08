@@ -1,10 +1,11 @@
 // Supplier Payment and Check Management Service
 
-import { SupplierPayment, SupplierCheck, SupplierAccountSummary, CheckStatus } from '../types/supplierPayment'
+import { SupplierPayment, SupplierCheck, SupplierAccountSummary } from '../types/supplierPayment'
 import { Purchase } from '../types/purchase'
-import { getAll, getById, put, deleteById, getByIndex, STORES } from '../database/db'
+import { getAll, getById, put, deleteById, STORES } from '../database/db'
 import { purchaseService } from './purchaseService'
 import { supplierService } from './purchaseService'
+import { cloudSupplierCheckService } from './cloudSupplierCheckService'
 
 export const supplierPaymentService = {
   // ========== PAYMENT METHODS ==========
@@ -78,19 +79,24 @@ export const supplierPaymentService = {
     }
   },
 
-  // ========== CHECK METHODS ==========
+  // ========== CHECK METHODS (use cloud for cross-device sync) ==========
+
+  /**
+   * Get all checks linked to a purchase
+   */
+  getChecksByPurchase: async (purchaseId: number): Promise<SupplierCheck[]> => {
+    const allChecks = await cloudSupplierCheckService.getAll()
+    return allChecks
+      .filter(c => c.purchase_id === purchaseId)
+      .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
+  },
 
   /**
    * Get all checks for a supplier
    */
   getChecksBySupplier: async (supplierId: number, companyId?: number | null): Promise<SupplierCheck[]> => {
-    const allChecks = await getAll<SupplierCheck>(STORES.SUPPLIER_CHECKS)
-    let filtered = allChecks.filter(c => c.supplier_id === supplierId)
-    
-    if (companyId !== undefined && companyId !== null) {
-      filtered = filtered.filter(c => c.company_id === companyId)
-    }
-    
+    const allChecks = await cloudSupplierCheckService.getAll(companyId)
+    const filtered = allChecks.filter(c => c.supplier_id === supplierId)
     return filtered.sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime())
   },
 
@@ -98,77 +104,43 @@ export const supplierPaymentService = {
    * Get check by ID
    */
   getCheckById: async (id: number): Promise<SupplierCheck | undefined> => {
-    return await getById<SupplierCheck>(STORES.SUPPLIER_CHECKS, id)
+    return await cloudSupplierCheckService.getById(id)
   },
 
   /**
-   * Create a new check
+   * Create a new check (syncs to Supabase when online)
    */
   createCheck: async (check: Omit<SupplierCheck, 'id' | 'created_at' | 'updated_at'>): Promise<SupplierCheck> => {
     const supplier = await supplierService.getById(check.supplier_id)
-    
-    const newCheck: SupplierCheck = {
+    const payload = {
       ...check,
-      id: Date.now(),
       supplier_name: supplier?.name || check.supplier_name,
-      status: check.status || 'pending',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
     }
-    
-    await put(STORES.SUPPLIER_CHECKS, newCheck)
-    return newCheck
+    return await cloudSupplierCheckService.create(payload)
   },
 
   /**
-   * Update a check
+   * Update a check (syncs to Supabase when online)
    */
   updateCheck: async (id: number, check: Partial<SupplierCheck>): Promise<SupplierCheck | null> => {
-    const existing = await getById<SupplierCheck>(STORES.SUPPLIER_CHECKS, id)
-    if (!existing) return null
-
-    const updated: SupplierCheck = {
-      ...existing,
-      ...check,
-      updated_at: new Date().toISOString(),
-    }
-    
-    // If status is changed to 'cleared', set cleared_date
-    if (check.status === 'cleared' && !updated.cleared_date) {
-      updated.cleared_date = new Date().toISOString()
-    }
-    
-    await put(STORES.SUPPLIER_CHECKS, updated)
-    return updated
+    return await cloudSupplierCheckService.update(id, check)
   },
 
   /**
-   * Delete a check
+   * Delete a check (syncs to Supabase when online)
    */
   deleteCheck: async (id: number): Promise<boolean> => {
-    try {
-      await deleteById(STORES.SUPPLIER_CHECKS, id)
-      return true
-    } catch (error) {
-      console.error('Error deleting check:', error)
-      return false
-    }
+    return await cloudSupplierCheckService.delete(id)
   },
 
   /**
    * Get all upcoming checks (due date in future)
    */
   getUpcomingChecks: async (companyId?: number | null, daysAhead: number = 30): Promise<SupplierCheck[]> => {
-    const allChecks = await getAll<SupplierCheck>(STORES.SUPPLIER_CHECKS)
-    let filtered = allChecks.filter(c => c.status === 'pending')
-    
-    if (companyId !== undefined && companyId !== null) {
-      filtered = filtered.filter(c => c.company_id === companyId)
-    }
-    
+    const allChecks = await cloudSupplierCheckService.getAll(companyId)
+    const filtered = allChecks.filter(c => c.status === 'pending')
     const today = new Date()
     const futureDate = new Date(today.getTime() + daysAhead * 24 * 60 * 60 * 1000)
-    
     return filtered
       .filter(c => {
         const dueDate = new Date(c.due_date)
@@ -181,15 +153,9 @@ export const supplierPaymentService = {
    * Get all overdue checks
    */
   getOverdueChecks: async (companyId?: number | null): Promise<SupplierCheck[]> => {
-    const allChecks = await getAll<SupplierCheck>(STORES.SUPPLIER_CHECKS)
-    let filtered = allChecks.filter(c => c.status === 'pending')
-    
-    if (companyId !== undefined && companyId !== null) {
-      filtered = filtered.filter(c => c.company_id === companyId)
-    }
-    
+    const allChecks = await cloudSupplierCheckService.getAll(companyId)
+    const filtered = allChecks.filter(c => c.status === 'pending')
     const today = new Date()
-    
     return filtered
       .filter(c => new Date(c.due_date) < today)
       .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())

@@ -2239,13 +2239,13 @@ const SaleForm = () => {
       return_amount: returnAmount > 0 ? returnAmount : undefined, // Store return amount if any
       credit_applied: creditApplied > 0 ? creditApplied : undefined, // Store credit applied if any
       internal_remarks: finalInternalRemarks || undefined, // Internal remarks + auto edit change log
-      hold_for_alteration: holdForAlteration || undefined,
-      alteration_notes: holdForAlteration
+      hold_for_alteration: (hasPlanFeature('sales_alteration') && holdForAlteration) || undefined,
+      alteration_notes: (hasPlanFeature('sales_alteration') && holdForAlteration)
         ? [alterationPurpose && `Purpose: ${alterationPurpose}`, alterationSentTo && `Sent to: ${alterationSentTo}`, alterationNotes].filter(Boolean).join('\n')
         : undefined,
       alteration_type_id: undefined, // Reserved for future dropdown
       sent_to_contact_id: undefined, // Reserved for future dropdown
-      amount_to_pay: holdForAlteration && amountToPay > 0 ? amountToPay : undefined,
+      amount_to_pay: (hasPlanFeature('sales_alteration') && holdForAlteration && amountToPay > 0) ? amountToPay : undefined,
       sale_date: new Date().toISOString(),
       company_id: getCurrentCompanyId() || undefined,
       created_by: parseInt(user?.id || '1')
@@ -3010,15 +3010,30 @@ const SaleForm = () => {
               </div>
 
               {/* Alteration / Hold for collection */}
-              <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6 border border-white/50">
+              <div className={`bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6 border border-white/50 relative ${!hasPlanFeature('sales_alteration') ? 'opacity-75' : ''}`}>
+                {!hasPlanFeature('sales_alteration') && (
+                  <div
+                    className="absolute inset-0 z-10 rounded-2xl cursor-pointer flex items-start justify-end p-2"
+                    onClick={() => showPlanUpgrade('sales_alteration')}
+                    title="Upgrade to Premium to use Hold for alteration"
+                  >
+                    <div className="rounded-full bg-white/90 p-1.5 shadow-md">
+                      <LockIcon className="w-4 h-4 text-amber-600" />
+                    </div>
+                  </div>
+                )}
                 <h2 className="text-xl font-bold text-gray-900 mb-4">Alteration / Hold for collection</h2>
                 <div className="space-y-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label
+                    className={`flex items-center gap-2 ${hasPlanFeature('sales_alteration') ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+                    onClick={!hasPlanFeature('sales_alteration') ? (e) => { e.preventDefault(); showPlanUpgrade('sales_alteration') } : undefined}
+                  >
                     <input
                       type="checkbox"
-                      checked={holdForAlteration}
-                      onChange={(e) => setHoldForAlteration(e.target.checked)}
-                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      checked={hasPlanFeature('sales_alteration') ? holdForAlteration : false}
+                      onChange={hasPlanFeature('sales_alteration') ? (e) => setHoldForAlteration(e.target.checked) : undefined}
+                      disabled={!hasPlanFeature('sales_alteration')}
+                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-60"
                     />
                     <span className="text-sm font-medium text-gray-700">
                       Hold for alteration (customer pays part now, balance on collection)

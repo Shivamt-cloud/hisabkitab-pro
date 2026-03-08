@@ -16,6 +16,7 @@ export type PlanFeature =
   | 'report_low_stock'
   | 'report_out_of_stock'
   | 'report_upcoming_checks'
+  | 'report_alteration_sales'
   // Sales Options
   | 'sales_quick_sale'
   | 'sales_new_sale'
@@ -69,6 +70,10 @@ export type PlanFeature =
   | 'sales_manual_product'
   // Edit sale from Sales Reports / Sales History = Premium & above
   | 'sales_edit'
+  // Premium & above: Balance on collection, Alteration in sale form, Alteration in sales report
+  | 'sales_balance_collection'
+  | 'sales_alteration'
+  | 'sales_report_alteration'
   // Premium Plus only: Services export & upcoming widget
   | 'services_export'
   | 'services_upcoming_widget'
@@ -84,6 +89,7 @@ export const PLAN_FEATURE_MAP: Record<PlanFeature, PlanTier | 'admin'> = {
   report_low_stock: 'starter',
   report_out_of_stock: 'standard',
   report_upcoming_checks: 'premium',
+  report_alteration_sales: 'premium', // Premium & above – Hold for Alteration report card
   // Sales options
   sales_quick_sale: 'standard',
   sales_new_sale: 'starter',
@@ -134,6 +140,9 @@ export const PLAN_FEATURE_MAP: Record<PlanFeature, PlanTier | 'admin'> = {
   services_customer_notify: 'premium_plus', // Premium Plus & above – Notify customer via WhatsApp & Email
   sales_manual_product: 'premium', // Premium & above – Manual product entry during sale (unlisted products)
   sales_edit: 'premium', // Premium & above – Edit sale from Sales Reports / Sales History
+  sales_balance_collection: 'premium', // Premium & above – Balance on collection (receive pending amount after alteration)
+  sales_alteration: 'premium', // Premium & above – Hold for alteration checkbox in Sale form
+  sales_report_alteration: 'premium', // Premium & above – Alteration tab, download slip, details in Sales Reports
 }
 
 /** Human-readable labels for upgrade modal (only for plan-gated features we show in UI) */
@@ -145,6 +154,7 @@ export const PLAN_FEATURE_LABELS: Partial<Record<PlanFeature, string>> = {
   report_low_stock: 'Low Stock Alert',
   report_out_of_stock: 'Out of Stock',
   report_upcoming_checks: 'Upcoming Checks',
+  report_alteration_sales: 'Hold for Alteration',
   report_daily_activity: 'Daily Activity Report',
   report_sales: 'Sales Reports',
   report_purchases: 'Purchase Reports',
@@ -176,6 +186,9 @@ export const PLAN_FEATURE_LABELS: Partial<Record<PlanFeature, string>> = {
   sales_quick_sale: 'Quick Sale',
   sales_history: 'Sales History',
   sales_rent: 'Rent / Bookings',
+  sales_balance_collection: 'Balance on collection',
+  sales_alteration: 'Hold for alteration (in Sale form)',
+  sales_report_alteration: 'Alteration in Sales Reports',
   expense_daily_expenses: 'Daily Expenses',
   expense_daily_report: 'Daily Report',
   services_bike_car_ebike: 'Services (Bike, Car, E-bike, E-car)',

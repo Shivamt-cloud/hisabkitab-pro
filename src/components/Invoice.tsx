@@ -14,11 +14,13 @@ interface InvoiceProps {
   showActions?: boolean
   /** When true, auto-trigger receipt print (e.g. after Complete Sale) */
   autoPrint?: boolean
+  /** Override document title (e.g. "PAYMENT RECEIVED" for balance collection receipt) */
+  documentTitle?: string
 }
 
 const TZ_INDIA = 'Asia/Kolkata'
 
-const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true, autoPrint = false }: InvoiceProps) => {
+const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true, autoPrint = false, documentTitle = 'INVOICE' }: InvoiceProps) => {
   const invoiceRef = useRef<HTMLDivElement>(null)
   const [template, setTemplate] = useState<InvoiceTemplateType>('detailed')
   const [timeFormat12h, setTimeFormat12h] = useState(true)
@@ -293,7 +295,7 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true, autoPrin
             </div>
           </div>
           <div className="invoice-details text-right">
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">INVOICE</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">{documentTitle}</h2>
             <p className="text-gray-600 text-sm">
               <strong>Invoice #:</strong> {invoiceData.invoice_number}
             </p>

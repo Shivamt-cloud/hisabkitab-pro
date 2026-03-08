@@ -10,6 +10,7 @@ import PurchaseHistory from './pages/PurchaseHistory'
 import GSTPurchaseForm from './pages/GSTPurchaseForm'
 import SimplePurchaseForm from './pages/SimplePurchaseForm'
 import SalesHistory from './pages/SalesHistory'
+import BalanceCollection from './pages/BalanceCollection'
 import SaleForm from './pages/SaleForm'
 import QuickSale from './pages/QuickSale'
 import Rentals from './pages/Rentals'
@@ -35,6 +36,7 @@ import Customers from './pages/Customers'
 import CustomerInsights from './pages/CustomerInsights'
 import CustomerForm from './pages/CustomerForm'
 import InvoiceView from './pages/InvoiceView'
+import PaymentReceiptView from './pages/PaymentReceiptView'
 import StockAlerts from './pages/StockAlerts'
 import ReorderList from './pages/ReorderList'
 import ReorderForm from './pages/ReorderForm'
@@ -291,6 +293,14 @@ function App() {
             }
           />
           <Route
+            path="/sales/balance-collection"
+            element={
+              <ProtectedRoute requiredPermission="sales:update" requiredPlanFeature="sales_balance_collection">
+                <BalanceCollection />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/subscription/payments"
             element={
               <ProtectedRoute>
@@ -519,6 +529,14 @@ function App() {
             element={
               <ProtectedRoute requiredPermission="sales:update">
                 <CustomerForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/invoice/:id/payment-receipt"
+            element={
+              <ProtectedRoute requiredPermission="sales:read">
+                <PaymentReceiptView />
               </ProtectedRoute>
             }
           />

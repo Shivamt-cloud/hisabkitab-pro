@@ -12,7 +12,7 @@ import {
   SalesBySalesPersonReport,
   ReportTimePeriod,
 } from '../types/reports'
-import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText, Eye, ShoppingCart, Search, X, Columns3, Pencil, FileDown } from 'lucide-react'
+import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText, Eye, ShoppingCart, Search, X, Columns3, Pencil, FileDown, Scissors } from 'lucide-react'
 import { saleService } from '../services/saleService'
 import { Sale } from '../types/sale'
 import { exportToExcel as exportExcel, exportDataToPDF, exportAlterationSlipToPDF, type AlterationSlipData } from '../utils/exportUtils'
@@ -35,6 +35,7 @@ import { ScrollableTableWrapper } from '../components/ScrollableTableWrapper'
 import {
   getPaymentMethodsForDisplay,
   getNetPaymentMethodsForSale,
+  getPaymentsReceivedInDateRangeForSale,
 } from '../utils/salePaymentHelpers'
 
 type ReportView = SalesReportView
@@ -52,6 +53,17 @@ function formatPaymentMethod(sale: Sale): string {
     return `${method.charAt(0).toUpperCase() + method.slice(1)}: ₹${sale.grand_total.toFixed(2)}`
   }
   return method
+}
+
+/** Format only payments received on a given date (for Sales Report - shows due/balance received, not full payment) */
+function formatPaymentReceivedOnDate(sale: Sale, dateStr: string): string {
+  const dateStart = new Date(dateStr).getTime()
+  const dateEnd = dateStart + 86400000
+  const methods = getPaymentsReceivedInDateRangeForSale(sale, dateStart, dateEnd)
+  if (methods.length === 0) return '—'
+  return methods
+    .map(p => `${p.method}: ₹${(p.amount || 0).toFixed(2)}`)
+    .join(', ')
 }
 
 /** Format time for display: use created_at (actual record time) when available, else date-only as 12:00 AM */
@@ -98,7 +110,7 @@ const SalesReports = () => {
   const [showColumnSettings, setShowColumnSettings] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState<Record<ReportView, Set<string>>>(() => {
     const init: Record<ReportView, Set<string>> = {} as Record<ReportView, Set<string>>
-    ;(['product', 'category', 'customer', 'salesperson', 'sales'] as ReportView[]).forEach(view => {
+    ;(['product', 'category', 'customer', 'salesperson', 'sales', 'alteration'] as ReportView[]).forEach(view => {
       try {
         const stored = localStorage.getItem(getStorageKey(view))
         init[view] = stored ? new Set(JSON.parse(stored) as string[]) : new Set(DEFAULT_VISIBLE_COLUMNS[view])
@@ -201,6 +213,7 @@ const SalesReports = () => {
           setSalesPersonReports(salesPersonReports)
           break
         case 'sales':
+        case 'alteration':
           const allSales = await saleService.getAllFast(true, companyId)
           // Filter by date range
           let filteredSales = allSales
@@ -249,6 +262,7 @@ const SalesReports = () => {
     filteredCustomerReports,
     filteredSalesPersonReports,
     filteredSales,
+    filteredAlterationSales,
   } = useMemo(() => {
     let fProduct = productReports
     let fCategory = categoryReports
@@ -295,6 +309,8 @@ const SalesReports = () => {
       fSales = fSales.filter(s => s.sales_person_id === filterSalesPersonId)
     }
 
+    let fAlteration = fSales.filter(s => s.hold_for_alteration === true)
+
     // Global search across all views
     const q = globalSearchQuery.trim().toLowerCase()
     if (q) {
@@ -315,6 +331,14 @@ const SalesReports = () => {
         const productMatch = s.items.some(it => (it.product_name || '').toLowerCase().includes(q))
         return invMatch || custMatch || phoneMatch || salesPersonMatch || productMatch
       })
+      fAlteration = fAlteration.filter(s => {
+        const invMatch = (s.invoice_number || '').toLowerCase().includes(q)
+        const custMatch = (s.customer_name || '').toLowerCase().includes(q)
+        const cust = s.customer_id ? customers.find(c => c.id === s.customer_id) : null
+        const phoneMatch = cust?.phone ? cust.phone.replace(/\D/g, '').includes(q.replace(/\D/g, '')) : false
+        const productMatch = s.items.some(it => (it.product_name || '').toLowerCase().includes(q))
+        return invMatch || custMatch || phoneMatch || productMatch
+      })
     }
 
     return {
@@ -323,6 +347,7 @@ const SalesReports = () => {
       filteredCustomerReports: fCustomer,
       filteredSalesPersonReports: fSalesPerson,
       filteredSales: fSales,
+      filteredAlterationSales: fAlteration,
     }
   }, [
     productReports,
@@ -443,6 +468,38 @@ const SalesReports = () => {
         sheetName = 'All Sales'
         break
       }
+      case 'alteration': {
+        headers.push('Date', 'Invoice', 'Customer', 'Purpose', 'Sent to', 'Amount to Pay', 'Amount', 'Due Pending', 'Payment', 'Notes')
+        filteredAlterationSales.forEach(s => {
+          const an = s.alteration_notes || ''
+          const purposeMatch = an.match(/^Purpose:\s*(.+?)(?=\n|$)/m)
+          const sentToMatch = an.match(/^Sent to:\s*(.+?)(?=\n|$)/m)
+          const purpose = purposeMatch?.[1]?.trim() || 'Alteration'
+          const sentTo = sentToMatch?.[1]?.trim() || ''
+          const status = s.payment_status === 'paid' ? 'Paid' : 'Pending'
+          const methods = getPaymentMethodsForDisplay(s)
+          const methodStr = methods && methods.length > 0
+            ? methods.map(p => `₹${(p.amount || 0).toFixed(0)} ${p.method}`).join(', ')
+            : s.payment_method || ''
+          const excelMethods = getPaymentMethodsForDisplay(s)
+          const excelPmTotal = excelMethods ? excelMethods.reduce((sum, p) => sum + (p.amount || 0), 0) : 0
+          const excelDue = s.hold_for_alteration ? Math.max(0, s.grand_total - excelPmTotal - (s.credit_applied || 0)) : 0
+          rows.push([
+            new Date(s.sale_date).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
+            s.invoice_number,
+            s.customer_name || 'Walk-in',
+            purpose,
+            sentTo,
+            parseFloat((s.amount_to_pay ?? 0).toFixed(2)),
+            parseFloat(s.grand_total.toFixed(2)),
+            parseFloat(excelDue.toFixed(2)),
+            methodStr ? `${status} · ${methodStr}` : status,
+            (s.notes || '').slice(0, 100) || '—',
+          ])
+        })
+        sheetName = 'Alteration Sales'
+        break
+      }
     }
 
     const filename = `sales_report_${activeView}_${timePeriod}_${new Date().toISOString().split('T')[0]}`
@@ -554,12 +611,43 @@ const SalesReports = () => {
         title = 'Sales Report - All Sales'
         break
       }
+      case 'alteration':
+        headers.push('Date', 'Invoice', 'Customer', 'Purpose', 'Sent to', 'Amount to Pay', 'Amount', 'Due Pending', 'Payment', 'Notes')
+        filteredAlterationSales.forEach(s => {
+          const an = s.alteration_notes || ''
+          const purposeMatch = an.match(/^Purpose:\s*(.+?)(?=\n|$)/m)
+          const sentToMatch = an.match(/^Sent to:\s*(.+?)(?=\n|$)/m)
+          const purpose = purposeMatch?.[1]?.trim() || 'Alteration'
+          const sentTo = sentToMatch?.[1]?.trim() || ''
+          const status = s.payment_status === 'paid' ? 'Paid' : 'Pending'
+          const methods = getPaymentMethodsForDisplay(s)
+          const methodStr = methods && methods.length > 0
+            ? methods.map(p => `₹${(p.amount || 0).toFixed(0)} ${p.method}`).join(', ')
+            : s.payment_method || ''
+          const pdfMethods = getPaymentMethodsForDisplay(s)
+          const pdfPmTotal = pdfMethods ? pdfMethods.reduce((sum, p) => sum + (p.amount || 0), 0) : 0
+          const pdfDue = s.hold_for_alteration ? Math.max(0, s.grand_total - pdfPmTotal - (s.credit_applied || 0)) : 0
+          rows.push([
+            new Date(s.sale_date).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
+            s.invoice_number,
+            s.customer_name || 'Walk-in',
+            purpose,
+            sentTo,
+            `₹${(s.amount_to_pay ?? 0).toFixed(2)}`,
+            `₹${s.grand_total.toFixed(2)}`,
+            `₹${pdfDue.toFixed(2)}`,
+            methodStr ? `${status} · ${methodStr}` : status,
+            (s.notes || '').slice(0, 50) || '—',
+          ])
+        })
+        title = 'Sales Report - Alteration'
+        break
     }
 
     const period = timePeriod === 'all' ? 'All Time' : timePeriod
     const fullTitle = `${title} (${period})`
     const filename = `sales_report_${activeView}_${timePeriod}_${new Date().toISOString().split('T')[0]}`
-    const pdfOptions = activeView === 'sales' ? { orientation: 'landscape' as const } : undefined
+    const pdfOptions = (activeView === 'sales' || activeView === 'alteration') ? { orientation: 'landscape' as const } : undefined
     exportDataToPDF(rows, headers, filename, fullTitle, pdfOptions)
     toast.success('Report exported to PDF')
   }
@@ -748,6 +836,8 @@ const SalesReports = () => {
       case 'customer': return filteredCustomerReports
       case 'salesperson': return filteredSalesPersonReports
       case 'sales': return filteredSales
+      case 'alteration': return filteredAlterationSales
+      default: return []
     }
   }
 
@@ -761,16 +851,37 @@ const SalesReports = () => {
     return Object.entries(groups).sort(([a], [b]) => b.localeCompare(a))
   }, [filteredSales])
 
+  const alterationGroupedByDate = useMemo(() => {
+    const groups: Record<string, Sale[]> = {}
+    filteredAlterationSales.forEach(sale => {
+      const dateKey = sale.sale_date.split('T')[0]
+      if (!groups[dateKey]) groups[dateKey] = []
+      groups[dateKey].push(sale)
+    })
+    return Object.entries(groups).sort(([a], [b]) => b.localeCompare(a))
+  }, [filteredAlterationSales])
+
+  const parseAlterationNotes = (sale: Sale) => {
+    const an = sale.alteration_notes || ''
+    const purposeMatch = an.match(/^Purpose:\s*(.+?)(?=\n|$)/m)
+    const sentToMatch = an.match(/^Sent to:\s*(.+?)(?=\n|$)/m)
+    return {
+      purpose: purposeMatch?.[1]?.trim() || 'Alteration',
+      sentTo: sentToMatch?.[1]?.trim() || '',
+    }
+  }
+
   /**
-   * Aggregate by payment method = net received per method (payment minus return_amount).
-   * Only paid sales. Cash = sum of (cash received − return given in cash), etc.
+   * Aggregate by payment method = only payments received ON this date (by received_at or sale_date).
+   * For alteration sales: only balance received (payments with received_at) on this date.
    */
-  const getPaymentSummaryForSales = (sales: Sale[]): { method: string; count: number; total: number }[] => {
+  const getPaymentSummaryForSales = (sales: Sale[], dateStr: string): { method: string; count: number; total: number }[] => {
+    const dateStart = new Date(dateStr).getTime()
+    const dateEnd = dateStart + 86400000
     const byMethod: Record<string, { total: number; saleIds: Set<number> }> = {}
     sales.forEach(sale => {
-      if (sale.payment_status !== 'paid') return
-      const netMethods = getNetPaymentMethodsForSale(sale)
-      netMethods.forEach(p => {
+      const methods = getPaymentsReceivedInDateRangeForSale(sale, dateStart, dateEnd)
+      methods.forEach(p => {
         const key = (p.method || '').toLowerCase().trim() || 'other'
         const amt = Number(p.amount) || 0
         if (amt <= 0) return
@@ -795,7 +906,7 @@ const SalesReports = () => {
   const renderSalesList = () => (
     <ScrollableTableWrapper minWidth="800px" maxHeight="60vh">
       {salesGroupedByDate.map(([dateStr, dateSales]) => {
-        const paymentSummary = getPaymentSummaryForSales(dateSales)
+        const paymentSummary = getPaymentSummaryForSales(dateSales, dateStr)
         return (
         <div key={dateStr} className="mb-6">
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-3 rounded-t-lg sticky top-0 z-10">
@@ -874,18 +985,13 @@ const SalesReports = () => {
                     <td className="px-4 py-3 min-w-[180px] align-top" title={formatPaymentMethod(sale)}>
                       {(() => {
                         const status = sale.payment_status === 'paid' ? 'Paid' : 'Pending'
-                        const methods = getPaymentMethodsForDisplay(sale)
-                        const methodStr = methods && methods.length > 0
-                          ? methods.map(p => `₹${(p.amount || 0).toFixed(0)} ${(p.method || '').charAt(0).toUpperCase() + (p.method || '').slice(1).toLowerCase()}`).join(', ')
-                          : sale.payment_method && sale.grand_total != null
-                            ? `₹${sale.grand_total.toFixed(0)} ${(sale.payment_method || '').charAt(0).toUpperCase() + (sale.payment_method || '').slice(1).toLowerCase()}`
-                            : null
+                        const methodStr = formatPaymentReceivedOnDate(sale, dateStr)
                         return (
                           <div className="flex flex-col gap-1">
                             <span className={`inline-flex w-fit px-2 py-0.5 rounded-full text-xs font-medium ${sale.payment_status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
                               {status}
                             </span>
-                            {methodStr && <span className="text-sm text-gray-800 font-medium">{methodStr}</span>}
+                            {methodStr !== '—' && <span className="text-sm text-gray-800 font-medium">{methodStr}</span>}
                           </div>
                         )
                       })()}
@@ -901,7 +1007,11 @@ const SalesReports = () => {
                         <button onClick={() => showPlanUpgrade('sales_edit')} className="p-2 text-gray-400 hover:bg-gray-100 rounded" title="Upgrade to Premium to edit sale"><LockIcon className="w-4 h-4" /></button>
                       )}
                       {sale.hold_for_alteration && (
-                        <button onClick={() => handleDownloadAlterationSlip(sale)} className="p-2 text-amber-600 hover:bg-amber-50 rounded" title="Download Alteration Slip"><FileDown className="w-4 h-4" /></button>
+                        hasPlanFeature('sales_report_alteration') ? (
+                          <button onClick={() => handleDownloadAlterationSlip(sale)} className="p-2 text-amber-600 hover:bg-amber-50 rounded" title="Download Alteration Slip"><FileDown className="w-4 h-4" /></button>
+                        ) : (
+                          <button onClick={() => showPlanUpgrade('sales_report_alteration')} className="p-2 text-gray-400 hover:bg-gray-100 rounded" title="Upgrade to Premium to download alteration slip"><LockIcon className="w-4 h-4" /></button>
+                        )
                       )}
                       <button onClick={() => navigate(`/invoice/${sale.id}`)} className="p-2 text-blue-600 hover:bg-blue-50 rounded" title="View Receipt"><Eye className="w-4 h-4" /></button>
                     </div>
@@ -913,6 +1023,92 @@ const SalesReports = () => {
         </div>
         )
       })}
+    </ScrollableTableWrapper>
+  )
+
+  const renderAlterationList = () => (
+    <ScrollableTableWrapper minWidth="800px" maxHeight="60vh">
+      {alterationGroupedByDate.map(([dateStr, dateSales]) => (
+        <div key={dateStr} className="mb-6">
+          <div className="bg-gradient-to-r from-amber-600 to-orange-600 text-white px-4 py-3 rounded-t-lg sticky top-0 z-10">
+            <span className="font-bold">{new Date(dateStr).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+            <span className="ml-2 text-amber-100">({dateSales.length} alteration sale{dateSales.length !== 1 ? 's' : ''})</span>
+          </div>
+          <table className="w-full min-w-[800px] text-sm">
+            <thead className="bg-gray-100 border-b border-gray-200">
+              <tr>
+                {isColumnVisible('alteration', 'sale_date') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Time</th>}
+                {isColumnVisible('alteration', 'sale_date_full') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Date</th>}
+                {isColumnVisible('alteration', 'invoice_number') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Invoice</th>}
+                {isColumnVisible('alteration', 'customer_name') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Customer</th>}
+                {isColumnVisible('alteration', 'alteration_purpose') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Purpose</th>}
+                {isColumnVisible('alteration', 'alteration_sent_to') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Sent to</th>}
+                {isColumnVisible('alteration', 'amount_to_pay') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Amount to Pay</th>}
+                {isColumnVisible('alteration', 'grand_total') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Amount</th>}
+                {isColumnVisible('alteration', 'balance_due') && <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Due Pending</th>}
+                {isColumnVisible('alteration', 'payment') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Payment</th>}
+                {isColumnVisible('alteration', 'notes') && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Notes</th>}
+                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase w-16">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 bg-white">
+              {dateSales.map((sale) => {
+                const { purpose, sentTo } = parseAlterationNotes(sale)
+                return (
+                  <tr key={sale.id} className="hover:bg-gray-50 transition-colors">
+                    {isColumnVisible('alteration', 'sale_date') && <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-600">{formatRecordTime(sale.sale_date, sale.created_at)}</td>}
+                    {isColumnVisible('alteration', 'sale_date_full') && <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{new Date(sale.sale_date).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</td>}
+                    {isColumnVisible('alteration', 'invoice_number') && <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{sale.invoice_number}</td>}
+                    {isColumnVisible('alteration', 'customer_name') && <td className="px-4 py-3 text-sm text-gray-900">{sale.customer_name || 'Walk-in'}</td>}
+                    {isColumnVisible('alteration', 'alteration_purpose') && <td className="px-4 py-3 text-sm text-gray-800">{purpose}</td>}
+                    {isColumnVisible('alteration', 'alteration_sent_to') && <td className="px-4 py-3 text-sm text-gray-600">{sentTo || '—'}</td>}
+                    {isColumnVisible('alteration', 'amount_to_pay') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-semibold text-amber-700">₹{(sale.amount_to_pay ?? 0).toFixed(2)}</td>}
+                    {isColumnVisible('alteration', 'grand_total') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-bold text-gray-900">₹{sale.grand_total.toFixed(2)}</td>}
+                    {isColumnVisible('alteration', 'balance_due') && (() => {
+                      const methods = getPaymentMethodsForDisplay(sale)
+                      const pmTotal = methods ? methods.reduce((s, p) => s + (p.amount || 0), 0) : 0
+                      const due = sale.hold_for_alteration ? Math.max(0, sale.grand_total - pmTotal - (sale.credit_applied || 0)) : 0
+                      return <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-semibold text-red-600">₹{due.toFixed(2)}</td>
+                    })()}
+                    {isColumnVisible('alteration', 'payment') && (
+                      <td className="px-4 py-3 min-w-[140px]" title={formatPaymentMethod(sale)}>
+                        <div className="flex flex-col gap-1">
+                          <span className={`inline-flex w-fit px-2 py-0.5 rounded-full text-xs font-medium ${sale.payment_status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                            {sale.payment_status === 'paid' ? 'Paid' : 'Pending'}
+                          </span>
+                          {(() => {
+                            const methods = getPaymentMethodsForDisplay(sale)
+                            const methodStr = methods && methods.length > 0
+                              ? methods.map(p => `₹${(p.amount || 0).toFixed(0)} ${(p.method || '').charAt(0).toUpperCase() + (p.method || '').slice(1)}`).join(', ')
+                              : sale.payment_method && sale.grand_total != null ? `₹${sale.grand_total.toFixed(0)} ${(sale.payment_method || '').charAt(0).toUpperCase() + (sale.payment_method || '').slice(1)}` : null
+                            return methodStr ? <span className="text-xs text-gray-700">{methodStr}</span> : null
+                          })()}
+                        </div>
+                      </td>
+                    )}
+                    {isColumnVisible('alteration', 'notes') && <td className="px-4 py-3 text-xs text-gray-600 max-w-[150px] truncate" title={sale.notes}>{sale.notes || '—'}</td>}
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-1">
+                        {hasPlanFeature('sales_report_alteration') ? (
+                          <>
+                            <button onClick={() => handleDownloadAlterationSlip(sale)} className="p-2 text-amber-600 hover:bg-amber-50 rounded" title="Download Alteration Slip"><FileDown className="w-4 h-4" /></button>
+                            <button onClick={() => navigate(`/invoice/${sale.id}`)} className="p-2 text-blue-600 hover:bg-blue-50 rounded" title="View Receipt"><Eye className="w-4 h-4" /></button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => showPlanUpgrade('sales_report_alteration')} className="p-2 text-gray-400 hover:bg-gray-100 rounded" title="Upgrade to Premium to download alteration slip"><LockIcon className="w-4 h-4" /></button>
+                            <button onClick={() => showPlanUpgrade('sales_report_alteration')} className="p-2 text-gray-400 hover:bg-gray-100 rounded" title="Upgrade to Premium to view receipt"><LockIcon className="w-4 h-4" /></button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ))}
     </ScrollableTableWrapper>
   )
 
@@ -1245,6 +1441,19 @@ const SalesReports = () => {
                   <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
                 )}
               </button>
+              <button
+                onClick={() => hasPlanFeature('sales_report_alteration') ? setActiveView('alteration') : showPlanUpgrade('sales_report_alteration')}
+                className={`px-6 py-3 font-semibold text-sm transition-colors relative flex items-center gap-2 ${
+                  activeView === 'alteration' ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Scissors className="w-4 h-4" />
+                Alteration ({filteredAlterationSales.length})
+                {!hasPlanFeature('sales_report_alteration') && <LockIcon className="w-3.5 h-3.5 text-amber-500" />}
+                {activeView === 'alteration' && (
+                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></span>
+                )}
+              </button>
             </div>
             <button
               type="button"
@@ -1261,7 +1470,7 @@ const SalesReports = () => {
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowColumnSettings(false)}>
                 <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                   <h3 className="text-lg font-bold text-gray-900 mb-2">Show / Hide Columns</h3>
-                  <p className="text-sm text-gray-500 mb-2">View: <span className="font-semibold">{activeView === 'product' ? 'By Product' : activeView === 'category' ? 'By Category' : activeView === 'customer' ? 'By Customer' : activeView === 'salesperson' ? 'By Sales Person' : 'All Sales'}</span></p>
+                  <p className="text-sm text-gray-500 mb-2">View: <span className="font-semibold">{activeView === 'product' ? 'By Product' : activeView === 'category' ? 'By Category' : activeView === 'customer' ? 'By Customer' : activeView === 'salesperson' ? 'By Sales Person' : activeView === 'sales' ? 'All Sales' : 'Alteration'}</span></p>
                   <div className="grid grid-cols-2 gap-2 mb-4">
                     {SALES_REPORT_COLUMNS[activeView].map(({ key, label }) => (
                       <label key={key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
@@ -1297,6 +1506,18 @@ const SalesReports = () => {
                 {activeView === 'customer' && renderCustomerReport()}
                 {activeView === 'salesperson' && renderSalesPersonReport()}
                 {activeView === 'sales' && renderSalesList()}
+                {activeView === 'alteration' && (
+                  hasPlanFeature('sales_report_alteration') ? renderAlterationList() : (
+                    <div className="p-12 text-center">
+                      <LockIcon className="w-16 h-16 text-amber-400 mx-auto mb-4" />
+                      <h3 className="text-xl font-semibold text-gray-900 mb-2">Alteration Report</h3>
+                      <p className="text-gray-600 mb-4">Upgrade to Premium or Premium Plus to view alteration sales, download slips, and view receipt details.</p>
+                      <button onClick={() => showPlanUpgrade('sales_report_alteration')} className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-medium">
+                        Upgrade to unlock
+                      </button>
+                    </div>
+                  )
+                )}
               </>
             )}
           </div>

@@ -2,7 +2,7 @@
  * Column configuration for Sales Reports - user-selectable columns per view
  */
 
-export type SalesReportView = 'product' | 'category' | 'customer' | 'salesperson' | 'sales'
+export type SalesReportView = 'product' | 'category' | 'customer' | 'salesperson' | 'sales' | 'alteration'
 
 export const SALES_REPORT_COLUMNS: Record<SalesReportView, { key: string; label: string }[]> = {
   product: [
@@ -61,6 +61,19 @@ export const SALES_REPORT_COLUMNS: Record<SalesReportView, { key: string; label:
     { key: 'internal_remarks', label: 'Remark' },
     { key: 'notes', label: 'Notes' },
   ],
+  alteration: [
+    { key: 'sale_date', label: 'Time' },
+    { key: 'sale_date_full', label: 'Date' },
+    { key: 'invoice_number', label: 'Invoice' },
+    { key: 'customer_name', label: 'Customer' },
+    { key: 'alteration_purpose', label: 'Purpose' },
+    { key: 'alteration_sent_to', label: 'Sent to' },
+    { key: 'amount_to_pay', label: 'Amount to Pay' },
+    { key: 'grand_total', label: 'Amount' },
+    { key: 'balance_due', label: 'Due Pending' },
+    { key: 'payment', label: 'Payment' },
+    { key: 'notes', label: 'Notes' },
+  ],
 }
 
 export const DEFAULT_VISIBLE_COLUMNS: Record<SalesReportView, string[]> = {
@@ -69,6 +82,7 @@ export const DEFAULT_VISIBLE_COLUMNS: Record<SalesReportView, string[]> = {
   customer: ['customer_name', 'total_quantity', 'total_revenue', 'total_cost', 'total_profit', 'profit_margin', 'sale_count', 'average_order_value'],
   salesperson: ['sales_person_name', 'total_quantity', 'total_revenue', 'total_cost', 'total_profit', 'profit_margin', 'commission_amount', 'sale_count'],
   sales: ['sale_date', 'invoice_number', 'sale_type', 'customer_name', 'sales_person_name', 'items_count', 'grand_total', 'return_amount', 'payment', 'internal_remarks'],
+  alteration: ['sale_date', 'sale_date_full', 'invoice_number', 'customer_name', 'alteration_purpose', 'alteration_sent_to', 'amount_to_pay', 'grand_total', 'balance_due', 'payment', 'notes'],
 }
 
 const STORAGE_PREFIX = 'salesReport_visibleColumns_'

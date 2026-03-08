@@ -23,14 +23,14 @@ export function parsePaymentMethodsFromRemarks(
   return pairs.length > 0 ? pairs : null
 }
 
-/** Normalize payment_methods (may be string from DB/IndexedDB). Returns array or null. */
+/** Normalize payment_methods (may be string from DB/IndexedDB). Drops received_at for display. Returns array or null. */
 export function normalizePaymentMethods(
   sale: Sale
 ): Array<{ method: string; amount: number }> | null {
   let raw = sale.payment_methods
   if (typeof raw === 'string') {
     try {
-      raw = JSON.parse(raw) as Array<{ method: string; amount: number }>
+      raw = JSON.parse(raw) as Array<{ method: string; amount: number; received_at?: string }>
     } catch {
       return null
     }
@@ -42,6 +42,145 @@ export function normalizePaymentMethods(
     }))
   }
   return null
+}
+
+/**
+ * Get balance collections (payments with received_at) in a date range.
+ * Used by Daily Report to show "collections received today" (e.g. balance on collection).
+ */
+export function getBalanceCollectionsInDateRange(
+  sales: Sale[],
+  dateStartMs: number,
+  dateEndMs: number
+): Array<{ method: string; amount: number }> {
+  const methodMap = new Map<string, number>()
+  sales.forEach(sale => {
+    let raw = sale.payment_methods
+    if (typeof raw === 'string') {
+      try {
+        raw = JSON.parse(raw) as Array<{ method: string; amount: number; received_at?: string }>
+      } catch {
+        return
+      }
+    }
+    if (!Array.isArray(raw)) return
+    raw.forEach((p: { method?: string; amount?: number; received_at?: string }) => {
+      const receivedAt = p?.received_at
+      if (!receivedAt) return
+      const t = new Date(receivedAt).getTime()
+      if (t < dateStartMs || t >= dateEndMs) return
+      const amount = Number(p?.amount) || 0
+      if (amount <= 0) return
+      const key = (String(p?.method || '').trim() || 'other').toLowerCase()
+      methodMap.set(key, (methodMap.get(key) || 0) + amount)
+    })
+  })
+  return Array.from(methodMap.entries())
+    .map(([method, amount]) => ({
+      method: method.charAt(0).toUpperCase() + method.slice(1),
+      amount,
+    }))
+    .sort((a, b) => b.amount - a.amount)
+}
+
+/**
+ * Get payments for a single sale that were received in the date range.
+ * For alteration sales: ONLY payments with received_at count (balance on collection) - initial payment was taken earlier.
+ * For regular sales: payments without received_at are attributed to sale_date.
+ */
+export function getPaymentsReceivedInDateRangeForSale(
+  sale: Sale,
+  dateStartMs: number,
+  dateEndMs: number
+): Array<{ method: string; amount: number }> {
+  if (sale.payment_status !== 'paid') return []
+  const saleDateMs = new Date(sale.sale_date).getTime()
+  const isAlteration = !!sale.hold_for_alteration
+  let raw: unknown = sale.payment_methods
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw)
+    } catch {
+      raw = []
+    }
+  }
+  const arr = Array.isArray(raw) ? raw : []
+  const result: Array<{ method: string; amount: number }> = []
+  if (arr.length > 0) {
+    arr.forEach((p: { method?: string; amount?: number; received_at?: string }) => {
+      const amount = Number(p?.amount) || 0
+      if (amount <= 0) return
+      if (isAlteration && !p?.received_at) return // Alteration: only count balance (received_at), not initial payment
+      const dateMs = p?.received_at ? new Date(p.received_at).getTime() : saleDateMs
+      if (dateMs >= dateStartMs && dateMs < dateEndMs) {
+        const key = (String(p?.method || '').trim() || 'other').toLowerCase()
+        result.push({ method: key.charAt(0).toUpperCase() + key.slice(1), amount })
+      }
+    })
+    return result
+  }
+  if (!isAlteration && saleDateMs >= dateStartMs && saleDateMs < dateEndMs && sale.payment_method && sale.grand_total != null) {
+    const returnAmount = Number(sale.return_amount) || 0
+    const net = Math.max(0, sale.grand_total - returnAmount)
+    if (net > 0) {
+      const key = (sale.payment_method || '').toLowerCase().trim() || 'cash'
+      result.push({ method: key.charAt(0).toUpperCase() + key.slice(1), amount: net })
+    }
+  }
+  return result
+}
+
+/**
+ * Get collections for a date range, attributing each payment to the day it was actually received:
+ * - Alteration sales: ONLY payments with received_at (balance on collection) - initial was taken earlier
+ * - Regular sales: payments without received_at attributed to sale_date
+ */
+export function getCollectionsForDateRange(
+  allSales: Sale[],
+  dateStartMs: number,
+  dateEndMs: number
+): Array<{ method: string; amount: number }> {
+  const methodMap = new Map<string, number>()
+  allSales.forEach(sale => {
+    if (sale.payment_status !== 'paid') return
+    const saleDateMs = new Date(sale.sale_date).getTime()
+    const isAlteration = !!sale.hold_for_alteration
+    let raw: unknown = sale.payment_methods
+    if (typeof raw === 'string') {
+      try {
+        raw = JSON.parse(raw)
+      } catch {
+        raw = []
+      }
+    }
+    const arr = Array.isArray(raw) ? raw : []
+    if (arr.length > 0) {
+      arr.forEach((p: { method?: string; amount?: number; received_at?: string }) => {
+        const amount = Number(p?.amount) || 0
+        if (amount <= 0) return
+        if (isAlteration && !p?.received_at) return
+        const dateMs = p?.received_at ? new Date(p.received_at).getTime() : saleDateMs
+        if (dateMs < dateStartMs || dateMs >= dateEndMs) return
+        const key = (String(p?.method || '').trim() || 'other').toLowerCase()
+        methodMap.set(key, (methodMap.get(key) || 0) + amount)
+      })
+      return
+    }
+    if (!isAlteration && saleDateMs >= dateStartMs && saleDateMs < dateEndMs && sale.payment_method && sale.grand_total != null) {
+      const returnAmount = Number(sale.return_amount) || 0
+      const net = Math.max(0, sale.grand_total - returnAmount)
+      if (net > 0) {
+        const key = (sale.payment_method || '').toLowerCase().trim() || 'cash'
+        methodMap.set(key, (methodMap.get(key) || 0) + net)
+      }
+    }
+  })
+  return Array.from(methodMap.entries())
+    .map(([method, amount]) => ({
+      method: method.charAt(0).toUpperCase() + method.slice(1),
+      amount,
+    }))
+    .sort((a, b) => b.amount - a.amount)
 }
 
 /**

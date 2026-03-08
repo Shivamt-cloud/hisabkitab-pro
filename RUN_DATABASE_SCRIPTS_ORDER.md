@@ -79,6 +79,13 @@ All statements use `IF NOT EXISTS` / `DROP CONSTRAINT IF EXISTS` so the script i
 - Creates **`daily_report_details`**: per-day sale target, customers purchased/returned, return reason, expectation, remark. Enables time-wise reporting and cross-device sync for Daily Report customer details.
 - Run after base schema (companies table exists). Safe to re-run.
 
+## 3.6. Supplier checks (cross-device sync for cheque payments)
+
+**`CREATE_SUPPLIER_CHECKS_TABLE.sql`**
+
+- Creates **`supplier_checks`** so check details from Simple/GST Purchase (when payment method is Cheque) and Upcoming Checks sync to Supabase and persist across devices.
+- Run after base schema. Safe to re-run.
+
 ## 4. Maintenance / alert (optional – for Settings > Maintenance & Alerts to sync to all users)
 
 **`ADD_MAINTENANCE_CONFIG_TABLE.sql`**
@@ -118,5 +125,6 @@ These are **not required** if you have run the three steps above (RUN_ALL → AP
 - [ ] Run **ADD_ORDERED_QTY_BOX_PIECE.sql** (reorder: ordered qty box/piece)
 - [ ] Run **ADD_RECEIVED_QTY_BOX_PIECE.sql** (reorder: received qty box/piece; run after ADD_ORDERED_QTY_BOX_PIECE)
 - [ ] Run **CREATE_DAILY_REPORT_DETAILS_TABLE.sql** (optional: Daily Report sale target + customer details in cloud for time-wise reporting)
+- [ ] Run **CREATE_SUPPLIER_CHECKS_TABLE.sql** (supplier checks from purchase forms + Upcoming Checks – cross-device sync)
 
 After these, the database has everything the app expects for Supabase sync.

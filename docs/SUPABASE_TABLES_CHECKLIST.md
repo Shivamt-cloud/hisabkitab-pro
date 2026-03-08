@@ -37,7 +37,7 @@ This document lists **all app functionality** (IndexedDB stores), whether each h
 | 27 | **sales_person_category_assignments** | ❌ No | — | *IndexedDB only* |
 | 28 | **user_permissions** | ❌ No | — | *IndexedDB only* |
 | 29 | **supplier_payments** | ❌ No | — | *IndexedDB only* |
-| 30 | **supplier_checks** | ❌ No | — | *IndexedDB only* |
+| 30 | **supplier_checks** | ✅ Yes | cloudSupplierCheckService | **CREATE_SUPPLIER_CHECKS_TABLE.sql** |
 | 31 | **subscription_payments** | ❌ No | — | *IndexedDB only* |
 | 32 | **price_segments** | ❌ No | — | *IndexedDB only* (ADD_PRICE_SEGMENT_SUPPORT.sql exists) |
 | 33 | **product_segment_prices** | ❌ No | — | *IndexedDB only* (ADD_PRICE_SEGMENT_SUPPORT.sql) |
@@ -59,7 +59,7 @@ These are **only in IndexedDB**; no cloud sync:
 - **sales_commissions** – calculated commission per sale
 - **sales_person_category_assignments** – which sales person is assigned to which category
 - **user_permissions** – custom permissions per user
-- **supplier_payments** / **supplier_checks**
+- **supplier_payments** (IndexedDB only) / **supplier_checks** (Supabase – run CREATE_SUPPLIER_CHECKS_TABLE.sql)
 - **subscription_payments**
 - **price_segments** / **product_segment_prices**
 - **audit_logs** / **notifications**

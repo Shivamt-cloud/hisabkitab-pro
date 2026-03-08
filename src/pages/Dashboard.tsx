@@ -55,6 +55,7 @@ import {
   Wallet,
   ExternalLink,
   Wrench,
+  Scissors,
   Heart,
   Calculator,
   Wifi,
@@ -754,6 +755,18 @@ const Dashboard = () => {
 
     const upcomingChecksTotal = upcomingChecks.reduce((sum, check) => sum + check.amount, 0)
 
+    // Alteration sales still being held (balance due) – exclude fully paid (customer picked up and settled)
+    const getBalanceDue = (s: { grand_total: number; payment_methods?: Array<{ amount?: number }>; credit_applied?: number }) => {
+      const pmTotal = (s.payment_methods || []).reduce((sum, p) => sum + (p.amount || 0), 0)
+      return Math.max(0, s.grand_total - pmTotal - (s.credit_applied || 0))
+    }
+    const alterationSalesHeld = allSales.filter(s => {
+      if (!s.hold_for_alteration) return false
+      return getBalanceDue(s) > 0
+    })
+    const alterationSalesCount = alterationSalesHeld.length
+    const alterationAmountToCollect = alterationSalesHeld.reduce((sum, s) => sum + getBalanceDue(s), 0)
+
     // Reorder List count: same logic as Reorder List page (product-level + article-level below min)
     const reorderListProductCount = allProducts.filter(p => {
       const minStockLevel = p.min_stock_level ?? productMinStockMap.get(p.id)
@@ -889,6 +902,16 @@ const Dashboard = () => {
       bgGradient: 'from-indigo-500 to-purple-600',
       textColor: 'text-indigo-700',
       onClick: () => navigate('/checks/upcoming')
+    },
+    {
+      title: 'Hold for Alteration',
+      value: alterationSalesCount.toString(),
+      change: `₹${alterationAmountToCollect.toLocaleString('en-IN', { maximumFractionDigits: 0 })} to collect`,
+      trend: alterationSalesCount > 0 ? 'up' : 'neutral',
+      icon: <Scissors className="w-8 h-8" />,
+      bgGradient: 'from-amber-500 to-orange-600',
+      textColor: 'text-amber-700',
+      onClick: () => navigate('/reports/sales')
     }
     ]
     setReports(reportsData)
@@ -911,17 +934,20 @@ const Dashboard = () => {
     { title: 'Quick Sale', description: 'Scan barcode → auto-add → pay (fast checkout)', icon: <ShoppingCart className="w-10 h-10" />, gradient: 'from-emerald-500 to-teal-600', hoverGradient: 'from-emerald-600 to-teal-700', link: '/sales/quick', permission: 'sales:create', planFeature: 'sales_quick_sale' as const },
     { title: 'New Sale', description: 'Create a new sales invoice (full form)', icon: <ShoppingCart className="w-10 h-10" />, gradient: 'from-blue-500 to-blue-600', hoverGradient: 'from-blue-600 to-blue-700', link: '/sales/new', permission: 'sales:create', planFeature: 'sales_new_sale' as const },
     { title: 'New Sale Tab', description: 'Open sale form in new tab (for multiple customers)', icon: <ShoppingCart className="w-10 h-10" />, gradient: 'from-green-500 to-emerald-600', hoverGradient: 'from-green-600 to-emerald-700', link: '/sales/new', permission: 'sales:create', openInNewTab: true, planFeature: 'sales_new_sale_tab' as const },
+    { title: 'Balance on collection', description: 'Receive pending amount when customer picks up after alteration', icon: <Wallet className="w-10 h-10" />, gradient: 'from-amber-500 to-orange-600', hoverGradient: 'from-amber-600 to-orange-700', link: '/sales/balance-collection', permission: 'sales:update', planFeature: 'sales_balance_collection' as const },
     { title: 'Rent / Bookings', description: 'Goods on rent – pickup & return dates, security deposit', icon: <Calendar className="w-10 h-10" />, gradient: 'from-indigo-500 to-purple-600', hoverGradient: 'from-indigo-600 to-purple-700', link: '/rentals', permission: 'sales:read', planFeature: 'sales_rent' as const },
   ]
 
-  const salesOptions = useMemo(() => {
+  // Sales: show plan-gated options to all with permission (locked when !hasPlanFeature); non-plan-gated only when permission
+  const salesOptionsToShow = useMemo(() => {
     return allSalesOptions.filter(option => {
       if (!hasPermission(option.permission)) return false
-      if (!hasPlanFeature(option.planFeature)) return false
       if ((option as any).adminOnly && user?.role !== 'admin') return false
+      const planFeature = (option as { planFeature?: keyof typeof import('../utils/planFeatures').PLAN_FEATURE_MAP }).planFeature
+      if (planFeature != null) return true
       return true
     })
-  }, [hasPermission, hasPlanFeature, user])
+  }, [hasPermission, user])
 
   const allPurchaseOptions = [
     {
@@ -1022,11 +1048,12 @@ const Dashboard = () => {
     'Low Stock Alert': 'report_low_stock',
     'Out of Stock': 'report_out_of_stock',
     'Upcoming Checks': 'report_upcoming_checks',
+    'Hold for Alteration': 'report_alteration_sales',
   }
   const reportCardAccess = useMemo(() => {
     const map: Record<string, boolean> = {}
     reports.forEach(report => {
-      const permCheck = report.title === 'Total Sales' || report.title === 'Total Profit'
+      const permCheck = report.title === 'Total Sales' || report.title === 'Total Profit' || report.title === 'Hold for Alteration'
         ? hasPermission('sales:read')
         : report.title === 'Total Purchases'
           ? hasPermission('purchases:read')
@@ -1656,8 +1683,9 @@ const Dashboard = () => {
                 Sales
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                {allSalesOptions.map((option, index) => {
-                  const canAccess = hasPermission(option.permission) && hasPlanFeature(option.planFeature) && (!(option as any).adminOnly || user?.role === 'admin')
+                {salesOptionsToShow.map((option, index) => {
+                  const planFeature = (option as { planFeature?: keyof typeof import('../utils/planFeatures').PLAN_FEATURE_MAP }).planFeature
+                  const canAccess = hasPermission(option.permission) && (planFeature == null || hasPlanFeature(planFeature)) && (!(option as any).adminOnly || user?.role === 'admin')
                   const handleClick = canAccess
                     ? () => {
                         if ((option as any).openInNewTab) {
@@ -1666,7 +1694,7 @@ const Dashboard = () => {
                           navigate(option.link)
                         }
                       }
-                    : () => showPlanUpgrade(option.planFeature)
+                    : () => planFeature != null && showPlanUpgrade(planFeature)
                   return (
                     <button
                       key={index}
@@ -2024,7 +2052,7 @@ const Dashboard = () => {
             )}
 
             {/* No permissions message */}
-            {salesOptions.length === 0 && purchaseOptionsToShow.length === 0 && expenseOptions.length === 0 && !hasPermission('products:read') && (
+            {salesOptionsToShow.length === 0 && purchaseOptionsToShow.length === 0 && expenseOptions.length === 0 && !hasPermission('products:read') && (
               <div className="text-center py-12 text-gray-500">
                 <p className="text-lg font-medium">You don't have permission to access sales, purchase, or expense operations.</p>
               </div>
