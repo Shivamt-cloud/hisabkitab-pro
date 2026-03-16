@@ -51,6 +51,8 @@ export interface Sale {
   hold_for_alteration?: boolean
   alteration_notes?: string
   alteration_type_id?: number
+  /** Technician / tailor charge configuration for alteration */
+  alteration_technician_mode?: 'advance' | 'pending'
   sent_to_contact_id?: number
   amount_to_pay?: number
   /** When set, this sale is for parts/products sold during this service */

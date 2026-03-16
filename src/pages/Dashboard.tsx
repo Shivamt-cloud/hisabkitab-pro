@@ -2580,6 +2580,15 @@ const Dashboard = () => {
                   <span>Outstanding Payments</span>
                   <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                 </button>
+                <button
+                  onClick={() => hasPlanFeature('report_outstanding') ? navigate('/payments/party-ledger') : showPlanUpgrade('report_outstanding')}
+                  className="group relative w-full bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 text-white font-bold py-4 px-6 rounded-xl hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-300 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                >
+                  {!hasPlanFeature('report_outstanding') && <LockIcon className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 opacity-90" />}
+                  <FileText className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                  <span>Party Ledger Summary</span>
+                  <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                </button>
               </div>
             )}
             {hasPermission('settings:update') && user?.role === 'admin' && (

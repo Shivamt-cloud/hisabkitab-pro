@@ -53,6 +53,7 @@ const GSTPurchaseForm = () => {
   const [dueDate, setDueDate] = useState('')
   const [items, setItems] = useState<PurchaseItem[]>([])
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'pending' | 'partial'>('pending')
+  const [amountPaid, setAmountPaid] = useState<number>(0)
   const [paymentMethod, setPaymentMethod] = useState('')
   const [checkDetails, setCheckDetails] = useState<Array<{ id?: number; check_number: string; bank_name: string; issue_date: string; due_date: string; amount: number; status: 'pending' | 'cleared' }>>([])
   const [notes, setNotes] = useState('')
@@ -306,6 +307,9 @@ const GSTPurchaseForm = () => {
           setItemSegmentPrices(byIndex)
         })
         setPaymentStatus(gstPurchase.payment_status)
+        const gt = gstPurchase.grand_total ?? 0
+        const ap = (gstPurchase as any).amount_paid
+        setAmountPaid(ap != null ? Math.max(0, Math.min(gt, ap)) : (gstPurchase.payment_status === 'paid' ? gt : gstPurchase.payment_status === 'partial' ? gt / 2 : 0))
         const pm = gstPurchase.payment_method || ''
         setPaymentMethod(pm ? (PAYMENT_METHOD_OPTIONS.find(o => o.toLowerCase() === pm.toLowerCase()) || pm) : '')
         if (pm.toLowerCase() === 'cheque' && gstPurchase.id) {
@@ -711,7 +715,8 @@ const GSTPurchaseForm = () => {
           cgst_amount: totals.cgstAmount,
           sgst_amount: totals.sgstAmount,
           grand_total: totals.grandTotal,
-          payment_status: paymentStatus,
+          payment_status: amountPaid >= totals.grandTotal ? 'paid' : amountPaid > 0 ? 'partial' : 'pending',
+          amount_paid: Math.max(0, Math.min(totals.grandTotal, amountPaid)),
           payment_method: paymentMethod,
           notes,
           return_remarks: items.some(item => item.purchase_type === 'return') ? returnRemarks.trim() || undefined : undefined,
@@ -782,7 +787,8 @@ const GSTPurchaseForm = () => {
           sgst_amount: totals.sgstAmount,
           grand_total: totals.grandTotal,
           company_id: getCurrentCompanyId() ?? undefined,
-          payment_status: paymentStatus,
+          payment_status: amountPaid >= totals.grandTotal ? 'paid' : amountPaid > 0 ? 'partial' : 'pending',
+          amount_paid: Math.max(0, Math.min(totals.grandTotal, amountPaid)),
           payment_method: paymentMethod,
           notes,
           return_remarks: items.some(item => item.purchase_type === 'return') ? returnRemarks.trim() || undefined : undefined,
@@ -975,16 +981,26 @@ const GSTPurchaseForm = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Payment Status</label>
-                  <select
-                    value={paymentStatus}
-                    onChange={(e) => setPaymentStatus(e.target.value as any)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none appearance-none bg-white"
-                  >
-                    <option value="pending">Pending</option>
-                    <option value="paid">Paid</option>
-                    <option value="partial">Partial</option>
-                  </select>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Amount paid (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={amountPaid > 0 ? amountPaid : ''}
+                    onChange={(e) => setAmountPaid(Math.max(0, parseFloat(e.target.value) || 0))}
+                    placeholder="0"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                    title="Amount paid at goods receiving (e.g. advance). Rest is pending."
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Paid at goods receiving. Remaining = Pending for later.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Pending (₹)</label>
+                  <div className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 text-gray-800 font-medium">
+                    ₹{Math.max(0, (calculateTotals().grandTotal - amountPaid)).toFixed(2)}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">Bill total − Amount paid. Shown in Outstanding / Reports.</p>
                 </div>
 
                 <div>

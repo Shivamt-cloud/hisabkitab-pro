@@ -53,6 +53,7 @@ import PriceLists from './pages/PriceLists'
 import AutomatedExports from './pages/AutomatedExports'
 import CAReports from './pages/CAReports'
 import OutstandingPayments from './pages/OutstandingPayments'
+import PartyLedgerSummary from './pages/PartyLedgerSummary'
 import SystemSettings from './pages/SystemSettings'
 import BackupRestore from './pages/BackupRestore'
 import AuditLogs from './pages/AuditLogs'
@@ -633,6 +634,14 @@ function App() {
             element={
               <ProtectedRoute requiredPermission="sales:read" requiredPlanFeature="report_outstanding">
                 <OutstandingPayments />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/payments/party-ledger"
+            element={
+              <ProtectedRoute requiredPermission="sales:read" requiredPlanFeature="report_outstanding">
+                <PartyLedgerSummary />
               </ProtectedRoute>
             }
           />

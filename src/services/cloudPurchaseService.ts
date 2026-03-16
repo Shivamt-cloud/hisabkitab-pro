@@ -69,6 +69,38 @@ export const cloudPurchaseService = {
   },
 
   /**
+   * Get purchase total for one supplier – minimal columns, no items. Fast for Supplier Account.
+   */
+  getPurchaseTotalBySupplier: async (supplierId: number, companyId?: number | null): Promise<number> => {
+    if (!isSupabaseAvailable() || !isOnline()) {
+      const all = await getAll<Purchase>(STORES.PURCHASES)
+      const filtered = all.filter(
+        p => (p as any).supplier_id === supplierId && (companyId == null || (p as any).company_id === companyId)
+      )
+      return filtered.reduce((sum, p) => sum + (p.type === 'gst' ? ((p as any).grand_total ?? 0) : ((p as any).total_amount ?? 0)), 0)
+    }
+    try {
+      let query = supabase!
+        .from('purchases')
+        .select('type, grand_total, total_amount')
+        .eq('supplier_id', supplierId)
+      if (companyId != null) query = query.eq('company_id', companyId)
+      const { data, error } = await query
+      if (error) throw error
+      return (data || []).reduce((sum: number, row: any) => {
+        const amt = row.type === 'gst' ? (row.grand_total ?? 0) : (row.total_amount ?? 0)
+        return sum + Number(amt)
+      }, 0)
+    } catch {
+      const all = await getAll<Purchase>(STORES.PURCHASES)
+      const filtered = all.filter(
+        p => (p as any).supplier_id === supplierId && (companyId == null || (p as any).company_id === companyId)
+      )
+      return filtered.reduce((sum, p) => sum + (p.type === 'gst' ? ((p as any).grand_total ?? 0) : ((p as any).total_amount ?? 0)), 0)
+    }
+  },
+
+  /**
    * Search purchases in Supabase (server-side, fast when online).
    * Used by Sale form when online - avoids loading full purchase history.
    * Returns only matching purchases (max 500).
@@ -249,6 +281,7 @@ export const cloudPurchaseService = {
           grand_total: purchaseData.type === 'gst' ? (purchaseData as GSTPurchase).grand_total : null,
           total_amount: purchaseData.type === 'simple' ? (purchaseData as SimplePurchase).total_amount : null,
           payment_status: purchaseData.payment_status,
+          amount_paid: (purchaseData as any).amount_paid ?? null,
           payment_method: purchaseData.payment_method || null,
           notes: purchaseData.notes || null,
           return_remarks: (purchaseData as any).return_remarks || null,
@@ -327,6 +360,7 @@ export const cloudPurchaseService = {
           grand_total: updated.type === 'gst' ? (updated as GSTPurchase).grand_total : null,
           total_amount: updated.type === 'simple' ? (updated as SimplePurchase).total_amount : null,
           payment_status: updated.payment_status,
+          amount_paid: (updated as any).amount_paid ?? null,
           payment_method: updated.payment_method || null,
           notes: updated.notes || null,
           return_remarks: (updated as any).return_remarks || null,

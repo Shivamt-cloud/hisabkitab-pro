@@ -2,81 +2,53 @@
 
 import { SupplierPayment, SupplierCheck, SupplierAccountSummary } from '../types/supplierPayment'
 import { Purchase } from '../types/purchase'
-import { getAll, getById, put, deleteById, STORES } from '../database/db'
+import { supabase, isSupabaseAvailable, isOnline } from './supabaseClient'
 import { purchaseService } from './purchaseService'
 import { supplierService } from './purchaseService'
 import { cloudSupplierCheckService } from './cloudSupplierCheckService'
+import { cloudSupplierPaymentService } from './cloudSupplierPaymentService'
 
 export const supplierPaymentService = {
   // ========== PAYMENT METHODS ==========
   
   /**
-   * Get all payments for a supplier
+   * Get all payments for a supplier (uses Supabase when online)
    */
   getPaymentsBySupplier: async (supplierId: number, companyId?: number | null): Promise<SupplierPayment[]> => {
-    const allPayments = await getAll<SupplierPayment>(STORES.SUPPLIER_PAYMENTS)
-    let filtered = allPayments.filter(p => p.supplier_id === supplierId)
-    
-    if (companyId !== undefined && companyId !== null) {
-      filtered = filtered.filter(p => p.company_id === companyId)
-    }
-    
-    return filtered.sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime())
+    return await cloudSupplierPaymentService.getBySupplier(supplierId, companyId)
   },
 
   /**
-   * Get payment by ID
+   * Get payment by ID (uses Supabase when online)
    */
   getPaymentById: async (id: number): Promise<SupplierPayment | undefined> => {
-    return await getById<SupplierPayment>(STORES.SUPPLIER_PAYMENTS, id)
+    return await cloudSupplierPaymentService.getById(id)
   },
 
   /**
-   * Create a new payment
+   * Create a new payment (syncs to Supabase when online)
    */
   createPayment: async (payment: Omit<SupplierPayment, 'id' | 'created_at' | 'updated_at'>): Promise<SupplierPayment> => {
     const supplier = await supplierService.getById(payment.supplier_id)
-    
-    const newPayment: SupplierPayment = {
+    const payload = {
       ...payment,
-      id: Date.now(),
       supplier_name: supplier?.name || payment.supplier_name,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
     }
-    
-    await put(STORES.SUPPLIER_PAYMENTS, newPayment)
-    return newPayment
+    return await cloudSupplierPaymentService.create(payload)
   },
 
   /**
-   * Update a payment
+   * Update a payment (syncs to Supabase when online)
    */
   updatePayment: async (id: number, payment: Partial<SupplierPayment>): Promise<SupplierPayment | null> => {
-    const existing = await getById<SupplierPayment>(STORES.SUPPLIER_PAYMENTS, id)
-    if (!existing) return null
-
-    const updated: SupplierPayment = {
-      ...existing,
-      ...payment,
-      updated_at: new Date().toISOString(),
-    }
-    
-    await put(STORES.SUPPLIER_PAYMENTS, updated)
-    return updated
+    return await cloudSupplierPaymentService.update(id, payment)
   },
 
   /**
-   * Delete a payment
+   * Delete a payment (syncs to Supabase when online)
    */
   deletePayment: async (id: number): Promise<boolean> => {
-    try {
-      await deleteById(STORES.SUPPLIER_PAYMENTS, id)
-      return true
-    } catch (error) {
-      console.error('Error deleting payment:', error)
-      return false
-    }
+    return await cloudSupplierPaymentService.delete(id)
   },
 
   // ========== CHECK METHODS (use cloud for cross-device sync) ==========
@@ -95,9 +67,8 @@ export const supplierPaymentService = {
    * Get all checks for a supplier
    */
   getChecksBySupplier: async (supplierId: number, companyId?: number | null): Promise<SupplierCheck[]> => {
-    const allChecks = await cloudSupplierCheckService.getAll(companyId)
-    const filtered = allChecks.filter(c => c.supplier_id === supplierId)
-    return filtered.sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime())
+    const checks = await cloudSupplierCheckService.getBySupplier(supplierId, companyId)
+    return checks.sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime())
   },
 
   /**
@@ -170,32 +141,13 @@ export const supplierPaymentService = {
     const supplier = await supplierService.getById(supplierId)
     if (!supplier) return null
 
-    // Get all purchases for this supplier
-    const allPurchases = await purchaseService.getAll(undefined, companyId)
-    const supplierPurchases = allPurchases.filter(p => {
-      if (p.type === 'gst') {
-        return (p as any).supplier_id === supplierId
-      }
-      return (p as any).supplier_id === supplierId
-    })
-
-    // Calculate total purchases
-    const totalPurchases = supplierPurchases.reduce((sum, p) => {
-      if (p.type === 'gst') {
-        return sum + ((p as any).grand_total || 0)
-      }
-      return sum + ((p as any).total_amount || 0)
-    }, 0)
-
-    // Get all payments
-    const payments = await supplierPaymentService.getPaymentsBySupplier(supplierId, companyId)
+    const [totalPurchases, payments, allChecks] = await Promise.all([
+      purchaseService.getPurchaseTotalBySupplier(supplierId, companyId),
+      supplierPaymentService.getPaymentsBySupplier(supplierId, companyId),
+      supplierPaymentService.getChecksBySupplier(supplierId, companyId),
+    ])
     const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0)
-
-    // Calculate pending amount
     const pendingAmount = totalPurchases - totalPaid
-
-    // Get all checks
-    const allChecks = await supplierPaymentService.getChecksBySupplier(supplierId, companyId)
     const today = new Date()
     
     const upcomingChecks = allChecks.filter(c => {
@@ -223,7 +175,69 @@ export const supplierPaymentService = {
   },
 
   /**
-   * Get account summaries for all suppliers
+   * Lightweight supplier ledger summary. Uses Supabase RPC when online (single fast query).
+   * Falls back to in-memory aggregation when offline.
+   */
+  getSupplierLedgerSummariesFast: async (companyId?: number | null): Promise<{ supplier_id: number; supplier_name: string; total_purchases: number; total_paid: number; pending_amount: number }[]> => {
+    if (isSupabaseAvailable() && isOnline()) {
+      try {
+        const { data, error } = await supabase!.rpc('get_supplier_ledger_summary', {
+          p_company_id: companyId ?? null,
+        })
+        if (!error && Array.isArray(data)) {
+          return data.map((row: any) => ({
+            supplier_id: Number(row.supplier_id),
+            supplier_name: String(row.supplier_name ?? ''),
+            total_purchases: Number(row.total_purchases ?? 0),
+            total_paid: Number(row.total_paid ?? 0),
+            pending_amount: Number(row.pending_amount ?? 0),
+          }))
+        }
+      } catch (e) {
+        console.warn('[supplierPaymentService] RPC get_supplier_ledger_summary failed, falling back:', e)
+      }
+    }
+
+    const [suppliers, allPurchases, allPayments] = await Promise.all([
+      supplierService.getAll(companyId),
+      purchaseService.getAll(undefined, companyId),
+      cloudSupplierPaymentService.getAll(companyId),
+    ])
+
+    const bySupplier = new Map<number, { supplier_name: string; total_purchases: number; total_paid: number }>()
+    suppliers.forEach(s => bySupplier.set(s.id, { supplier_name: s.name, total_purchases: 0, total_paid: 0 }))
+
+    allPurchases.forEach(p => {
+      const sid = (p as any).supplier_id
+      if (sid == null) return
+      const total = p.type === 'gst' ? (p as any).grand_total : (p as any).total_amount
+      const amtPaid = (p as any).amount_paid ?? (p.payment_status === 'paid' ? (total ?? 0) : 0)
+      const entry = bySupplier.get(sid)
+      if (entry) {
+        entry.total_purchases += total ?? 0
+        entry.total_paid += amtPaid
+      } else {
+        bySupplier.set(sid, { supplier_name: (p as any).supplier_name || 'Unknown', total_purchases: total ?? 0, total_paid: amtPaid })
+      }
+    })
+
+    const paymentsFiltered = companyId != null ? allPayments.filter(p => p.company_id === companyId) : allPayments
+    paymentsFiltered.forEach(p => {
+      const entry = bySupplier.get(p.supplier_id)
+      if (entry) entry.total_paid += p.amount ?? 0
+    })
+
+    return Array.from(bySupplier.entries()).map(([supplier_id, data]) => ({
+      supplier_id,
+      supplier_name: data.supplier_name,
+      total_purchases: data.total_purchases,
+      total_paid: data.total_paid,
+      pending_amount: Math.max(0, data.total_purchases - data.total_paid),
+    })).sort((a, b) => b.pending_amount - a.pending_amount)
+  },
+
+  /**
+   * Get account summaries for all suppliers (full detail – slower, used by SupplierAccount)
    */
   getAllAccountSummaries: async (companyId?: number | null): Promise<SupplierAccountSummary[]> => {
     const suppliers = await supplierService.getAll(companyId)

@@ -7,12 +7,13 @@ import { getAll, getById, put, STORES } from '../database/db'
 
 export const paymentService = {
   // Initialize payment records from sales and purchases (accepts pre-loaded data to avoid duplicate fetches)
+  // Uses getAllFast for speed when loading Outstanding Payments page
   initializeFromSalesAndPurchases: async (companyId?: number | null, preloaded?: { sales?: Sale[]; purchases?: Purchase[] }): Promise<void> => {
     const [sales, purchases] = preloaded?.sales && preloaded?.purchases
       ? [preloaded.sales, preloaded.purchases]
       : await Promise.all([
-          saleService.getAll(true, companyId),
-          purchaseService.getAll(undefined, companyId)
+          saleService.getAllFast(true, companyId),
+          purchaseService.getAllFast(undefined, companyId, { limit: 10000 }),
         ])
 
     const existingRecords = await getAll<PaymentRecord>(STORES.PAYMENT_RECORDS)
@@ -43,11 +44,26 @@ export const paymentService = {
       }
     }
     for (const purchase of purchases) {
+      const totalAmount = purchase.type === 'gst' ? (purchase as any).grand_total : (purchase as any).total_amount
+      const amountPaid = (purchase as any).amount_paid
+      const paidAmount = amountPaid != null
+        ? Math.min(totalAmount, Math.max(0, amountPaid))
+        : (purchase.payment_status === 'paid' ? totalAmount : purchase.payment_status === 'partial' ? totalAmount * 0.5 : 0)
+      const pendingAmount = totalAmount - paidAmount
+      const derivedStatus: PaymentStatus = pendingAmount <= 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'pending'
+
       const existing = existingRecords.find(p => p.type === 'purchase' && p.reference_id === purchase.id)
-      if (!existing) {
-        const totalAmount = purchase.type === 'gst' ? (purchase as any).grand_total : (purchase as any).total_amount
-        const paidAmount = purchase.payment_status === 'paid' ? totalAmount : purchase.payment_status === 'partial' ? (totalAmount * 0.5) : 0
-        const pendingAmount = totalAmount - paidAmount
+      if (existing) {
+        // Sync from purchase when amount_paid is set (form edit); otherwise keep record (may have been updated by Add payment)
+        if (amountPaid != null) {
+          existing.paid_amount = paidAmount
+          existing.pending_amount = pendingAmount
+          existing.payment_status = derivedStatus
+          existing.updated_at = (purchase as any).updated_at
+          if (derivedStatus === 'paid') existing.payment_date = purchase.purchase_date
+          toPut.push(existing)
+        }
+      } else {
         toPut.push({
           id: Date.now() + Math.random() * 10000 + idx++,
           type: 'purchase',
@@ -58,9 +74,9 @@ export const paymentService = {
           total_amount: totalAmount,
           paid_amount: paidAmount,
           pending_amount: pendingAmount,
-          payment_status: purchase.payment_status as PaymentStatus,
+          payment_status: derivedStatus,
           payment_method: purchase.payment_method as PaymentMethod,
-          payment_date: purchase.payment_status === 'paid' ? purchase.purchase_date : undefined,
+          payment_date: derivedStatus === 'paid' ? purchase.purchase_date : undefined,
           created_at: purchase.created_at,
           updated_at: (purchase as any).updated_at,
         })
@@ -73,34 +89,26 @@ export const paymentService = {
     }
   },
 
-  // Get all payment records
+  // Get all payment records (uses getAllFast, no per-record getById)
   getAll: async (type?: PaymentType, companyId?: number | null): Promise<PaymentRecord[]> => {
-    await paymentService.initializeFromSalesAndPurchases(companyId)
+    const [sales, purchases] = await Promise.all([
+      saleService.getAllFast(true, companyId),
+      purchaseService.getAllFast(undefined, companyId, { limit: 10000 }),
+    ])
+    await paymentService.initializeFromSalesAndPurchases(companyId, { sales, purchases })
     let records = await getAll<PaymentRecord>(STORES.PAYMENT_RECORDS)
-    
-    // Filter by company_id if provided
+
     if (companyId !== undefined && companyId !== null) {
-      // Filter records based on their source (sale or purchase) company_id
-      // We need to check the source record's company_id
-      const filteredRecords: PaymentRecord[] = []
-      for (const record of records) {
-        if (record.type === 'sale') {
-          const sale = await saleService.getById(record.reference_id)
-          if (sale && sale.company_id === companyId) {
-            filteredRecords.push(record)
-          }
-        } else if (record.type === 'purchase') {
-          const purchase = await purchaseService.getById(record.reference_id)
-          if (purchase && purchase.company_id === companyId) {
-            filteredRecords.push(record)
-          }
-        }
-      }
-      records = filteredRecords
+      const saleIds = new Set(sales.filter(s => s.company_id === companyId).map(s => s.id))
+      const purchaseIds = new Set(purchases.filter(p => p.company_id === companyId).map(p => p.id))
+      records = records.filter(r =>
+        (r.type === 'sale' && saleIds.has(r.reference_id)) ||
+        (r.type === 'purchase' && purchaseIds.has(r.reference_id))
+      )
     } else if (companyId === null) {
       records = []
     }
-    
+
     if (type) {
       records = records.filter(p => p.type === type)
     }
@@ -109,28 +117,24 @@ export const paymentService = {
 
   // Get outstanding payments (preloaded avoids re-fetching sales/purchases)
   getOutstandingPayments: async (type?: PaymentType, companyId?: number | null, preloaded?: { sales: Sale[]; purchases: Purchase[] }): Promise<OutstandingPayment[]> => {
-    await paymentService.initializeFromSalesAndPurchases(companyId, preloaded)
+    const [sales, purchases] = preloaded?.sales && preloaded?.purchases
+      ? [preloaded.sales, preloaded.purchases]
+      : await Promise.all([
+          saleService.getAllFast(true, companyId),
+          purchaseService.getAllFast(undefined, companyId, { limit: 10000 }),
+        ])
+    await paymentService.initializeFromSalesAndPurchases(companyId, { sales, purchases })
     let records = await getAll<PaymentRecord>(STORES.PAYMENT_RECORDS)
     records = records.filter(p => p.pending_amount > 0)
-    
-    // Filter by company_id if provided
+
+    // Filter by company_id using preloaded sales/purchases (no per-record getById)
     if (companyId !== undefined && companyId !== null) {
-      // Filter records based on their source (sale or purchase) company_id
-      const filteredRecords: PaymentRecord[] = []
-      for (const record of records) {
-        if (record.type === 'sale') {
-          const sale = await saleService.getById(record.reference_id)
-          if (sale && sale.company_id === companyId) {
-            filteredRecords.push(record)
-          }
-        } else if (record.type === 'purchase') {
-          const purchase = await purchaseService.getById(record.reference_id)
-          if (purchase && purchase.company_id === companyId) {
-            filteredRecords.push(record)
-          }
-        }
-      }
-      records = filteredRecords
+      const saleIds = new Set(sales.filter(s => s.company_id === companyId).map(s => s.id))
+      const purchaseIds = new Set(purchases.filter(p => p.company_id === companyId).map(p => p.id))
+      records = records.filter(r =>
+        (r.type === 'sale' && saleIds.has(r.reference_id)) ||
+        (r.type === 'purchase' && purchaseIds.has(r.reference_id))
+      )
     } else if (companyId === null) {
       records = []
     }
@@ -243,13 +247,14 @@ export const paymentService = {
         })
       }
     } else if (record.type === 'purchase') {
-      // Update purchase payment status
+      // Update purchase payment status and amount_paid so form and reports stay in sync
       const purchase = await purchaseService.getById(record.reference_id)
       if (purchase) {
         await purchaseService.update(record.reference_id, {
           payment_status: updatedStatus as any,
           payment_method: paymentMethod as any,
-        })
+          amount_paid: updatedPaidAmount,
+        } as any)
       }
     }
 

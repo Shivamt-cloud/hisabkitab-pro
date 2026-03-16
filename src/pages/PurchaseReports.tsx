@@ -466,7 +466,17 @@ const PurchaseReports = () => {
                   {isColumnVisible('purchases', 'tax_amount') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">₹{getPurchaseTax(p).toFixed(2)}</td>}
                   {isColumnVisible('purchases', 'grand_total') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-bold text-gray-900">₹{getPurchaseTotal(p).toFixed(2)}</td>}
                   {isColumnVisible('purchases', 'payment_status') && <td className="px-4 py-3 whitespace-nowrap">
-                    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${p.payment_status === 'paid' ? 'bg-green-100 text-green-700' : p.payment_status === 'partial' ? 'bg-yellow-100 text-yellow-700' : 'bg-amber-100 text-amber-700'}`}>{p.payment_status.charAt(0).toUpperCase() + p.payment_status.slice(1)}</span>
+                    {(() => {
+                      const total = p.type === 'gst' ? (p as any).grand_total : (p as any).total_amount
+                      const paid = (p as any).amount_paid ?? (p.payment_status === 'paid' ? total : p.payment_status === 'partial' ? total / 2 : 0)
+                      const pending = total - paid
+                      return (
+                        <span className={`inline-flex flex-col gap-0.5 ${p.payment_status === 'paid' ? 'text-green-700' : p.payment_status === 'partial' ? 'text-yellow-700' : 'text-amber-700'}`}>
+                          <span className={`inline-flex w-fit px-2 py-0.5 rounded-full text-xs font-medium ${p.payment_status === 'paid' ? 'bg-green-100' : p.payment_status === 'partial' ? 'bg-yellow-100' : 'bg-amber-100'}`}>{p.payment_status.charAt(0).toUpperCase() + p.payment_status.slice(1)}</span>
+                          {pending > 0 && <span className="text-xs">Paid ₹{paid.toFixed(0)} · Pending ₹{pending.toFixed(0)}</span>}
+                        </span>
+                      )
+                    })()}
                   </td>}
                   {isColumnVisible('purchases', 'notes') && <td className="px-4 py-3 text-xs text-gray-600 max-w-[150px] truncate" title={(p as any).notes}>{(p as any).notes || '—'}</td>}
                   <td className="px-4 py-3 text-right whitespace-nowrap">

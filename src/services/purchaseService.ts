@@ -52,6 +52,11 @@ export const purchaseService = {
     return await cloudPurchaseService.searchPurchasesForSale(query, companyId)
   },
 
+  /** Get purchase total for one supplier – fast, no full purchase load. */
+  getPurchaseTotalBySupplier: async (supplierId: number, companyId?: number | null): Promise<number> => {
+    return await cloudPurchaseService.getPurchaseTotalBySupplier(supplierId, companyId)
+  },
+
   // Get purchase by ID (from cloud, with local fallback)
   getById: async (id: number): Promise<Purchase | undefined> => {
     return await cloudPurchaseService.getById(id)

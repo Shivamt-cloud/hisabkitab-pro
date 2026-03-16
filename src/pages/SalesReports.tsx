@@ -12,7 +12,7 @@ import {
   SalesBySalesPersonReport,
   ReportTimePeriod,
 } from '../types/reports'
-import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText, Eye, ShoppingCart, Search, X, Columns3, Pencil, FileDown, Scissors } from 'lucide-react'
+import { Home, TrendingUp, Package, Users, UserCheck, Filter, FileSpreadsheet, FileText, Eye, ShoppingCart, Search, X, Columns3, Pencil, FileDown, Scissors, Plus } from 'lucide-react'
 import { saleService } from '../services/saleService'
 import { Sale } from '../types/sale'
 import { exportToExcel as exportExcel, exportDataToPDF, exportAlterationSlipToPDF, type AlterationSlipData } from '../utils/exportUtils'
@@ -55,8 +55,25 @@ function formatPaymentMethod(sale: Sale): string {
   return method
 }
 
-/** Format only payments received on a given date (for Sales Report - shows due/balance received, not full payment) */
+/**
+ * Format only payments received on a given date for the Sales tab.
+ * For regular sales: show net received per method on the sale date (after return_amount).
+ * For alteration sales: show only balance collections (payments with received_at) on that date.
+ */
 function formatPaymentReceivedOnDate(sale: Sale, dateStr: string): string {
+  const saleDateOnly = sale.sale_date.split('T')[0]
+  const isAlteration = !!sale.hold_for_alteration
+
+  // Regular sale: net payment on sale date (grand_total - return_amount), split by method
+  if (!isAlteration && saleDateOnly === dateStr) {
+    const methods = getNetPaymentMethodsForSale(sale)
+    if (!methods || methods.length === 0) return '—'
+    return methods
+      .map(p => `${p.method}: ₹${(p.amount || 0).toFixed(2)}`)
+      .join(', ')
+  }
+
+  // Alteration / other dates: use date-range helper (balance collections by received_at)
   const dateStart = new Date(dateStr).getTime()
   const dateEnd = dateStart + 86400000
   const methods = getPaymentsReceivedInDateRangeForSale(sale, dateStart, dateEnd)
@@ -107,6 +124,7 @@ const SalesReports = () => {
   const [customerReports, setCustomerReports] = useState<SalesByCustomerReport[]>([])
   const [salesPersonReports, setSalesPersonReports] = useState<SalesBySalesPersonReport[]>([])
   const [sales, setSales] = useState<Sale[]>([])
+  const [detailModal, setDetailModal] = useState<{ title: string; columns: string[]; rows: Array<Record<string, string | number>> } | null>(null)
   const [showColumnSettings, setShowColumnSettings] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState<Record<ReportView, Set<string>>>(() => {
     const init: Record<ReportView, Set<string>> = {} as Record<ReportView, Set<string>>
@@ -441,11 +459,11 @@ const SalesReports = () => {
           const hasSale = s.items?.some((i: { sale_type?: string }) => i.sale_type === 'sale')
           const typeStr = hasReturn && hasSale ? 'Mixed' : hasReturn ? 'Return' : 'Sale'
           const status = s.payment_status === 'paid' ? 'Paid' : 'Pending'
-          const methods = getPaymentMethodsForDisplay(s)
-          const methodStr = methods && methods.length > 0
-            ? methods.map(p => `₹${(p.amount || 0).toFixed(0)} ${p.method.charAt(0).toUpperCase() + p.method.slice(1)}`).join(', ')
+          const netMethods = getNetPaymentMethodsForSale(s)
+          const methodStr = netMethods && netMethods.length > 0
+            ? netMethods.map(p => `₹${(p.amount || 0).toFixed(0)} ${p.method}`).join(', ')
             : s.payment_method && s.grand_total != null
-              ? `₹${s.grand_total.toFixed(0)} ${s.payment_method.charAt(0).toUpperCase() + s.payment_method.slice(1)}`
+              ? `₹${Math.max(0, (s.grand_total - (s.return_amount || 0))).toFixed(0)} ${s.payment_method.charAt(0).toUpperCase() + s.payment_method.slice(1)}`
               : ''
           rows.push([
             formatRecordTime(s.sale_date, s.created_at),
@@ -689,6 +707,91 @@ const SalesReports = () => {
     toast.success('Alteration slip downloaded')
   }
 
+  /** Build detail rows for product: each sale line that has this product */
+  const getDetailRowsForProduct = (report: SalesByProductReport) => {
+    const columns = ['Date', 'Invoice', 'Customer', 'Qty', 'Revenue', 'Cost', 'Profit']
+    const rows: Array<Record<string, string | number>> = []
+    filteredSales.forEach(sale => {
+      (sale.items || []).forEach(item => {
+        if (item.product_id !== report.product_id) return
+        const cost = (item.purchase_price ?? 0) * (item.quantity ?? 0)
+        const revenue = item.total ?? 0
+        const profit = revenue - cost
+        rows.push({
+          Date: new Date(sale.sale_date).toLocaleDateString('en-IN'),
+          Invoice: sale.invoice_number || `#${sale.id}`,
+          Customer: sale.customer_name || 'Walk-in',
+          Qty: item.quantity ?? 0,
+          Revenue: parseFloat(revenue.toFixed(2)),
+          Cost: parseFloat(cost.toFixed(2)),
+          Profit: parseFloat(profit.toFixed(2)),
+        })
+      })
+    })
+    return { columns, rows }
+  }
+
+  /** Build detail rows for category: each sale line that belongs to this category */
+  const getDetailRowsForCategory = (report: SalesByCategoryReport) => {
+    const productIdsInCategory = new Set(products.filter(p => (p.category_name || 'Uncategorized') === report.category_name).map(p => p.id))
+    const columns = ['Date', 'Invoice', 'Customer', 'Product', 'Qty', 'Revenue', 'Cost', 'Profit']
+    const rows: Array<Record<string, string | number>> = []
+    filteredSales.forEach(sale => {
+      (sale.items || []).forEach(item => {
+        if (!productIdsInCategory.has(item.product_id)) return
+        const cost = (item.purchase_price ?? 0) * (item.quantity ?? 0)
+        const revenue = item.total ?? 0
+        const profit = revenue - cost
+        rows.push({
+          Date: new Date(sale.sale_date).toLocaleDateString('en-IN'),
+          Invoice: sale.invoice_number || `#${sale.id}`,
+          Customer: sale.customer_name || 'Walk-in',
+          Product: item.product_name || '—',
+          Qty: item.quantity ?? 0,
+          Revenue: parseFloat(revenue.toFixed(2)),
+          Cost: parseFloat(cost.toFixed(2)),
+          Profit: parseFloat(profit.toFixed(2)),
+        })
+      })
+    })
+    return { columns, rows }
+  }
+
+  /** Build detail rows for customer: each sale for this customer */
+  const getDetailRowsForCustomer = (report: SalesByCustomerReport) => {
+    const columns = ['Date', 'Invoice', 'Amount', 'Items']
+    const rows: Array<Record<string, string | number>> = []
+    filteredSales.forEach(sale => {
+      const match = report.customer_id != null ? sale.customer_id === report.customer_id : (sale.customer_name || 'Walk-in') === report.customer_name
+      if (!match) return
+      rows.push({
+        Date: new Date(sale.sale_date).toLocaleDateString('en-IN'),
+        Invoice: sale.invoice_number || `#${sale.id}`,
+        Amount: parseFloat(sale.grand_total.toFixed(2)),
+        Items: sale.items?.length ?? 0,
+      })
+    })
+    return { columns, rows }
+  }
+
+  /** Build detail rows for sales person: each sale by this sales person */
+  const getDetailRowsForSalesPerson = (report: SalesBySalesPersonReport) => {
+    const columns = ['Date', 'Invoice', 'Customer', 'Amount', 'Items']
+    const rows: Array<Record<string, string | number>> = []
+    filteredSales.forEach(sale => {
+      const match = report.sales_person_id != null ? sale.sales_person_id === report.sales_person_id : (sale.sales_person_name || '') === report.sales_person_name
+      if (!match) return
+      rows.push({
+        Date: new Date(sale.sale_date).toLocaleDateString('en-IN'),
+        Invoice: sale.invoice_number || `#${sale.id}`,
+        Customer: sale.customer_name || 'Walk-in',
+        Amount: parseFloat(sale.grand_total.toFixed(2)),
+        Items: sale.items?.length ?? 0,
+      })
+    })
+    return { columns, rows }
+  }
+
   const renderProductReport = () => (
     <ScrollableTableWrapper minWidth="700px" maxHeight="55vh">
       <table className="w-full min-w-[700px]">
@@ -707,7 +810,13 @@ const SalesReports = () => {
         <tbody className="divide-y divide-gray-200 bg-white">
           {filteredProductReports.map((report) => (
             <tr key={report.product_id} className="hover:bg-gray-50 transition-colors">
-              {isColumnVisible('product', 'product_name') && <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{report.product_name}</td>}
+              {isColumnVisible('product', 'product_name') && (
+                <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">
+                  <button type="button" onClick={() => setDetailModal({ title: `Details: ${report.product_name}`, ...getDetailRowsForProduct(report) })} className="text-blue-600 hover:underline text-left font-medium cursor-pointer">
+                    {report.product_name}
+                  </button>
+                </td>
+              )}
               {isColumnVisible('product', 'total_quantity') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-900">{report.total_quantity}</td>}
               {isColumnVisible('product', 'total_revenue') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-semibold text-green-600">₹{report.total_revenue.toFixed(2)}</td>}
               {isColumnVisible('product', 'total_cost') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">₹{report.total_cost.toFixed(2)}</td>}
@@ -742,7 +851,13 @@ const SalesReports = () => {
         <tbody className="divide-y divide-gray-200 bg-white">
           {filteredCategoryReports.map((report) => (
             <tr key={report.category_name} className="hover:bg-gray-50 transition-colors">
-              {isColumnVisible('category', 'category_name') && <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{report.category_name}</td>}
+              {isColumnVisible('category', 'category_name') && (
+                <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">
+                  <button type="button" onClick={() => setDetailModal({ title: `Details: ${report.category_name}`, ...getDetailRowsForCategory(report) })} className="text-blue-600 hover:underline text-left font-medium cursor-pointer">
+                    {report.category_name}
+                  </button>
+                </td>
+              )}
               {isColumnVisible('category', 'total_quantity') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-900">{report.total_quantity}</td>}
               {isColumnVisible('category', 'total_revenue') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-semibold text-green-600">₹{report.total_revenue.toFixed(2)}</td>}
               {isColumnVisible('category', 'total_cost') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">₹{report.total_cost.toFixed(2)}</td>}
@@ -777,7 +892,13 @@ const SalesReports = () => {
         <tbody className="divide-y divide-gray-200 bg-white">
           {filteredCustomerReports.map((report) => (
             <tr key={report.customer_name} className="hover:bg-gray-50 transition-colors">
-              {isColumnVisible('customer', 'customer_name') && <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{report.customer_name}</td>}
+              {isColumnVisible('customer', 'customer_name') && (
+                <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">
+                  <button type="button" onClick={() => setDetailModal({ title: `Details: ${report.customer_name}`, ...getDetailRowsForCustomer(report) })} className="text-blue-600 hover:underline text-left font-medium cursor-pointer">
+                    {report.customer_name}
+                  </button>
+                </td>
+              )}
               {isColumnVisible('customer', 'total_quantity') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-900">{report.total_quantity}</td>}
               {isColumnVisible('customer', 'total_revenue') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-semibold text-green-600">₹{report.total_revenue.toFixed(2)}</td>}
               {isColumnVisible('customer', 'total_cost') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">₹{report.total_cost.toFixed(2)}</td>}
@@ -812,7 +933,13 @@ const SalesReports = () => {
         <tbody className="divide-y divide-gray-200 bg-white">
           {filteredSalesPersonReports.map((report) => (
             <tr key={report.sales_person_name} className="hover:bg-gray-50 transition-colors">
-              {isColumnVisible('salesperson', 'sales_person_name') && <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{report.sales_person_name}</td>}
+              {isColumnVisible('salesperson', 'sales_person_name') && (
+                <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">
+                  <button type="button" onClick={() => setDetailModal({ title: `Details: ${report.sales_person_name}`, ...getDetailRowsForSalesPerson(report) })} className="text-blue-600 hover:underline text-left font-medium cursor-pointer">
+                    {report.sales_person_name}
+                  </button>
+                </td>
+              )}
               {isColumnVisible('salesperson', 'total_quantity') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-900">{report.total_quantity}</td>}
               {isColumnVisible('salesperson', 'total_revenue') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-semibold text-green-600">₹{report.total_revenue.toFixed(2)}</td>}
               {isColumnVisible('salesperson', 'total_cost') && <td className="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-600">₹{report.total_cost.toFixed(2)}</td>}
@@ -872,14 +999,33 @@ const SalesReports = () => {
   }
 
   /**
-   * Aggregate by payment method = only payments received ON this date (by received_at or sale_date).
-   * For alteration sales: only balance received (payments with received_at) on this date.
+   * Aggregate by payment method for the Sales tab header chip.
+   * - Regular sales: show net received on sale date (grand_total - return_amount), split by method.
+   * - Alteration sales: only balance received on this date (payments with received_at in range).
    */
   const getPaymentSummaryForSales = (sales: Sale[], dateStr: string): { method: string; count: number; total: number }[] => {
     const dateStart = new Date(dateStr).getTime()
     const dateEnd = dateStart + 86400000
     const byMethod: Record<string, { total: number; saleIds: Set<number> }> = {}
     sales.forEach(sale => {
+      const saleDateOnly = sale.sale_date.split('T')[0]
+      const isAlteration = !!sale.hold_for_alteration
+
+      // Regular sale on its sale date: use net methods (after return_amount)
+      if (!isAlteration && saleDateOnly === dateStr) {
+        const netMethods = getNetPaymentMethodsForSale(sale)
+        netMethods.forEach(p => {
+          const key = (p.method || '').toLowerCase().trim() || 'other'
+          const amt = Number(p.amount) || 0
+          if (amt <= 0) return
+          if (!byMethod[key]) byMethod[key] = { total: 0, saleIds: new Set() }
+          byMethod[key].total += amt
+          byMethod[key].saleIds.add(sale.id)
+        })
+        return
+      }
+
+      // Alteration or other dates: use balance collections helper
       const methods = getPaymentsReceivedInDateRangeForSale(sale, dateStart, dateEnd)
       methods.forEach(p => {
         const key = (p.method || '').toLowerCase().trim() || 'other'
@@ -903,16 +1049,51 @@ const SalesReports = () => {
       })
   }
 
+  /** Aggregate quantity and amount by sales person for a day's sales. Item-level sales_person overrides sale-level; missing = "Not Assigned". */
+  const getQuantityBySalesPerson = (sales: Sale[]): { name: string; quantity: number; amount: number }[] => {
+    const byPerson: Record<string, { quantity: number; amount: number }> = {}
+    sales.forEach(sale => {
+      (sale.items || []).forEach(item => {
+        const name = (item.sales_person_name ?? sale.sales_person_name)?.trim() || 'Not Assigned'
+        if (!byPerson[name]) byPerson[name] = { quantity: 0, amount: 0 }
+        byPerson[name].quantity += item.quantity ?? 0
+        byPerson[name].amount += item.total ?? 0
+      })
+    })
+    return Object.entries(byPerson)
+      .map(([name, { quantity, amount }]) => ({ name, quantity, amount }))
+      .sort((a, b) => (a.name === 'Not Assigned' ? 1 : b.name === 'Not Assigned' ? -1 : a.name.localeCompare(b.name)))
+  }
+
   const renderSalesList = () => (
     <ScrollableTableWrapper minWidth="800px" maxHeight="60vh">
       {salesGroupedByDate.map(([dateStr, dateSales]) => {
         const paymentSummary = getPaymentSummaryForSales(dateSales, dateStr)
+        const totalQuantity = dateSales.reduce(
+          (sum, s) => sum + (s.items || []).reduce((s2, it) => s2 + (it.quantity ?? 0), 0),
+          0
+        )
+        const quantityBySalesPerson = getQuantityBySalesPerson(dateSales)
         return (
         <div key={dateStr} className="mb-6">
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-3 rounded-t-lg sticky top-0 z-10">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <span className="font-bold">{new Date(dateStr).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
-              <span className="text-blue-100">({dateSales.length} sale{dateSales.length !== 1 ? 's' : ''})</span>
+              <span className="text-blue-100">({dateSales.length} sale{dateSales.length !== 1 ? 's' : ''}{totalQuantity > 0 ? `, ${totalQuantity} qty` : ''})</span>
+              {quantityBySalesPerson.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 ml-2 pt-0.5">
+                  {quantityBySalesPerson.map(({ name, quantity, amount }) => (
+                    <span
+                      key={name}
+                      className="inline-flex flex-col px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/15 backdrop-blur-sm border border-white/25"
+                      title={`${name}: ${quantity} qty, ₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+                    >
+                      <span className={name === 'Not Assigned' ? 'text-blue-200 font-bold' : 'font-bold'}>{name}</span>
+                      <span className="opacity-90">{quantity} qty, ₹{amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
               {paymentSummary.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2 ml-2 pt-0.5">
                   {paymentSummary.map(({ method, count, total }) => (
@@ -1133,7 +1314,17 @@ const SalesReports = () => {
                   <p className="text-sm text-gray-600 mt-1">Detailed sales analysis by product, category, customer, and salesperson</p>
                 </div>
               </div>
-              <div className="flex gap-3">
+              <div className="flex items-center gap-3">
+                {hasPermission('sales:create') && (
+                  <button
+                    type="button"
+                    onClick={() => { window.open('/sales/new', '_blank') }}
+                    className="flex items-center justify-center w-10 h-10 rounded-lg border border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100 transition-colors"
+                    title="New sale"
+                  >
+                    <Plus className="w-5 h-5" />
+                  </button>
+                )}
                 <button
                   onClick={exportToExcel}
                   className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
@@ -1455,15 +1646,28 @@ const SalesReports = () => {
                 )}
               </button>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowColumnSettings(true)}
-              className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-lg text-sm font-medium text-gray-700"
-              title="Show / Hide columns"
-            >
-              <Columns3 className="w-4 h-4" />
-              Columns
-            </button>
+            <div className="flex items-center gap-2">
+              {activeView === 'sales' && hasPermission('sales:create') && (
+                <button
+                  type="button"
+                  onClick={() => window.open('/sales/new', '_blank')}
+                  className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium"
+                  title="Open new sale in a new tab"
+                >
+                  <Plus className="w-4 h-4" />
+                  New Sale
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowColumnSettings(true)}
+                className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-lg text-sm font-medium text-gray-700"
+                title="Show / Hide columns"
+              >
+                <Columns3 className="w-4 h-4" />
+                Columns
+              </button>
+            </div>
             </div>
 
             {showColumnSettings && (
@@ -1483,6 +1687,48 @@ const SalesReports = () => {
                     <button type="button" onClick={() => { const all = new Set(SALES_REPORT_COLUMNS[activeView].map(c => c.key)); setVisibleColumns(prev => ({ ...prev, [activeView]: all })); localStorage.setItem(getStorageKey(activeView), JSON.stringify([...all])) }} className="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 rounded-lg">Select All</button>
                     <button type="button" onClick={() => { const def = new Set(DEFAULT_VISIBLE_COLUMNS[activeView]); setVisibleColumns(prev => ({ ...prev, [activeView]: def })); localStorage.setItem(getStorageKey(activeView), JSON.stringify([...def])) }} className="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 rounded-lg">Reset</button>
                     <button type="button" onClick={() => setShowColumnSettings(false)} className="ml-auto px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Done</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {detailModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDetailModal(null)}>
+                <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center justify-between p-4 border-b border-gray-200">
+                    <h3 className="text-lg font-bold text-gray-900">{detailModal.title}</h3>
+                    <button type="button" onClick={() => setDetailModal(null)} className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg" title="Close">
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <div className="overflow-auto flex-1 p-4">
+                    {detailModal.rows.length === 0 ? (
+                      <p className="text-gray-500 text-sm">No detail rows in the selected period.</p>
+                    ) : (
+                      <table className="w-full text-sm min-w-[500px]">
+                        <thead className="bg-gray-100 border-b border-gray-200 sticky top-0">
+                          <tr>
+                            {detailModal.columns.map(col => (
+                              <th key={col} className="px-3 py-2 text-left text-xs font-semibold text-gray-700 uppercase">{col}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {detailModal.rows.map((row, idx) => (
+                            <tr key={idx} className="hover:bg-gray-50">
+                              {detailModal.columns.map(col => (
+                                <td key={col} className="px-3 py-2 whitespace-nowrap">
+                                  {typeof row[col] === 'number' && (col === 'Revenue' || col === 'Cost' || col === 'Profit' || col === 'Amount') ? `₹${Number(row[col]).toFixed(2)}` : String(row[col] ?? '—')}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                  <div className="p-4 border-t border-gray-200 text-sm text-gray-500">
+                    {detailModal.rows.length} row{detailModal.rows.length !== 1 ? 's' : ''}
                   </div>
                 </div>
               </div>

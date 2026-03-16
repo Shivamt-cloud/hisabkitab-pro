@@ -130,7 +130,7 @@ export function CustomerCard({ customer, hasPermission, onDelete }: CustomerCard
       <div className="flex gap-2 pt-4 border-t border-gray-200">
         {hasPermission('sales:update') && (
           <button
-            onClick={() => navigate(`/customers/${customer.id}/edit`)}
+            onClick={() => navigate(`/customers/${customer.id}/edit`, { state: { customer } })}
             className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
           >
             <Edit className="w-4 h-4" />

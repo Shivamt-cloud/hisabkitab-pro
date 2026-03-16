@@ -442,19 +442,18 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true, autoPrin
             {(() => {
               const totalMRP = invoiceData.items.reduce((sum, item) => {
                 const mrp = item.mrp || item.unit_price
-                return sum + (mrp * item.quantity)
+                const lineMrp = mrp * (item.quantity || 0)
+                return sum + (item.sale_type === 'return' ? -lineMrp : lineMrp)
               }, 0)
               const totalSavings = totalMRP - invoiceData.subtotal
               const hasSavings = totalSavings > 0
               
               return (
                 <>
-                  {hasSavings && (
-                    <div className="flex justify-between text-gray-400 text-sm mb-2">
-                      <span>Total MRP:</span>
-                      <span className="line-through">₹{totalMRP.toFixed(2)}</span>
-                    </div>
-                  )}
+                  <div className={`flex justify-between mb-2 ${hasSavings ? 'text-gray-400 text-sm' : 'text-gray-600'}`}>
+                    <span>MRP Total:</span>
+                    <span className={hasSavings ? 'line-through' : ''}>₹{totalMRP.toFixed(2)}</span>
+                  </div>
                   <div className="flex justify-between text-gray-600">
                     <span>Subtotal:</span>
                     <span>₹{invoiceData.subtotal.toFixed(2)}</span>
@@ -538,14 +537,18 @@ const Invoice = ({ invoiceData, onClose, onNewSale, showActions = true, autoPrin
         </div>
 
         {/* Alteration / Hold for collection message */}
-        {invoiceData.hold_for_alteration && invoiceData.balance_due !== undefined && invoiceData.balance_due > 0 && (
-          <div className="border-t border-gray-200 pt-6 mb-6 p-4 bg-amber-50 rounded-lg border border-amber-200">
+        {invoiceData.hold_for_alteration && invoiceData.balance_due !== undefined && (
+          <div className={`border-t border-gray-200 pt-6 mb-6 p-4 rounded-lg border ${invoiceData.balance_due > 0 ? 'bg-amber-50 border-amber-200' : 'bg-green-50 border-green-200'}`}>
             <div className="flex justify-between items-center mb-1">
-              <span className="text-sm font-semibold text-amber-800">Balance Due:</span>
-              <span className="text-lg font-bold text-amber-700">₹{invoiceData.balance_due.toFixed(2)}</span>
+              <span className="text-sm font-semibold text-gray-800">Balance Due:</span>
+              <span className={`text-lg font-bold ${invoiceData.balance_due > 0 ? 'text-amber-700' : 'text-green-700'}`}>
+                ₹{invoiceData.balance_due.toFixed(2)}
+              </span>
             </div>
-            <p className="text-sm text-amber-700">
-              Product is with us for {invoiceData.alteration_purpose || 'Alteration'}. Due amount will be paid by the customer while receiving the product.
+            <p className={`text-sm ${invoiceData.balance_due > 0 ? 'text-amber-700' : 'text-green-700'}`}>
+              {invoiceData.balance_due > 0
+                ? `Product is with us for ${invoiceData.alteration_purpose || 'Alteration'}. Due amount will be paid by the customer while receiving the product.`
+                : `Product is with us for ${invoiceData.alteration_purpose || 'Alteration'}. No amount is due when the customer collects the product.`}
             </p>
           </div>
         )}
@@ -737,17 +740,18 @@ const generateInvoiceHTML = (invoiceData: InvoiceData): string => {
         ${(() => {
           const totalMRP = invoiceData.items.reduce((sum, item) => {
             const mrp = item.mrp || item.unit_price
-            return sum + (mrp * item.quantity)
+            const lineMrp = mrp * (item.quantity || 0)
+            return sum + (item.sale_type === 'return' ? -lineMrp : lineMrp)
           }, 0)
           const totalSavings = totalMRP - invoiceData.subtotal
           const hasSavings = totalSavings > 0
           
           return `
+            <div class="totals-row" style="${hasSavings ? 'color: #9ca3af; text-decoration: line-through;' : ''}">
+              <span>MRP Total:</span>
+              <span>₹${totalMRP.toFixed(2)}</span>
+            </div>
             ${hasSavings ? `
-              <div class="totals-row" style="color: #9ca3af; text-decoration: line-through;">
-                <span>Total MRP:</span>
-                <span>₹${totalMRP.toFixed(2)}</span>
-              </div>
               <div class="totals-row" style="color: #16a34a; font-weight: 600;">
                 <span>Total Savings:</span>
                 <span>₹${totalSavings.toFixed(2)}</span>

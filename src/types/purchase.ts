@@ -45,6 +45,8 @@ export interface GSTPurchase {
   igst_amount?: number
   grand_total: number
   payment_status: PaymentStatus
+  /** Amount already paid (e.g. at goods receiving). Pending = grand_total - amount_paid. Used for partial payments. */
+  amount_paid?: number
   payment_method?: string
   notes?: string
   return_remarks?: string // Remarks/details for purchase returns to supplier
@@ -65,6 +67,8 @@ export interface SimplePurchase {
   items: PurchaseItem[]
   total_amount: number
   payment_status: PaymentStatus
+  /** Amount already paid (e.g. at goods receiving). Pending = total_amount - amount_paid. Used for partial payments. */
+  amount_paid?: number
   payment_method?: string
   notes?: string
   return_remarks?: string // Remarks/details for purchase returns to supplier

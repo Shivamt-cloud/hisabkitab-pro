@@ -3,7 +3,7 @@
 import { Customer, CustomerSummary } from '../types/customer'
 import { saleService } from './saleService'
 import { cloudCustomerService } from './cloudCustomerService'
-import { getAll, put, STORES } from '../database/db'
+import { getAll, put, getById as getByIdLocal, STORES } from '../database/db'
 
 // Initialize with sample data if empty
 async function initializeData(): Promise<void> {
@@ -34,6 +34,16 @@ export const customerService = {
 
   // Get customer by ID (from cloud, with local fallback)
   getById: async (id: number): Promise<Customer | null> => {
+    // Try local first for fastest load when editing/viewing customer
+    const local = await getByIdLocal<Customer>(STORES.CUSTOMERS, id)
+    if (local) {
+      // Refresh from cloud in background (do not block UI)
+      void cloudCustomerService.getById(id).catch(() => {
+        // Ignore background refresh errors; local data is good enough for form
+      })
+      return local
+    }
+
     const customer = await cloudCustomerService.getById(id)
     return customer || null
   },

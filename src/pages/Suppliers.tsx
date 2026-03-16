@@ -14,13 +14,18 @@ import {
   Filter,
   Home,
   DollarSign,
-  Eye
+  Eye,
+  FileSpreadsheet,
+  FileDown,
 } from 'lucide-react'
+import { exportToExcel, exportDataToPDF } from '../utils/exportUtils'
+import { useToast } from '../context/ToastContext'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { LoadingState } from '../components/LoadingState'
 
 const Suppliers = () => {
   const { hasPermission, getCurrentCompanyId } = useAuth()
+  const { toast } = useToast()
   const navigate = useNavigate()
   const location = useLocation()
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -83,6 +88,47 @@ const Suppliers = () => {
     return matchesSearch && matchesFilter
   })
 
+  const exportToExcelReport = () => {
+    const headers = ['Supplier', 'Contact', 'Phone', 'Email', 'City', 'State', 'GSTIN', 'Status', 'Total Purchases', 'Total Paid', 'Pending']
+    const rows = filteredSuppliers.map(s => {
+      const summary = accountSummaries.get(s.id)
+      return [
+        s.name,
+        s.contact_person || '-',
+        s.phone || '-',
+        s.email || '-',
+        s.city || '-',
+        s.state || '-',
+        s.gstin || '-',
+        s.is_registered ? 'GST Registered' : 'Unregistered',
+        summary ? summary.total_purchases.toFixed(2) : '0.00',
+        summary ? summary.total_paid.toFixed(2) : '0.00',
+        summary ? summary.pending_amount.toFixed(2) : '0.00',
+      ]
+    })
+    const filename = `Suppliers_${new Date().toISOString().split('T')[0]}`
+    exportToExcel(rows, headers, filename, 'Suppliers')
+    toast.success('Report exported to Excel')
+  }
+
+  const exportToPDFReport = () => {
+    const headers = ['Supplier', 'Contact', 'GSTIN', 'Total Purchases', 'Total Paid', 'Pending']
+    const rows = filteredSuppliers.map(s => {
+      const summary = accountSummaries.get(s.id)
+      return [
+        s.name,
+        s.contact_person || '-',
+        s.gstin || '-',
+        `Rs.${summary ? summary.total_purchases.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '0.00'}`,
+        `Rs.${summary ? summary.total_paid.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '0.00'}`,
+        `Rs.${summary ? summary.pending_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '0.00'}`,
+      ]
+    })
+    const filename = `Suppliers_${new Date().toISOString().split('T')[0]}`
+    exportDataToPDF(rows, headers, filename, 'Suppliers Report', { orientation: 'landscape' })
+    toast.success('Report exported to PDF')
+  }
+
   const getRegisteredBadge = (supplier: Supplier) => {
     if (supplier.is_registered) {
       return (
@@ -118,15 +164,33 @@ const Suppliers = () => {
                   <p className="text-sm text-gray-600 mt-1">Manage your supplier contacts</p>
                 </div>
               </div>
-              {hasPermission('purchases:create') && (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => navigate('/suppliers/new')}
-                  className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold py-3 px-6 rounded-xl hover:shadow-xl transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
+                  onClick={exportToExcelReport}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-lg border border-green-200 transition-colors"
+                  title="Export to Excel"
                 >
-                  <Plus className="w-5 h-5" />
-                  Add Supplier
+                  <FileSpreadsheet className="w-4 h-4" />
+                  Excel
                 </button>
-              )}
+                <button
+                  onClick={exportToPDFReport}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition-colors"
+                  title="Export to PDF"
+                >
+                  <FileDown className="w-4 h-4" />
+                  PDF
+                </button>
+                {hasPermission('purchases:create') && (
+                  <button
+                    onClick={() => navigate('/suppliers/new')}
+                    className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold py-3 px-6 rounded-xl hover:shadow-xl transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
+                  >
+                    <Plus className="w-5 h-5" />
+                    Add Supplier
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </header>

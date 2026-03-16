@@ -420,6 +420,118 @@ export function exportDataToPDF(
 }
 
 /**
+ * Export Supplier Account full report to PDF (Summary + Payment History + Check History)
+ */
+export function exportSupplierAccountReportToPDF(
+  supplierName: string,
+  summary: { total_purchases: number; total_paid: number; pending_amount: number },
+  paymentHistory: Array<{ payment_date: string; purchase_invoice_number?: string; amount: number; payment_method: string; reference_number?: string }>,
+  checkHistory: Array<{ check_number: string; bank_name: string; amount: number; issue_date: string; due_date: string; status: string; cleared_date?: string }>,
+  filename: string
+): void {
+  const pdf = new jsPDF('p', 'mm', 'a4')
+  const pageWidth = pdf.internal.pageSize.width
+  const pageHeight = pdf.internal.pageSize.height
+  const margin = 12
+  let y = margin
+
+  // Title
+  pdf.setFontSize(16)
+  pdf.setFont('helvetica', 'bold')
+  pdf.text(sanitizeForPdf(`Supplier Account Report: ${supplierName}`), margin, y)
+  y += 8
+  pdf.setFontSize(9)
+  pdf.setFont('helvetica', 'normal')
+  pdf.setTextColor(80, 80, 80)
+  pdf.text(sanitizeForPdf(`Generated: ${new Date().toLocaleString('en-IN')}`), margin, y)
+  pdf.setTextColor(0, 0, 0)
+  y += 12
+
+  // Summary
+  pdf.setFontSize(12)
+  pdf.setFont('helvetica', 'bold')
+  pdf.text('Summary', margin, y)
+  y += 8
+  pdf.setFontSize(10)
+  pdf.setFont('helvetica', 'normal')
+  const sumW = pageWidth - margin * 2
+  pdf.text(sanitizeForPdf(`Total Purchases: Rs.${summary.total_purchases.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`), margin, y)
+  y += 6
+  pdf.text(sanitizeForPdf(`Total Paid: Rs.${summary.total_paid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`), margin, y)
+  y += 6
+  pdf.text(sanitizeForPdf(`Pending: Rs.${summary.pending_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`), margin, y)
+  y += 14
+
+  const addTable = (title: string, headers: string[], rows: any[][]) => {
+    if (y > pageHeight - 40) {
+      pdf.addPage()
+      y = margin
+    }
+    pdf.setFontSize(11)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text(title, margin, y)
+    y += 8
+    const colCount = headers.length
+    const colWidth = (pageWidth - margin * 2) / colCount
+    const rowHeight = 6
+    pdf.setFontSize(8)
+    headers.forEach((h, i) => {
+      pdf.text(sanitizeForPdf(h.substring(0, 15)), margin + i * colWidth + 1, y)
+    })
+    pdf.setDrawColor(200, 200, 200)
+    pdf.line(margin, y + 2, pageWidth - margin, y + 2)
+    y += 6
+    pdf.setFont('helvetica', 'normal')
+    rows.forEach(row => {
+      if (y > pageHeight - 20) {
+        pdf.addPage()
+        y = margin + 6
+      }
+      row.forEach((cell, i) => {
+        pdf.text(sanitizeForPdf(String(cell ?? '').substring(0, 18)), margin + i * colWidth + 1, y)
+      })
+      y += rowHeight
+    })
+    y += 10
+  }
+
+  if (paymentHistory.length > 0) {
+    addTable(
+      'Payment History',
+      ['Date', 'Invoice', 'Amount', 'Method', 'Reference'],
+      paymentHistory.map(p => [
+        new Date(p.payment_date).toLocaleDateString('en-IN'),
+        p.purchase_invoice_number || '-',
+        `Rs.${p.amount.toFixed(2)}`,
+        p.payment_method,
+        p.reference_number || '-',
+      ])
+    )
+  }
+
+  if (checkHistory.length > 0) {
+    addTable(
+      'Check History',
+      ['Check No', 'Bank', 'Amount', 'Due Date', 'Status'],
+      checkHistory.map(c => [
+        c.check_number,
+        c.bank_name || '-',
+        `Rs.${c.amount.toFixed(2)}`,
+        new Date(c.due_date).toLocaleDateString('en-IN'),
+        c.status,
+      ])
+    )
+  }
+
+  pdf.setFontSize(8)
+  pdf.setTextColor(100, 100, 100)
+  pdf.text(POWERED_BY_TEXT, pageWidth / 2, pageHeight - 10, { align: 'center' })
+  pdf.text(POWERED_BY_CONTACT, pageWidth / 2, pageHeight - 6, { align: 'center' })
+  pdf.setTextColor(0, 0, 0)
+  pdf.save(`${filename}.pdf`)
+}
+
+/**
  * Export invoice to PDF (detailed version)
  */
 export function exportInvoiceToPDF(

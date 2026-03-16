@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { paymentService } from '../services/paymentService'
+import { saleService } from '../services/saleService'
+import { purchaseService } from '../services/purchaseService'
 import { ProtectedRoute } from '../components/ProtectedRoute'
 import { OutstandingPayment } from '../types/payment'
 import { Home, Users, Building2, AlertTriangle, DollarSign, Clock, CheckCircle } from 'lucide-react'
@@ -32,11 +34,15 @@ const OutstandingPayments = () => {
     setLoading(true)
     try {
       const companyId = getCurrentCompanyId()
-      // Pass companyId directly - services will handle null by returning empty array for data isolation
-      // undefined means admin hasn't selected a company (show all), null means user has no company (show nothing)
+      // Preload sales + purchases once (getAllFast, no items needed), then pass to both calls
+      const [sales, purchases] = await Promise.all([
+        saleService.getAllFast(true, companyId),
+        purchaseService.getAllFast(undefined, companyId, { limit: 10000 }),
+      ])
+      const preloaded = { sales, purchases }
       const [outstanding, paymentStats] = await Promise.all([
-        paymentService.getOutstandingPayments(undefined, companyId),
-        paymentService.getStats(companyId)
+        paymentService.getOutstandingPayments(undefined, companyId, preloaded),
+        paymentService.getStats(companyId, preloaded),
       ])
       setCustomerPayments(outstanding.filter(p => p.type === 'sale'))
       setSupplierPayments(outstanding.filter(p => p.type === 'purchase'))
@@ -101,6 +107,12 @@ const OutstandingPayments = () => {
                   <p className="text-sm text-gray-600 mt-1">Track pending payments from customers and to suppliers</p>
                 </div>
               </div>
+              <button
+                onClick={() => navigate('/payments/party-ledger')}
+                className="px-4 py-2 text-sm font-medium text-violet-600 hover:bg-violet-50 rounded-lg border border-violet-200 transition-colors"
+              >
+                Party Ledger Summary
+              </button>
             </div>
           </div>
         </header>

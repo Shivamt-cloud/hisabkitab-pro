@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supplierPaymentService } from '../services/supplierPaymentService'
 import { supplierService } from '../services/purchaseService'
@@ -19,12 +19,20 @@ import {
   CreditCard,
   TrendingUp,
   TrendingDown,
+  Trash2,
+  FileSpreadsheet,
+  FileDown,
 } from 'lucide-react'
+import { exportMultiSheetExcel, exportSupplierAccountReportToPDF } from '../utils/exportUtils'
+import { useToast } from '../context/ToastContext'
 
 const SupplierAccount = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
+  const fromPartyLedger = (location.state as { from?: string })?.from === 'party-ledger'
   const { getCurrentCompanyId, hasPermission } = useAuth()
+  const { toast } = useToast()
   const companyId = getCurrentCompanyId()
 
   const [supplier, setSupplier] = useState<Supplier | null>(null)
@@ -39,7 +47,7 @@ const SupplierAccount = () => {
 
   const loadData = async () => {
     if (!id) return
-    
+
     setLoading(true)
     try {
       const supplierId = parseInt(id)
@@ -54,6 +62,17 @@ const SupplierAccount = () => {
       console.error('Error loading supplier account:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleDeletePayment = async (paymentId: number) => {
+    if (!window.confirm('Are you sure you want to delete this payment? This cannot be undone.')) return
+    try {
+      await supplierPaymentService.deletePayment(paymentId)
+      await loadData()
+    } catch (error) {
+      console.error('Error deleting payment:', error)
+      alert('Failed to delete payment.')
     }
   }
 
@@ -74,6 +93,87 @@ const SupplierAccount = () => {
         {status.charAt(0).toUpperCase() + status.slice(1)}
       </span>
     )
+  }
+
+  const exportToExcelReport = () => {
+    const safeName = (supplier?.name || 'Supplier').replace(/[^a-zA-Z0-9]/g, '_').substring(0, 20)
+    const filename = `Supplier_Account_${safeName}_${new Date().toISOString().split('T')[0]}`
+    const sheets: { sheetName: string; headers: string[]; rows: any[][] }[] = [
+      {
+        sheetName: 'Summary',
+        headers: ['Metric', 'Amount'],
+        rows: [
+          ['Total Purchases', accountSummary!.total_purchases.toFixed(2)],
+          ['Total Paid', accountSummary!.total_paid.toFixed(2)],
+          ['Pending Amount', accountSummary!.pending_amount.toFixed(2)],
+        ],
+      },
+      {
+        sheetName: 'Payment History',
+        headers: ['Date', 'Purchase Invoice', 'Amount', 'Payment Method', 'Reference'],
+        rows: accountSummary!.payment_history.map(p => [
+          new Date(p.payment_date).toLocaleDateString('en-IN'),
+          p.purchase_invoice_number || '-',
+          p.amount.toFixed(2),
+          p.payment_method,
+          p.reference_number || '-',
+        ]),
+      },
+      {
+        sheetName: 'Upcoming Checks',
+        headers: ['Check Number', 'Bank', 'Amount', 'Due Date', 'Status'],
+        rows: accountSummary!.upcoming_checks.map(c => [
+          c.check_number,
+          c.bank_name || '-',
+          c.amount.toFixed(2),
+          new Date(c.due_date).toLocaleDateString('en-IN'),
+          c.status,
+        ]),
+      },
+      {
+        sheetName: 'Overdue Checks',
+        headers: ['Check Number', 'Bank', 'Amount', 'Due Date', 'Status'],
+        rows: accountSummary!.overdue_checks.map(c => [
+          c.check_number,
+          c.bank_name || '-',
+          c.amount.toFixed(2),
+          new Date(c.due_date).toLocaleDateString('en-IN'),
+          c.status,
+        ]),
+      },
+      {
+        sheetName: 'Check History',
+        headers: ['Check Number', 'Bank', 'Amount', 'Issue Date', 'Due Date', 'Status', 'Cleared Date'],
+        rows: accountSummary!.check_history.map(c => [
+          c.check_number,
+          c.bank_name || '-',
+          c.amount.toFixed(2),
+          new Date(c.issue_date).toLocaleDateString('en-IN'),
+          new Date(c.due_date).toLocaleDateString('en-IN'),
+          c.status,
+          c.cleared_date ? new Date(c.cleared_date).toLocaleDateString('en-IN') : '-',
+        ]),
+      },
+    ]
+    exportMultiSheetExcel(sheets, filename)
+    toast.success('Report exported to Excel')
+  }
+
+  const exportToPDFReport = () => {
+    const safeName = (supplier?.name || 'Supplier').replace(/[^a-zA-Z0-9]/g, '_').substring(0, 20)
+    const filename = `Supplier_Account_${safeName}_${new Date().toISOString().split('T')[0]}`
+    exportSupplierAccountReportToPDF(
+      supplier!.name,
+      {
+        total_purchases: accountSummary!.total_purchases,
+        total_paid: accountSummary!.total_paid,
+        pending_amount: accountSummary!.pending_amount,
+      },
+      accountSummary!.payment_history,
+      accountSummary!.check_history,
+      filename
+    )
+    toast.success('Report exported to PDF')
   }
 
   const getPaymentMethodBadge = (method: string) => {
@@ -115,10 +215,10 @@ const SupplierAccount = () => {
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Supplier Not Found</h2>
             <p className="text-gray-600 mb-6">The supplier you're looking for doesn't exist.</p>
             <button
-              onClick={() => navigate('/suppliers')}
+              onClick={() => navigate(fromPartyLedger ? '/payments/party-ledger' : '/suppliers')}
               className="bg-blue-600 text-white font-semibold px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
             >
-              Back to Suppliers
+              {fromPartyLedger ? 'Back to Party Ledger' : 'Back to Suppliers'}
             </button>
           </div>
         </div>
@@ -135,9 +235,9 @@ const SupplierAccount = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <button
-                  onClick={() => navigate('/suppliers')}
+                  onClick={() => navigate(fromPartyLedger ? '/payments/party-ledger' : '/suppliers')}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors flex items-center justify-center border border-gray-200 bg-white"
-                  title="Back to Suppliers"
+                  title={fromPartyLedger ? 'Back to Party Ledger Summary' : 'Back to Suppliers'}
                 >
                   <ArrowLeft className="w-5 h-5 text-gray-700" />
                 </button>
@@ -147,6 +247,22 @@ const SupplierAccount = () => {
                 </div>
               </div>
               <div className="flex items-center gap-3">
+                <button
+                  onClick={exportToExcelReport}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-lg border border-green-200 transition-colors"
+                  title="Export to Excel"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  Excel
+                </button>
+                <button
+                  onClick={exportToPDFReport}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition-colors"
+                  title="Export to PDF"
+                >
+                  <FileDown className="w-4 h-4" />
+                  PDF
+                </button>
                 <button
                   onClick={() => navigate('/')}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors flex items-center justify-center border border-gray-200 bg-white"
@@ -330,17 +446,34 @@ const SupplierAccount = () => {
                         <td className="px-4 py-3">{getPaymentMethodBadge(payment.payment_method)}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">{payment.reference_number || '—'}</td>
                         <td className="px-4 py-3 text-right">
-                          {hasPermission('purchases:update') && (
-                            <button
-                              onClick={() => navigate(`/suppliers/${id}/payment/${payment.id}/edit`)}
-                              className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                            >
-                              Edit
-                            </button>
-                          )}
+                          <div className="flex items-center justify-end gap-2">
+                            {hasPermission('purchases:update') && (
+                              <button
+                                onClick={() => navigate(`/suppliers/${id}/payment/${payment.id}/edit`)}
+                                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                              >
+                                Edit
+                              </button>
+                            )}
+                            {(hasPermission('purchases:delete') || hasPermission('purchases:update')) && (
+                              <button
+                                onClick={() => handleDeletePayment(payment.id)}
+                                className="text-red-600 hover:text-red-800 text-sm font-medium flex items-center gap-1"
+                                title="Delete"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                Delete
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
+                    <tr className="bg-gray-50 border-t-2 border-gray-200 font-semibold">
+                      <td colSpan={2} className="px-4 py-3 text-sm text-gray-700">Total paid (Payments)</td>
+                      <td className="px-4 py-3 text-sm text-green-700 text-right">₹{accountSummary.payment_history.reduce((s, p) => s + p.amount, 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                      <td colSpan={3} className="px-4 py-3"></td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -348,7 +481,7 @@ const SupplierAccount = () => {
           </div>
 
           {/* Check History */}
-          <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6 border border-white/50">
+          <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6 mb-6 border border-white/50">
             <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
               <FileText className="w-5 h-5 text-blue-600" />
               Check History
@@ -396,6 +529,30 @@ const SupplierAccount = () => {
                 </table>
               </div>
             )}
+          </div>
+
+          {/* Reconciliation Summary */}
+          <div className="bg-gradient-to-r from-slate-100 to-slate-200 rounded-2xl shadow-xl p-6 border border-slate-300">
+            <h2 className="text-lg font-bold text-gray-900 mb-4">Reconciliation Summary</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-white rounded-xl p-4 border border-slate-200">
+                <p className="text-sm text-gray-600 mb-1">Total Purchases</p>
+                <p className="text-xl font-bold text-gray-900">₹{accountSummary.total_purchases.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+              </div>
+              <div className="bg-white rounded-xl p-4 border border-slate-200">
+                <p className="text-sm text-gray-600 mb-1">Total Paid</p>
+                <p className="text-xl font-bold text-green-600">₹{accountSummary.total_paid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+              </div>
+              <div className="bg-white rounded-xl p-4 border border-slate-200">
+                <p className="text-sm text-gray-600 mb-1">Outstanding / Pending</p>
+                <p className={`text-xl font-bold ${accountSummary.pending_amount > 0 ? 'text-red-600' : 'text-gray-600'}`}>
+                  ₹{accountSummary.pending_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mt-3">
+              Total Paid = Payments recorded + Amount paid at purchase. Outstanding = Total Purchases − Total Paid.
+            </p>
           </div>
         </main>
       </div>

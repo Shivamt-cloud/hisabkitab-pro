@@ -80,6 +80,28 @@ export const cloudSupplierCheckService = {
   },
 
   /**
+   * Get checks for one supplier – single query when online.
+   */
+  getBySupplier: async (supplierId: number, companyId?: number | null): Promise<SupplierCheck[]> => {
+    if (!isSupabaseAvailable() || !isOnline()) {
+      const all = await getAll<SupplierCheck>(STORES.SUPPLIER_CHECKS)
+      const filtered = all.filter(c => c.supplier_id === supplierId && (companyId == null || c.company_id === companyId))
+      return filtered.sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
+    }
+    try {
+      let query = supabase!.from('supplier_checks').select('*').eq('supplier_id', supplierId)
+      if (companyId != null) query = query.eq('company_id', companyId)
+      const { data, error } = await query.order('due_date', { ascending: true })
+      if (error) throw error
+      return (data || []).map(toSupplierCheck)
+    } catch {
+      const all = await getAll<SupplierCheck>(STORES.SUPPLIER_CHECKS)
+      const filtered = all.filter(c => c.supplier_id === supplierId && (companyId == null || c.company_id === companyId))
+      return filtered.sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
+    }
+  },
+
+  /**
    * Get check by ID
    */
   getById: async (id: number): Promise<SupplierCheck | undefined> => {

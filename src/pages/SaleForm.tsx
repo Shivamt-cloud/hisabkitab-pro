@@ -15,11 +15,14 @@ import { Breadcrumbs } from '../components/Breadcrumbs'
 import CustomerModal from '../components/CustomerModal'
 import { usePlanUpgrade } from '../context/PlanUpgradeContext'
 import { LockIcon } from '../components/icons/LockIcon'
-import { X, Plus, Trash2, Search, ShoppingCart, Home, User, Pause, Play, RotateCcw, PenSquare, Download } from 'lucide-react'
+import BarcodeScanner from '../components/BarcodeScanner'
+import { X, Plus, Trash2, Search, ShoppingCart, Home, User, Pause, Play, RotateCcw, PenSquare, Download, Camera } from 'lucide-react'
 import { SaleItem, Sale } from '../types/sale'
 import { Purchase, PurchaseItem } from '../types/purchase'
 import { exportAlterationSlipToPDF, type AlterationSlipData } from '../utils/exportUtils'
 import { companyService } from '../services/companyService'
+import { alterationContactService } from '../services/alterationContactService'
+import type { AlterationContact } from '../types/alteration'
 
 const SaleForm = () => {
   const navigate = useNavigate()
@@ -66,6 +69,7 @@ const SaleForm = () => {
   const [manualEntryForm, setManualEntryForm] = useState({ barcode: '', productName: '', mrp: '', salePrice: '' })
   const [editingInvoiceNumber, setEditingInvoiceNumber] = useState<string>('') // Invoice number when editing
   const originalSaleItemsRef = useRef<SaleItem[]>([]) // Original items when editing, for change detection
+  const originalSaleDateRef = useRef<string | null>(null) // Original sale_date when editing – preserve so edited bill stays under original date
   const originalEditSnapshotRef = useRef<{
     discount: number
     discountType: 'percentage' | 'fixed'
@@ -78,6 +82,9 @@ const SaleForm = () => {
   const [editingQty, setEditingQty] = useState<Record<string, string>>({}) // per-row quantity while user is typing (e.g. ".5")
   const [saleSegmentId, setSaleSegmentId] = useState<number | null>(null) // Price segment for this sale (null = Retail/default)
   const [priceSegments, setPriceSegments] = useState<Array<{ id: number; name: string; description?: string; is_default: boolean }>>([])
+  const [scannerOpen, setScannerOpen] = useState(false)
+  const [alterationContacts, setAlterationContacts] = useState<AlterationContact[]>([])
+  const [alterationContactId, setAlterationContactId] = useState<number | ''>('')
   const [isSubmitting, setIsSubmitting] = useState(false) // Prevent double-click on Complete Sale
 
   // Alteration: hold for balance on collection (e.g. after tailor)
@@ -85,6 +92,7 @@ const SaleForm = () => {
   const [alterationPurpose, setAlterationPurpose] = useState('') // Purpose (e.g. Alteration, Tailor)
   const [alterationSentTo, setAlterationSentTo] = useState('') // Sent to (tailor/technician)
   const [alterationNotes, setAlterationNotes] = useState('') // Additional notes
+  const [alterationTechnicianMode, setAlterationTechnicianMode] = useState<'advance' | 'pending'>('advance')
   const [amountToPay, setAmountToPay] = useState<number>(0) // Amount to pay to tailor/technician
 
   // Segment pricing: key = priceKey(productId, segmentId, article). When user selects segment, override product prices.
@@ -296,6 +304,10 @@ const SaleForm = () => {
         const allSuppliers = await supplierService.getAll(companyId ?? undefined)
         setSuppliers(allSuppliers.map(s => ({ id: s.id, name: s.name })))
 
+        // Load alteration contacts (tailor / technician)
+        const contacts = await alterationContactService.getAll(companyId ?? undefined)
+        setAlterationContacts(contacts)
+
         // Load recent sales for Quick reorder (Last sold / Frequently sold) - use getAllFast for speed
         const allSales = await saleService.getAllFast(true, companyId ?? undefined)
         // Sort by date descending and take last 100
@@ -308,6 +320,11 @@ const SaleForm = () => {
     }
     loadData()
   }, [])
+
+  // Clear original sale date when not editing (e.g. navigated to new sale)
+  useEffect(() => {
+    if (!isEditing) originalSaleDateRef.current = null
+  }, [isEditing])
 
   // Load sale for edit mode
   useEffect(() => {
@@ -323,6 +340,7 @@ const SaleForm = () => {
           return
         }
         setEditingInvoiceNumber(sale.invoice_number || '')
+        originalSaleDateRef.current = sale.sale_date || null
         const mappedItems = sale.items.map(item => ({ ...item, purchase_item_unique_key: item.purchase_item_unique_key ?? `P${item.purchase_id ?? 0}-I${item.purchase_item_id ?? 0}` }))
         originalSaleItemsRef.current = mappedItems.map(i => ({ ...i })) // Store original for change detection
         setSaleItems(mappedItems)
@@ -357,6 +375,7 @@ const SaleForm = () => {
         // Alteration fields
         setHoldForAlteration(sale.hold_for_alteration ?? false)
         setAmountToPay(sale.amount_to_pay ?? 0)
+        if (sale.sent_to_contact_id) setAlterationContactId(sale.sent_to_contact_id)
         const an = sale.alteration_notes ?? ''
         let purpose = '', sentTo = '', notes = ''
         for (const line of an.split('\n')) {
@@ -367,6 +386,9 @@ const SaleForm = () => {
         setAlterationPurpose(purpose)
         setAlterationSentTo(sentTo)
         setAlterationNotes(notes)
+        if (sale.alteration_technician_mode === 'advance' || sale.alteration_technician_mode === 'pending') {
+          setAlterationTechnicianMode(sale.alteration_technician_mode)
+        }
       } catch (err) {
         console.error('Error loading sale for edit:', err)
         toast.error('Failed to load sale')
@@ -1866,6 +1888,14 @@ const SaleForm = () => {
     // Use functional update to ensure we have the latest state
     setSaleItems(prevItems => {
       const updatedItems = prevItems.map(item => {
+        // 1) Strongest match: same object reference (the exact line user clicked)
+        if (item === saleItem) {
+          const newQuantity = Math.max(0.01, Math.min(quantity, maxQuantity))
+          const newTotal = Math.round(item.unit_price * newQuantity * 100) / 100
+          console.log(`[SaleForm] Updating quantity (same instance) for ${item.product_name}: ${item.quantity} -> ${newQuantity}, Total: ₹${(item.total ?? 0).toFixed(2)} -> ₹${newTotal.toFixed(2)}`)
+          return { ...item, quantity: newQuantity, total: newTotal }
+        }
+
         // Match by unique key first (most accurate)
         if (saleItem.purchase_item_unique_key && item.purchase_item_unique_key) {
           if (item.purchase_item_unique_key === saleItem.purchase_item_unique_key) {
@@ -1877,8 +1907,9 @@ const SaleForm = () => {
           return item
         }
         
-        // Fallback: Match by product_id AND (purchase_item_id OR purchase_item_article)
-        const isMatch = item.product_id === saleItem.product_id &&
+        // Fallback: Match by sale_type + product_id AND (purchase_item_id OR purchase_item_article)
+        const isMatch = item.sale_type === saleItem.sale_type &&
+          item.product_id === saleItem.product_id &&
           ((saleItem.purchase_item_id && item.purchase_item_id && item.purchase_item_id === saleItem.purchase_item_id &&
             saleItem.purchase_id && item.purchase_id && item.purchase_id === saleItem.purchase_id) ||
            (saleItem.purchase_item_article && item.purchase_item_article && 
@@ -1938,6 +1969,15 @@ const SaleForm = () => {
       // Otherwise, keep the item (they're different)
       return true
     }))
+  }
+
+  // MRP Total: sum of (mrp ?? unit_price) * quantity before item discounts
+  const getMRPTotal = () => {
+    return saleItems.reduce((sum, item) => {
+      const mrpPerUnit = item.mrp ?? item.unit_price ?? 0
+      const lineMrp = mrpPerUnit * (item.quantity || 0)
+      return sum + (item.sale_type === 'return' ? -lineMrp : lineMrp)
+    }, 0)
   }
 
   // Subtotal: sale items add to total, return items subtract (so mixed cart shows correct amount due)
@@ -2130,6 +2170,12 @@ const SaleForm = () => {
       setErrors({ items: 'Please add at least one item to the sale' })
       return
     }
+    // Require sales person: either at least one line has sales_person_id OR sale-level salesPersonId is set
+    const hasLineSalesPerson = saleItems.some(item => item.sales_person_id && item.sales_person_id > 0)
+    if (!hasLineSalesPerson && !salesPersonId) {
+      setErrors({ salesPerson: 'Please select a sales person (either overall or per item) before completing the sale' })
+      return
+    }
     setIsSubmitting(true)
     
     // Calculate return items total (for validation)
@@ -2154,10 +2200,17 @@ const SaleForm = () => {
     const totalCoverage = paymentTotal + creditApplied + creditPaymentTotal
     if (!holdForAlteration && totalCoverage < grandTotal - 0.01) {
       setIsSubmitting(false)
-      setErrors({ payment: `Payment total (₹${paymentTotal.toFixed(2)}) + Credit Applied (₹${creditApplied.toFixed(2)}) + Credit Payment (₹${creditPaymentTotal.toFixed(2)}) is less than grand total (₹${grandTotal.toFixed(2)})` })
+      setErrors(prev => ({
+        ...prev,
+        payment: `Payment total (₹${paymentTotal.toFixed(2)}) + Credit Applied (₹${creditApplied.toFixed(2)}) + Credit Payment (₹${creditPaymentTotal.toFixed(2)}) is less than grand total (₹${grandTotal.toFixed(2)})`,
+      }))
       return
     }
-    setErrors({}) // Clear errors if validation passes
+    // Clear payment error if validation passes; keep other errors (e.g. salesPerson) if any
+    setErrors(prev => {
+      const { payment, ...rest } = prev
+      return rest
+    })
 
     // Check stock availability (only for sale items, not returns; skip in edit mode)
     if (!isEditing) {
@@ -2244,9 +2297,10 @@ const SaleForm = () => {
         ? [alterationPurpose && `Purpose: ${alterationPurpose}`, alterationSentTo && `Sent to: ${alterationSentTo}`, alterationNotes].filter(Boolean).join('\n')
         : undefined,
       alteration_type_id: undefined, // Reserved for future dropdown
+      alteration_technician_mode: (hasPlanFeature('sales_alteration') && holdForAlteration && amountToPay > 0) ? alterationTechnicianMode : undefined,
       sent_to_contact_id: undefined, // Reserved for future dropdown
       amount_to_pay: (hasPlanFeature('sales_alteration') && holdForAlteration && amountToPay > 0) ? amountToPay : undefined,
-      sale_date: new Date().toISOString(),
+      sale_date: (isEditing && originalSaleDateRef.current) ? originalSaleDateRef.current : new Date().toISOString(),
       company_id: getCurrentCompanyId() || undefined,
       created_by: parseInt(user?.id || '1')
     }
@@ -2354,23 +2408,48 @@ const SaleForm = () => {
       )}
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <form ref={formRef} onSubmit={handleSubmit} className="space-y-6">
+        <form
+          ref={formRef}
+          onSubmit={handleSubmit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              const target = e.target as HTMLElement
+              const tag = target.tagName
+              const isTextInput = tag === 'INPUT' || tag === 'TEXTAREA'
+              const type = (target as HTMLInputElement).type
+              const isButton = tag === 'BUTTON' || type === 'submit' || type === 'button'
+              // Prevent accidental full form submit on Enter from regular inputs; allow when focused on the main action button
+              if (isTextInput && !isButton) {
+                e.preventDefault()
+              }
+            }
+          }}
+          className="space-y-6"
+        >
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Left Column - Product Search & Cart */}
             <div className="lg:col-span-2 space-y-6">
               {/* Product Search */}
               <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6 border border-white/50">
                 <h2 className="text-xl font-bold text-gray-900 mb-4">Add Products</h2>
-                <div className="flex gap-2 mb-4">
-                  <div className="relative flex-1">
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <div className="relative flex-1 min-w-[200px]">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                     <input
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder="Search by product name, barcode, article, or supplier..."
-                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      className="w-full pl-10 pr-10 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setScannerOpen(true)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-blue-600"
+                      title="Scan barcode with camera"
+                    >
+                      <Camera className="w-5 h-5" />
+                    </button>
                   </div>
                   <button
                     type="button"
@@ -2917,7 +2996,7 @@ const SaleForm = () => {
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                       <User className="w-4 h-4" />
-                      Sales Person (Optional)
+                      Sales Person <span className="text-red-500">*</span>
                     </label>
                     <select
                       value={salesPersonId || ''}
@@ -2933,6 +3012,9 @@ const SaleForm = () => {
                     </select>
                     {salesPersons.length === 0 && (
                       <p className="mt-1 text-xs text-gray-500">No active sales persons available</p>
+                    )}
+                    {errors.salesPerson && (
+                      <p className="mt-1 text-xs text-red-600">{errors.salesPerson}</p>
                     )}
                   </div>
                 </div>
@@ -3054,13 +3136,47 @@ const SaleForm = () => {
                         </div>
                         <div>
                           <label className="block text-sm font-semibold text-gray-700 mb-2">Sent to (tailor/technician)</label>
-                          <input
-                            type="text"
-                            value={alterationSentTo}
-                            onChange={(e) => setAlterationSentTo(e.target.value)}
-                            placeholder="Tailor name"
-                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                          />
+                          <div className="flex gap-2">
+                            <select
+                              value={alterationContactId || ''}
+                              onChange={async (e) => {
+                                const val = e.target.value ? parseInt(e.target.value, 10) : ''
+                                setAlterationContactId(val)
+                                if (val) {
+                                  const c = alterationContacts.find(ac => ac.id === val)
+                                  if (c) setAlterationSentTo(c.name)
+                                } else {
+                                  setAlterationSentTo('')
+                                }
+                              }}
+                              className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                            >
+                              <option value="">Select contact</option>
+                              {alterationContacts.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const name = window.prompt('Enter tailor / technician name')
+                                if (!name || !name.trim()) return
+                                try {
+                                  const companyId = getCurrentCompanyId()
+                                  const created = await alterationContactService.create({ name: name.trim(), company_id: companyId ?? undefined })
+                                  setAlterationContacts(prev => [...prev, created])
+                                  setAlterationContactId(created.id)
+                                  setAlterationSentTo(created.name)
+                                } catch (e) {
+                                  console.error('Failed to create alteration contact:', e)
+                                  toast.error('Failed to save contact. Please try again.')
+                                }
+                              }}
+                              className="px-3 py-2 rounded-xl border border-gray-300 bg-gray-50 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                            >
+                              + Add
+                            </button>
+                          </div>
                         </div>
                       </div>
                       <div>
@@ -3074,6 +3190,33 @@ const SaleForm = () => {
                           step="0.01"
                           className="w-full max-w-xs px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                         />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Technician payment mode</label>
+                        <div className="flex flex-wrap gap-4 text-sm text-gray-700">
+                          <label className="inline-flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name="alterationTechMode"
+                              value="advance"
+                              checked={alterationTechnicianMode === 'advance'}
+                              onChange={() => setAlterationTechnicianMode('advance')}
+                              className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                            />
+                            <span>Use advance (deduct from advance given to technician)</span>
+                          </label>
+                          <label className="inline-flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name="alterationTechMode"
+                              value="pending"
+                              checked={alterationTechnicianMode === 'pending'}
+                              onChange={() => setAlterationTechnicianMode('pending')}
+                              className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                            />
+                            <span>Keep as pending payable (settle later)</span>
+                          </label>
+                        </div>
                       </div>
                       <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-2">Notes (e.g. Cast – collect after alteration)</label>
@@ -3099,7 +3242,7 @@ const SaleForm = () => {
                             } catch (_) {}
                             const slipData: AlterationSlipData = {
                               invoice_number: isEditing ? editingInvoiceNumber : 'Draft',
-                              sale_date: new Date().toISOString(),
+                              sale_date: (isEditing && originalSaleDateRef.current) ? originalSaleDateRef.current : new Date().toISOString(),
                               customer_name: customers.find(c => c.id === customerId)?.name || 'Walk-in Customer',
                               items: saleItems.filter(i => i.sale_type !== 'return').map(i => ({
                                 product_name: i.product_name,
@@ -3277,6 +3420,10 @@ const SaleForm = () => {
                   )}
                   
                   <div className="pt-4 border-t border-gray-200">
+                    <div className="flex justify-between items-center mb-2 text-gray-600">
+                      <span className="text-sm font-semibold">MRP Total:</span>
+                      <span className="text-base font-medium">₹{getMRPTotal().toFixed(2)}</span>
+                    </div>
                     <div className="flex justify-between items-center mb-2">
                       <span className="text-sm font-semibold text-gray-700">Subtotal:</span>
                       <div className="text-right">
@@ -3413,9 +3560,14 @@ const SaleForm = () => {
                             return null
                           })()}
                           {creditPaymentTotal > 0 && (
-                            <div className="flex justify-between items-center mb-2 bg-green-50 p-2 rounded">
-                              <span className="text-sm font-semibold text-green-700">Credit Allocated:</span>
-                              <span className="text-sm font-bold text-green-600">+₹{creditPaymentTotal.toFixed(2)}</span>
+                            <div className="mb-2 bg-green-50 p-2 rounded">
+                              <div className="flex justify-between items-center">
+                                <span className="text-sm font-semibold text-green-700">Credit Allocated:</span>
+                                <span className="text-sm font-bold text-green-600">+₹{creditPaymentTotal.toFixed(2)}</span>
+                              </div>
+                              <p className="mt-1 text-xs text-green-700">
+                                This credit can be used on future purchases.
+                              </p>
                             </div>
                           )}
                           {creditApplied > 0 && (
@@ -3492,6 +3644,19 @@ const SaleForm = () => {
                             <span className="text-lg font-bold text-red-600">₹{balanceDue.toFixed(2)}</span>
                           </div>
                         )
+                      } else if (holdForAlteration) {
+                        const purpose = alterationPurpose?.trim() || 'Alteration'
+                        return (
+                          <div className="flex flex-col gap-1 bg-green-50 p-3 rounded-lg border border-green-200">
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm font-semibold text-gray-800">Balance Due:</span>
+                              <span className="text-lg font-bold text-green-700">₹0.00</span>
+                            </div>
+                            <p className="text-xs text-green-700">
+                              Product is with us for {purpose}. No amount is due when the customer collects the product.
+                            </p>
+                          </div>
+                        )
                       }
                       return null
                     })()}
@@ -3503,6 +3668,10 @@ const SaleForm = () => {
               <div className="bg-gradient-to-br from-blue-600 to-indigo-600 rounded-2xl shadow-xl p-6 text-white">
                 <h2 className="text-xl font-bold mb-4">Order Summary</h2>
                 <div className="space-y-3">
+                  <div className="flex justify-between text-lg">
+                    <span>MRP Total:</span>
+                    <span className="font-bold">₹{getMRPTotal().toFixed(2)}</span>
+                  </div>
                   <div className="flex justify-between text-lg">
                     <span>Subtotal:</span>
                     <span className="font-bold">₹{getSubtotal().toFixed(2)}</span>
@@ -3552,19 +3721,13 @@ const SaleForm = () => {
                     if (saleItems.length === 0) return true
                     // Alteration / Hold for collection: allow partial payment
                     if (holdForAlteration) return false
-                    const hasReturnItems = saleItems.some(item => item.sale_type === 'return')
-                    const hasSaleItems = saleItems.some(item => item.sale_type === 'sale')
                     const nonCreditPayments = paymentMethods.filter(p => p.method !== 'credit')
                     const creditPayments = paymentMethods.filter(p => p.method === 'credit')
                     const paymentTotal = nonCreditPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
                     const creditPaymentTotal = creditPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
                     const grandTotal = getGrandTotal()
                     const totalCoverage = paymentTotal + creditApplied + creditPaymentTotal
-                    // For return-only or any transaction: total payment (all methods) must cover grand total (allow 0.05 rounding)
-                    if (hasReturnItems || !hasSaleItems) {
-                      const difference = Math.abs(grandTotal - totalCoverage)
-                      return difference > 0.05
-                    }
+                    // Payment must cover grand total (allow 0.01 rounding). When grand total is 0 and customer applies credit (e.g. return + new purchase), allow totalCoverage >= 0.
                     return totalCoverage < grandTotal - 0.01
                   })()}
                   className="w-full mt-6 py-3 bg-white text-blue-600 font-bold rounded-xl hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -3576,6 +3739,15 @@ const SaleForm = () => {
           </div>
         </form>
       </main>
+
+      <BarcodeScanner
+        isOpen={scannerOpen}
+        onScan={(barcode) => {
+          setSearchQuery(barcode)
+          setScannerOpen(false)
+        }}
+        onClose={() => setScannerOpen(false)}
+      />
 
       {/* Add Customer modal: add new customer without leaving sale; cart and form data are preserved */}
       <CustomerModal
@@ -3697,6 +3869,7 @@ const SaleForm = () => {
           </div>
         </div>
       )}
+
     </div>
   )
 }

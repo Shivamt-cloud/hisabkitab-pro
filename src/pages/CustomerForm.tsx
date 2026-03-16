@@ -77,6 +77,57 @@ const CustomerForm = () => {
         setLoadingCustomer(false)
         return
       }
+
+      // 1) If customer was passed via navigation state (from Customers list), use it immediately for a fast load
+      const state = location.state as { customer?: Customer } | null
+      if (state?.customer && state.customer.id === numId) {
+        const customer = state.customer
+        setFormData({
+          name: customer.name || '',
+          email: customer.email || '',
+          phone: customer.phone || '',
+          gstin: customer.gstin || '',
+          address: customer.address || '',
+          city: customer.city || '',
+          state: customer.state || '',
+          pincode: customer.pincode || '',
+          contact_person: customer.contact_person || '',
+          id_type: customer.id_type || '',
+          id_number: customer.id_number || '',
+          credit_limit: customer.credit_limit?.toString() || '',
+          price_segment_id: customer.price_segment_id?.toString() || '',
+          is_active: customer.is_active,
+        })
+        setCreditBalance(customer.credit_balance || 0)
+        setLoadingCustomer(false)
+
+        // Refresh from service in background to pick up latest changes if any
+        void customerService.getById(numId).then((latest) => {
+          if (!latest) return
+          setFormData({
+            name: latest.name || '',
+            email: latest.email || '',
+            phone: latest.phone || '',
+            gstin: latest.gstin || '',
+            address: latest.address || '',
+            city: latest.city || '',
+            state: latest.state || '',
+            pincode: latest.pincode || '',
+            contact_person: latest.contact_person || '',
+            id_type: latest.id_type || '',
+            id_number: latest.id_number || '',
+            credit_limit: latest.credit_limit?.toString() || '',
+            price_segment_id: latest.price_segment_id?.toString() || '',
+            is_active: latest.is_active,
+          })
+          setCreditBalance(latest.credit_balance || 0)
+        }).catch(() => {
+          // ignore background refresh errors
+        })
+        return
+      }
+
+      // 2) Fallback: fetch from service (local-first, then cloud)
       setLoadingCustomer(true)
       setCustomerNotFound(false)
       customerService
@@ -115,7 +166,7 @@ const CustomerForm = () => {
       setLoadingCustomer(false)
       setCustomerNotFound(false)
     }
-  }, [isEditing, id])
+  }, [isEditing, id, location.state])
 
   const validate = (): boolean => {
     const newErrors: { [key: string]: string } = {}
